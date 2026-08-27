@@ -1,0 +1,167 @@
+// Pinpoint-Threads Prisma Schema
+// Docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// Account: 발행 대상 쓰레드 계정 (4개)
+// ==========================================
+model Account {
+  id                 String    @id @default(cuid())
+  handle             String    @unique
+  threadsUserId      String    @unique
+  accessToken        String
+  tokenExpiresAt     DateTime?
+  personaPrompt      String    @db.Text
+  timezone           String    @default("Asia/Seoul")
+  activeHourStart    Int       @default(8)
+  activeHourEnd      Int       @default(23)
+  userAgent          String?
+  isActive           Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  posts              Post[]
+  engagementLogs     EngagementLog[]
+  dailyPostCounts    DailyPostCount[]
+}
+
+// ==========================================
+// SourceItem: 해외/국내 쓰레드에서 수집한 원본
+// ==========================================
+model SourceItem {
+  id            String    @id @default(cuid())
+  sourceUrl     String    @unique
+  contentHash   String    @unique
+  rawText       String    @db.Text
+  mediaUrls     String[]
+  authorHandle  String?
+  language      String?
+  collectedAt   DateTime  @default(now())
+
+  posts         Post[]
+
+  @@index([collectedAt])
+}
+
+// ==========================================
+// CommerceProduct: 매칭된 커머스 상품 (쿠팡/무신사)
+// ==========================================
+enum CommerceChannel {
+  COUPANG
+  MUSINSA
+}
+
+model CommerceProduct {
+  id             String          @id @default(cuid())
+  channel        CommerceChannel
+  externalId     String
+  productName    String
+  productUrl     String
+  deeplinkUrl    String
+  thumbnailUrl   String
+  price          Int?
+  rating         Float?
+  category       String?
+  createdAt      DateTime        @default(now())
+
+  posts          Post[]
+
+  @@unique([channel, externalId])
+  @@index([channel, category])
+}
+
+// ==========================================
+// Post: 파이프라인 State Machine의 중심
+// ==========================================
+enum PostState {
+  DRAFT
+  CLASSIFYING
+  MATCHING
+  COPYWRITING
+  PENDING_APPROVAL
+  APPROVED
+  PUBLISHING
+  PUBLISHED
+  REJECTED
+  FAILED
+}
+
+model Post {
+  id                  String            @id @default(cuid())
+  state               PostState         @default(DRAFT)
+
+  accountId           String
+  account             Account           @relation(fields: [accountId], references: [id])
+
+  sourceItemId        String
+  sourceItem          SourceItem        @relation(fields: [sourceItemId], references: [id])
+
+  commerceProductId   String?
+  commerceProduct     CommerceProduct?  @relation(fields: [commerceProductId], references: [id])
+
+  generatedBody       String?           @db.Text
+  generatedReply      String?           @db.Text
+  mediaUrl            String?
+
+  telegramMessageId   String?
+  approvedAt          DateTime?
+  scheduledAt         DateTime?
+  publishedAt         DateTime?
+  threadsPostId       String?
+  threadsReplyId      String?
+
+  rejectionReason     String?
+  visionMatchScore    Float?
+  retryCount          Int               @default(0)
+
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  @@unique([accountId, commerceProductId, createdAt])
+  @@index([state])
+  @@index([scheduledAt])
+}
+
+// ==========================================
+// EngagementLog: 맞스하리 액션 이력 (일 3회 캡)
+// ==========================================
+enum EngagementAction {
+  LIKE
+  REPOST
+  REPLY
+}
+
+model EngagementLog {
+  id            String            @id @default(cuid())
+  accountId     String
+  account       Account           @relation(fields: [accountId], references: [id])
+  targetHandle  String
+  targetPostId  String
+  action        EngagementAction
+  executedAt    DateTime          @default(now())
+
+  @@index([accountId, executedAt])
+}
+
+// ==========================================
+// DailyPostCount: 계정별 일일 발행/스하리 카운터
+// ==========================================
+model DailyPostCount {
+  id              String   @id @default(cuid())
+  accountId       String
+  account         Account  @relation(fields: [accountId], references: [id])
+  date            DateTime @db.Date
+  publishedCount  Int      @default(0)
+  engagementCount Int      @default(0)
+
+  @@unique([accountId, date])
+  @@index([date])
+}
