@@ -64,6 +64,7 @@
 - [006-doc-structure](08-decisions/006-doc-structure.md) — 인덱스 기반 분리 문서 구조
 - [007-content-recycling](08-decisions/007-content-recycling.md) — 콘텐츠 재활용 전략 도입
 - [008-n-scale-safe](08-decisions/008-n-scale-safe.md) — 무한 확장 대응 설계 원칙
+- [pending-musinsa-strategy](08-decisions/pending-musinsa-strategy.md) — 무신사 큐레이터 활용 전략 (결정 대기)
 
 ## 09-agents (런타임 모듈)
 - [catalog](09-agents/catalog.md) — 12개 모듈 총람
