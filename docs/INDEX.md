@@ -22,6 +22,7 @@
 - [database](03-infrastructure/database.md) — Neon Postgres + pgvector
 - [deployment](03-infrastructure/deployment.md) — VPS 이전 계획
 - [cost-model](03-infrastructure/cost-model.md) — 월 비용 예측
+- [scaling-limits](03-infrastructure/scaling-limits.md) — 계정 수별 병목 및 대응 매트릭스
 
 ## 04-safety
 - [account-isolation](04-safety/account-isolation.md) — 4개 계정 격리 규칙
@@ -54,6 +55,8 @@
 - [004-three-pipelines](08-decisions/004-three-pipelines.md) — 파이프라인 3개 (A/B/C)
 - [005-rag-deferred](08-decisions/005-rag-deferred.md) — RAG는 데이터 임계량 후 자동 전환
 - [006-doc-structure](08-decisions/006-doc-structure.md) — 인덱스 기반 분리 문서 구조
+- [007-content-recycling](08-decisions/007-content-recycling.md) — 콘텐츠 재활용 전략 도입
+- [008-n-scale-safe](08-decisions/008-n-scale-safe.md) — 무한 확장 대응 설계 원칙
 
 ## 09-agents (런타임 모듈)
 - [catalog](09-agents/catalog.md) — 12개 모듈 총람
