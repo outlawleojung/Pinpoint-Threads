@@ -1,4 +1,4 @@
-import { bot } from './adapters/telegram/bot.js';
+import { bot } from './modules/shared/approval-gate/bot.js';
 import { logger } from './config/logger.js';
 
 async function start() {

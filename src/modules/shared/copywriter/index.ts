@@ -1,7 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
-import { anthropic, MODELS } from './client.js';
-import { logger } from '../../config/logger.js';
+import { anthropic, MODELS } from '../../../infra/anthropic-client.js';
+import { logger } from '../../../config/logger.js';
 
 /**
  * "쿠파스 게시글 생성기" Custom GPT 스타일을 이식한 카피 노드.

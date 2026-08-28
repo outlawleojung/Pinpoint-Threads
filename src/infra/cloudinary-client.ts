@@ -1,6 +1,6 @@
 import { v2 as cloudinary, type UploadApiOptions, type UploadApiResponse } from 'cloudinary';
-import { env } from '../../config/env.js';
-import { logger } from '../../config/logger.js';
+import { env } from '../config/env.js';
+import { logger } from '../config/logger.js';
 
 /**
  * Cloudinary 미디어 어댑터.

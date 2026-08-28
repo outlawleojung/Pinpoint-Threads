@@ -1,12 +1,12 @@
 import { Bot } from 'grammy';
-import { env } from '../../config/env.js';
-import { logger } from '../../config/logger.js';
-import { handleApprovalCallback, sendApprovalRequest } from '../../services/approval-service.js';
-import { prisma } from '../../db/prisma.js';
+import { env } from '../../../config/env.js';
+import { logger } from '../../../config/logger.js';
+import { handleApprovalCallback, sendApprovalRequest } from './service.js';
+import { prisma } from '../../../db/prisma.js';
 import { PostState } from '@prisma/client';
-import { classifySourceItem } from '../anthropic/classify.js';
-import { generateCopy } from '../anthropic/copywriter.js';
-import { verifyProductMatch } from '../anthropic/vision-match.js';
+import { classifySourceItem } from '../content-classifier/index.js';
+import { generateCopy } from '../copywriter/index.js';
+import { verifyProductMatch } from '../../pipeline-a/vision-verifier/index.js';
 
 export const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
 
@@ -85,7 +85,7 @@ bot.command('copy', async (ctx) => {
 bot.command('copy3', async (ctx) => {
   await ctx.reply('카피 3개 후보 생성 중... (Sonnet x3)');
   try {
-    const { generateBodyVariants } = await import('../anthropic/copywriter.js');
+    const { generateBodyVariants } = await import('../copywriter/index.js');
     const variants = await generateBodyVariants(
       {
         sourceImageUrl: 'https://picsum.photos/seed/humidifier/600/600',
@@ -99,7 +99,7 @@ bot.command('copy3', async (ctx) => {
       3,
     );
     await ctx.reply(
-      variants.map((v, i) => `${i + 1}. ${v}`).join('\n\n'),
+      variants.map((v: string, i: number) => `${i + 1}. ${v}`).join('\n\n'),
     );
   } catch (err) {
     logger.error(err, '/copy3 failed');

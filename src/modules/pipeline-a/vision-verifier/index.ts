@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { anthropic, MODELS } from './client.js';
-import { logger } from '../../config/logger.js';
+import { anthropic, MODELS } from '../../../infra/anthropic-client.js';
+import { logger } from '../../../config/logger.js';
 
 // CLAUDE.md §2 Pipeline A - Step 3: 원본 미디어 vs 커머스 썸네일 정합성 Vision 검증
 

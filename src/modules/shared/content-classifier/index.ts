@@ -1,7 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
-import { anthropic, MODELS } from './client.js';
-import { logger } from '../../config/logger.js';
+import { anthropic, MODELS } from '../../../infra/anthropic-client.js';
+import { logger } from '../../../config/logger.js';
 
 // CLAUDE.md §2 Pipeline A - Step 2: 소비재 적합성 필터링 + 카테고리 + 검색 키워드
 

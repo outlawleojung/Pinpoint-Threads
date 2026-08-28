@@ -1,11 +1,11 @@
 import type { Post, Account, CommerceProduct, SourceItem } from '@prisma/client';
 import { PostState } from '@prisma/client';
-import { bot } from '../adapters/telegram/bot.js';
-import { approvalKeyboard } from '../adapters/telegram/keyboards.js';
-import { env } from '../config/env.js';
-import { logger } from '../config/logger.js';
-import { prisma } from '../db/prisma.js';
-import { assertTransition } from '../state/post-state-machine.js';
+import { bot } from './bot.js';
+import { approvalKeyboard } from './keyboards.js';
+import { env } from '../../../config/env.js';
+import { logger } from '../../../config/logger.js';
+import { prisma } from '../../../db/prisma.js';
+import { assertTransition } from '../../../state/post-state-machine.js';
 
 type PostWithRelations = Post & {
   account: Account;
