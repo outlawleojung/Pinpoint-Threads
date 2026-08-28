@@ -25,6 +25,7 @@ export interface LlmCompletionInput {
   maxOutputTokens?: number;
   temperature?: number;
   jsonMode?: boolean;   // true면 JSON 응답 강제
+  jsonSchema?: unknown; // Gemini responseSchema (Vertex AI OpenAPI 3.0 스타일)
 }
 
 export interface LlmCompletionResult {

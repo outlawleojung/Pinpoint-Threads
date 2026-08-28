@@ -8,6 +8,7 @@ import { classifySourceItem } from '../content-classifier/index.js';
 import { generateCopy } from '../copywriter/index.js';
 import { verifyProductMatch } from '../../pipeline-a/vision-verifier/index.js';
 import { CoupangAdapter } from '../../../infra/commerce/coupang-client.js';
+import { composeReply } from '../../pipeline-a/reply-composer/index.js';
 
 export const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
 
@@ -61,22 +62,42 @@ bot.command('classify', async (ctx) => {
   }
 });
 
-// Claude 카피 테스트 (쿠파스 게시글 생성기 스타일)
+// Claude 카피 테스트 (쿠파스 게시글 생성기 스타일 본문 + 실전 4양식 고정 댓글)
 bot.command('copy', async (ctx) => {
-  await ctx.reply('카피 생성 중... (Sonnet)');
+  const variantArg = ctx.match?.trim();
+  const variantOverride = variantArg ? (Number(variantArg) as 1 | 2 | 3 | 4) : undefined;
+
+  await ctx.reply(
+    variantOverride
+      ? `카피 생성 중... (Gemini, 양식 ${variantOverride} 강제)`
+      : '카피 생성 중... (Gemini, 양식은 계정×요일 해시로 자동 선택)',
+  );
   try {
-    const result = await generateCopy({
+    const productName = '휴대용 무선 가습기 500ml';
+    const deeplinkUrl = 'https://link.coupang.com/a/gzTOZtY7Ai';
+    const accountId = 'dummy_kr_01';
+
+    const copyResult = await generateCopy({
       sourceText: 'USB 충전 미니 무선 가습기. 조용하고 세척 편함.',
       sourceImageUrl: 'https://picsum.photos/seed/humidifier/600/600',
-      productName: '휴대용 무선 가습기 500ml',
+      productName,
       productCategory: '생활용품',
-      accountSeed: 'dummy_kr_01',
-      deeplinkUrl: 'https://link.coupang.com/dummy',
+      accountSeed: accountId,
+      deeplinkUrl,
       channel: 'COUPANG',
     });
+
+    // 실전 4가지 양식 중 계정×요일 해시로 선택 (or variantOverride)
+    const reply = composeReply({
+      deeplinkUrl,
+      productName,
+      accountId,
+      variantOverride:
+        variantOverride && [1, 2, 3, 4].includes(variantOverride) ? variantOverride : undefined,
+    });
+
     await ctx.reply(
-      `📝 *본문*\n${result.body}\n\n💬 *고정 댓글*\n${result.reply}`,
-      { parse_mode: 'Markdown' },
+      `📝 본문\n\n${copyResult.body}\n\n\n💬 고정 댓글 (양식 ${reply.variantUsed})\n\n${reply.text}`,
     );
   } catch (err) {
     logger.error(err, '/copy failed');

@@ -53,15 +53,34 @@ export async function verifyProductMatch(input: VisionMatchInput): Promise<Visio
     maxOutputTokens: 512,
     temperature: 0.2,
     jsonMode: true,
+    jsonSchema: {
+      type: 'object',
+      properties: {
+        matched: { type: 'boolean' },
+        score: { type: 'number' },
+        reason: { type: 'string' },
+      },
+      required: ['matched', 'score'],
+    },
   });
 
-  const raw = response.text
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```\s*$/i, '')
-    .trim();
-
-  const parsed = JSON.parse(raw);
+  const parsed = extractJson(response.text);
   const result = VisionMatchResultSchema.parse(parsed);
   logger.debug({ result, provider: response.provider }, 'verifyProductMatch');
   return result;
+}
+
+function extractJson(raw: string): unknown {
+  const stripped = raw
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .trim();
+  try {
+    return JSON.parse(stripped);
+  } catch {
+    const start = stripped.indexOf('{');
+    const end = stripped.lastIndexOf('}');
+    if (start === -1 || end === -1) throw new Error(`no JSON in response: ${stripped.slice(0, 200)}`);
+    return JSON.parse(stripped.slice(start, end + 1));
+  }
 }

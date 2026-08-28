@@ -92,16 +92,37 @@ async function generateBody(input: CopywriteInput, seedIndex: number): Promise<s
     maxOutputTokens: 256,
     temperature: 0.9 + seedIndex * 0.05,
     jsonMode: true,
+    jsonSchema: {
+      type: 'object',
+      properties: {
+        body: { type: 'string', description: 'Threads 게시글 본문 1문장, 6~80자' },
+      },
+      required: ['body'],
+    },
   });
 
-  const raw = response.text
+  const parsed = extractJson(response.text);
+  const { body } = BodyResultSchema.parse(parsed);
+  return body;
+}
+
+/** Gemini가 채팅형 텍스트로 감싸 응답해도 JSON 객체만 추출. */
+function extractJson(raw: string): unknown {
+  const stripped = raw
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```\s*$/i, '')
     .trim();
-
-  const parsed = JSON.parse(raw);
-  const { body } = BodyResultSchema.parse(parsed);
-  return body;
+  try {
+    return JSON.parse(stripped);
+  } catch {
+    // "Here is the JSON: { ... }" 같은 경우 첫 { 부터 마지막 } 까지 추출
+    const start = stripped.indexOf('{');
+    const end = stripped.lastIndexOf('}');
+    if (start === -1 || end === -1 || end < start) {
+      throw new Error(`no JSON object in LLM response: ${stripped.slice(0, 200)}`);
+    }
+    return JSON.parse(stripped.slice(start, end + 1));
+  }
 }
 
 /**

@@ -1,3 +1,5 @@
+import { installHttpDefaults } from './config/http.js';
+installHttpDefaults();
 import { logger } from './config/logger.js';
 import { startAllWorkers } from './pipeline/workers.js';
 

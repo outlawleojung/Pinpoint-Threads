@@ -72,18 +72,35 @@ export async function classifySourceItem(input: ClassifyInput): Promise<Classify
     userParts,
     maxOutputTokens: 512,
     jsonMode: true,
+    jsonSchema: {
+      type: 'object',
+      properties: {
+        suitable: { type: 'boolean' },
+        category: { type: 'string', enum: [...CATEGORIES] },
+        searchKeyword: { type: 'string' },
+        reason: { type: 'string' },
+      },
+      required: ['suitable'],
+    },
   });
 
-  const parsed = parseJson(response.text);
+  const parsed = extractJson(response.text);
   const result = ClassifyResultSchema.parse(parsed);
   logger.debug({ result, provider: response.provider }, 'classifySourceItem');
   return result;
 }
 
-function parseJson(raw: string): unknown {
-  const cleaned = raw
+function extractJson(raw: string): unknown {
+  const stripped = raw
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```\s*$/i, '')
     .trim();
-  return JSON.parse(cleaned);
+  try {
+    return JSON.parse(stripped);
+  } catch {
+    const start = stripped.indexOf('{');
+    const end = stripped.lastIndexOf('}');
+    if (start === -1 || end === -1) throw new Error(`no JSON in response: ${stripped.slice(0, 200)}`);
+    return JSON.parse(stripped.slice(start, end + 1));
+  }
 }

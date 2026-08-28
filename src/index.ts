@@ -1,3 +1,5 @@
+import { installHttpDefaults } from './config/http.js';
+installHttpDefaults();
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';

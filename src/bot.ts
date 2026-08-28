@@ -1,3 +1,5 @@
+import { installHttpDefaults } from './config/http.js';
+installHttpDefaults();
 import { bot } from './modules/shared/approval-gate/bot.js';
 import { logger } from './config/logger.js';
 

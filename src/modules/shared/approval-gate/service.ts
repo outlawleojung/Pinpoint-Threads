@@ -15,16 +15,16 @@ type PostWithRelations = Post & {
 
 function buildPreviewCaption(post: PostWithRelations): string {
   const lines: string[] = [];
-  lines.push(`🧵 *승인 요청*`);
-  lines.push(`계정: \`${post.account.handle}\``);
+  lines.push('🧵 승인 요청');
+  lines.push(`계정: ${post.account.handle}`);
   if (post.commerceProduct) {
     lines.push(`상품: ${post.commerceProduct.productName} (${post.commerceProduct.channel})`);
   }
   lines.push('');
-  lines.push('*본문*');
+  lines.push('━━━ 본문 ━━━');
   lines.push(post.generatedBody ?? '(비어있음)');
   lines.push('');
-  lines.push('*고정 댓글*');
+  lines.push('━━━ 고정 댓글 ━━━');
   lines.push(post.generatedReply ?? '(비어있음)');
   return lines.join('\n');
 }
@@ -42,11 +42,9 @@ export async function sendApprovalRequest(postId: string): Promise<void> {
   const message = post.mediaUrl
     ? await bot.api.sendPhoto(env.TELEGRAM_ADMIN_CHAT_ID, post.mediaUrl, {
         caption,
-        parse_mode: 'Markdown',
         reply_markup: keyboard,
       })
     : await bot.api.sendMessage(env.TELEGRAM_ADMIN_CHAT_ID, caption, {
-        parse_mode: 'Markdown',
         reply_markup: keyboard,
       });
 
