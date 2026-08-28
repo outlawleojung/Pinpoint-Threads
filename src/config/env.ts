@@ -29,11 +29,10 @@ const envSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(1),
   TELEGRAM_ADMIN_CHAT_ID: z.string().min(1),
 
-  R2_ACCOUNT_ID: z.string().optional(),
-  R2_ACCESS_KEY_ID: z.string().optional(),
-  R2_SECRET_ACCESS_KEY: z.string().optional(),
-  R2_BUCKET_NAME: z.string().default('pinpoint-threads-media'),
-  R2_PUBLIC_URL: z.string().url().optional(),
+  CLOUDINARY_CLOUD_NAME: z.string().optional(),
+  CLOUDINARY_API_KEY: z.string().optional(),
+  CLOUDINARY_API_SECRET: z.string().optional(),
+  CLOUDINARY_UPLOAD_FOLDER: z.string().default('pinpoint-threads'),
 
   ENGAGEMENT_DAILY_LIMIT: z.coerce.number().default(3),
   ENGAGEMENT_MIN_DELAY_MINUTES: z.coerce.number().default(10),
