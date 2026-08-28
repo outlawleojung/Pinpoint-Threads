@@ -35,7 +35,7 @@ export type PipelineAOutcome =
       visionScore: number;
       body: string;
       replyText: string;
-      replyVariant: 1 | 2 | 3 | 4;
+      replyLead: string;
     }
   | { status: 'REJECTED'; stage: string; reason: string; postId?: string };
 
@@ -149,11 +149,14 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
     channel: matched.result.channel,
   });
 
-  // 11. Reply Composer
-  const reply = composeReply({
-    deeplinkUrl: matched.result.deeplinkUrl,
+  // 11. Reply Composer (AI 기반 감초 톤 리드 생성)
+  const reply = await composeReply({
+    body: copy.body,
     productName: matched.result.product.productName,
+    productCategory: matched.result.product.category ?? classified.category,
+    deeplinkUrl: matched.result.deeplinkUrl,
     accountId: account.id,
+    personaPrompt: account.personaPrompt,
   });
 
   // 12. Post 업데이트 (모든 필드 채워짐)
@@ -165,7 +168,6 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
       mediaUrls: media.publicUrls,
       generatedBody: copy.body,
       generatedReply: reply.text,
-      replyVariantUsed: reply.variantUsed,
       visionMatchScore: matched.result.visionScore,
     },
   });
@@ -181,7 +183,7 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
     visionScore: matched.result.visionScore,
     body: copy.body,
     replyText: reply.text,
-    replyVariant: reply.variantUsed,
+    replyLead: reply.lead,
   };
 }
 

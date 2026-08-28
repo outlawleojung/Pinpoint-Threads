@@ -8,14 +8,15 @@ status: "active"
 
 **새 세션 시작 시 이 파일을 먼저 읽으세요.**
 
-Last updated: 2026-08-28 16:40
-Last commit: `4e5f5cb` (pending: 3b/3e 완료 반영)
+Last updated: 2026-08-28 17:15
+Last commit: `d8b0c3c` (pending: Reply Composer 재설계 반영)
 
 ## Phase & 진행률
 
-- **Phase**: 3 (실 구현 진행 중)
-- **Task 완료**: 15/21 (71%)
-- **다음 Milestone**: 3h Pipeline A e2e 검증 (모든 A 파이프라인 노드 조립)
+- **Phase**: 3 → 완료 임박 (Priority 3 100% 예상)
+- **Task 완료**: 16/21 (76%)
+- **Priority 3 (Pipeline A 실 구현)**: 8/8 ✅
+- **다음 Milestone**: Meta 승인 대기 → Phase 4 (Publisher)
 
 ## 지금까지 검증된 것
 

@@ -1,78 +1,116 @@
-import { createHash } from 'node:crypto';
+import { z } from 'zod';
+import { llm } from '../../../infra/llm/index.js';
+import { logger } from '../../../config/logger.js';
 
 /**
- * Reply Composer (고정 댓글) — Pipeline A 전용.
- * 4가지 실전 양식 중 계정×요일 해시로 안정적 다변화.
- * 공정위 필수 문구 강제.
- * 자세한 사양: docs/09-agents/pipeline-a/reply-composer.md
+ * Reply Composer (고정 댓글).
+ * Pipeline A 발행 시 본문 밑에 자기 댓글로 즉시 다는 고정 댓글 조립.
+ *
+ * 설계 (사용자 방침 확정, 2026-08-28):
+ * - AI가 상품·본문 맥락에 맞춰 "툭 던지는 감초 같은 한 마디" 생성
+ * - 광고 티 안 나게 자연스럽게
+ * - 실전 4양식은 유지 안 함 (상품 성격과 톤 불일치 잦음)
+ * - 하드 규칙: 딥링크 + 공정위 필수 문구는 결정론적 조립
  */
 
 export const LEGAL_DISCLAIMER =
   '이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.';
 
-export type ReplyVariant = 1 | 2 | 3 | 4;
+const LeadResultSchema = z.object({
+  lead: z.string().min(4).max(80),
+});
 
 export interface ReplyComposeInput {
+  body: string;              // 본문 (컨텍스트로 사용)
+  productName: string;
+  productCategory?: string;
   deeplinkUrl: string;
-  productName?: string;
-  accountId: string;
-  dayOfWeek?: number; // 0-6
-  variantOverride?: ReplyVariant;
+  accountId: string;         // 페르소나 다변화 seed
+  personaPrompt?: string;
 }
 
 export interface ReplyComposeResult {
   text: string;
-  variantUsed: ReplyVariant;
+  lead: string;
 }
 
-const templates: Record<ReplyVariant, (deeplinkUrl: string, productName: string) => string> = {
-  1: (link) => `[광고] 완전 급할 땐 이거 씀ㅋㅋ
-➡️➡️${link}
-"${LEGAL_DISCLAIMER}"`,
+const SYSTEM_PROMPT = `너는 한국 Threads 고정 댓글의 첫 리드 문장을 만드는 도구다.
+게시글 본문 아래 자기 댓글로 즉시 다는 짧은 멘트.
 
-  2: (link) => `${LEGAL_DISCLAIMER}
-•••••••••••••••••••••••••••••••••••••••••••••••••••
-🔽 정보는 아래 링크에! 🔽
-❤️${link}❤️`,
+핵심 원칙:
+- 광고 카피 아님. 친구가 무심코 툭 던진 감초 같은 한 마디.
+- 상품·본문 맥락에 가볍게 연결되지만 상품 자랑 아님.
+- 1문장, 최대 2줄, 대략 15~50자.
+- 이모지는 안 쓰거나 최대 1개.
 
-  3: (link) => `[광고] 주말에 이거만 한다 ㅋㅋㅋ
-💕💕💕💕💕💕💕💕💕
-${link}
-${link}
-💕💕💕💕💕💕💕💕💕
-*${LEGAL_DISCLAIMER}`,
+문체:
+- 한국어 반말 + 인터넷 구어체
+- 어미: ~임 / ~네 / ~ㄹ 뻔 / ~였음 / ~인 거 실화? / ~이라니
+- 지나친 감성, 시적 은유 금지
 
-  4: (link, productName) => `"${LEGAL_DISCLAIMER}"
-ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+금지:
+- 브랜드명·모델명·가격·구매처·"쿠팡"·"파트너스"·"링크" 노골적 언급 금지
+- 강추·추천·가성비·필수템·후기·리뷰 같은 홍보 냄새 어휘 금지
+- 명령형·요청형 ("사세요", "확인해봐요") 금지
 
-🔽 ${productName} 정보 🔽
+권장 스타일 예:
+- "책상 위에 하나 놓았을 뿐인데 은근 별세계임"
+- "이거 없이 어떻게 살았는지 모르겠음"
+- "무심코 산 건데 요즘 제일 잘한 일임"
+- "이거 하나로 아침 준비 시간 반 줄었음"
+- "생각 없이 켰다가 이제 매일 씀"
 
-❤️${link}❤️
-❤️${link}❤️
+JSON으로만 반환. 다른 텍스트 절대 금지.
+{ "lead": "여기에 한 문장" }`;
 
-안사도 되니까 구경만 해요💗`,
-};
+export async function composeReply(input: ReplyComposeInput): Promise<ReplyComposeResult> {
+  const persona = input.personaPrompt
+    ? `\n\n== 계정 페르소나 (seed=${input.accountId}) ==\n${input.personaPrompt}`
+    : '';
+  const system = SYSTEM_PROMPT + persona;
 
-function stableVariant(accountId: string, dayOfWeek: number): ReplyVariant {
-  const h = createHash('sha256').update(`${accountId}|${dayOfWeek}`).digest();
-  const n = h.readUInt8(0) % 4;
-  return (n + 1) as ReplyVariant;
+  const userPrompt = [
+    `상품: ${input.productName}${input.productCategory ? ` (${input.productCategory})` : ''}`,
+    '',
+    '본문 (연결 참고):',
+    `"""${input.body}"""`,
+    '',
+    '위 본문 톤과 자연스럽게 이어지는 리드 한 문장을 JSON으로만 반환.',
+  ].join('\n');
+
+  const response = await llm().complete({
+    tier: 'main',
+    system,
+    userParts: [{ type: 'text', text: userPrompt }],
+    maxOutputTokens: 200,
+    temperature: 0.85,
+    jsonMode: true,
+    jsonSchema: {
+      type: 'object',
+      properties: { lead: { type: 'string' } },
+      required: ['lead'],
+    },
+  });
+
+  const parsed = extractJson(response.text);
+  const { lead } = LeadResultSchema.parse(parsed);
+
+  const text = [lead, input.deeplinkUrl, '', LEGAL_DISCLAIMER].join('\n');
+  logger.debug({ lead, textLength: text.length }, 'composeReply');
+  return { text, lead };
 }
 
-export function composeReply(input: ReplyComposeInput): ReplyComposeResult {
-  const dow = input.dayOfWeek ?? new Date().getDay();
-  let variant = input.variantOverride ?? stableVariant(input.accountId, dow);
-
-  // 양식 4는 productName 필수 — 없으면 양식 1로 폴백
-  if (variant === 4 && !input.productName) variant = 1;
-
-  const productName = input.productName ?? '';
-  let text = templates[variant](input.deeplinkUrl, productName);
-
-  // 공정위 문구 미포함 시 강제 append (안전빵)
-  if (!text.includes(LEGAL_DISCLAIMER)) {
-    text = `${text}\n\n${LEGAL_DISCLAIMER}`;
+function extractJson(raw: string): unknown {
+  const stripped = raw
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .trim();
+  try {
+    return JSON.parse(stripped);
+  } catch {
+    const s = stripped.indexOf('{');
+    const e = stripped.lastIndexOf('}');
+    if (s === -1 || e === -1) throw new Error(`no JSON in response: ${stripped.slice(0, 200)}`);
+    return JSON.parse(stripped.slice(s, e + 1));
   }
-
-  return { text, variantUsed: variant };
 }

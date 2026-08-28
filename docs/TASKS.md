@@ -26,8 +26,8 @@ Last synced: 2026-08-28
 - [x] **3d. Copywriter 카피 품질 검증** — `/copy 1~4` 4양식 실전 검증. thinking mode 끄기 튜닝
 - [x] **3e. Product Matcher 통합** — `/matcher` 실 검증 통과 (score 0.75, 1회 시도, deeplink 생성 완료)
 - [x] **3f. Media Handler** — Cloudinary uploadFromUrl / uploadManyFromUrls / 2개 이상 검증
-- [x] **3g. Reply Composer 4양식** — 계정×요일 해시 다변화, 공정위 강제
-- [ ] **3h. Pipeline A e2e 검증** — 수동 URL → 승인 카드 전체 흐름
+- [x] **3g. Reply Composer** — 재설계: 4양식 폐기, AI 감초 톤 매번 생성 (Anthropic Sonnet). 상품·본문 맥락 기반 자연스러운 리드 문장
+- [x] **3h. Pipeline A e2e 검증** — `/pa` 통과. 소스 미디어 2개 → 분류 → 매칭 → Cloudinary → 카피 → AI 감초 댓글 → 승인 카드 (미디어 그룹 프리뷰)
 
 ## Priority 4 — 발행 파이프라인 (Meta 승인 후)
 

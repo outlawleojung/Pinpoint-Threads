@@ -39,24 +39,51 @@ export async function sendApprovalRequest(postId: string): Promise<void> {
   const caption = buildPreviewCaption(post);
   const keyboard = approvalKeyboard(post.id);
 
-  const message = post.mediaUrl
-    ? await bot.api.sendPhoto(env.TELEGRAM_ADMIN_CHAT_ID, post.mediaUrl, {
-        caption,
-        reply_markup: keyboard,
-      })
-    : await bot.api.sendMessage(env.TELEGRAM_ADMIN_CHAT_ID, caption, {
-        reply_markup: keyboard,
-      });
+  const mediaUrls = post.mediaUrls.length > 0
+    ? post.mediaUrls
+    : post.mediaUrl
+      ? [post.mediaUrl]
+      : [];
+
+  let anchorMessageId: number;
+
+  if (mediaUrls.length >= 2) {
+    // Media group으로 여러 사진 프리뷰 + 별도 메시지에 버튼
+    const group = mediaUrls.slice(0, 10).map((url, i) => ({
+      type: 'photo' as const,
+      media: url,
+      caption: i === 0 ? caption : undefined,
+    }));
+    const groupMessages = await bot.api.sendMediaGroup(env.TELEGRAM_ADMIN_CHAT_ID, group);
+    anchorMessageId = groupMessages[0]?.message_id ?? 0;
+
+    await bot.api.sendMessage(
+      env.TELEGRAM_ADMIN_CHAT_ID,
+      `Post: ${post.id}\n승인 결정:`,
+      { reply_markup: keyboard },
+    );
+  } else if (mediaUrls.length === 1) {
+    const msg = await bot.api.sendPhoto(env.TELEGRAM_ADMIN_CHAT_ID, mediaUrls[0]!, {
+      caption,
+      reply_markup: keyboard,
+    });
+    anchorMessageId = msg.message_id;
+  } else {
+    const msg = await bot.api.sendMessage(env.TELEGRAM_ADMIN_CHAT_ID, caption, {
+      reply_markup: keyboard,
+    });
+    anchorMessageId = msg.message_id;
+  }
 
   await prisma.post.update({
     where: { id: post.id },
     data: {
       state: PostState.PENDING_APPROVAL,
-      telegramMessageId: String(message.message_id),
+      telegramMessageId: String(anchorMessageId),
     },
   });
 
-  logger.info({ postId, messageId: message.message_id }, 'approval request sent');
+  logger.info({ postId, anchorMessageId, mediaCount: mediaUrls.length }, 'approval request sent');
 }
 
 type Action = 'approve' | 'regen-text' | 'regen-product' | 'reject';

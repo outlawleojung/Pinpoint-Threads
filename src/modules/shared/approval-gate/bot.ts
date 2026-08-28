@@ -49,7 +49,7 @@ bot.command('classify', async (ctx) => {
   try {
     const result = await classifySourceItem({
       text: '요즘 자취방 필수템! USB로 충전되는 미니 무선 가습기 진짜 편해요. 물통도 세척 편하고 조용해서 잘 때도 좋음.',
-      mediaUrls: ['https://picsum.photos/seed/humidifier/600/600'],
+      mediaUrls: ['https://ads-partners.coupang.com/image1/T66Ju4qb_ZdJBMXjTzSbewR2XoTQo2xv6WoXcFBAaibSodiHvpvmTOSc0ykq7X-3WP2NNh8ZeonsVNxqQOw7XxTRzYV7-EH4JKyAo4rmjI9t81zSeHs_M_PxCNE3YH-gbrNurgw0a12nPilWLmowyQMmshu5dO0xG2_ZXHi3NuYVVw1Vol07zCIsXFNNRhpJx0YiENiCzv3CdWiVoN2ZImAR4YVbq2Yj4DcZKue4xdv7zyRTWqOTqTRT5jvdii-re1ByI5zoZeI5aQzjwMJte3VEqaNbuLRy9iPpqnCMzMEewzDM3HMAIYvIZA=='],
     });
     await ctx.reply(
       '📊 분류 결과\n\n' +
@@ -64,16 +64,9 @@ bot.command('classify', async (ctx) => {
   }
 });
 
-// Claude 카피 테스트 (쿠파스 게시글 생성기 스타일 본문 + 실전 4양식 고정 댓글)
+// 본문 + AI 감초 톤 댓글 테스트
 bot.command('copy', async (ctx) => {
-  const variantArg = ctx.match?.trim();
-  const variantOverride = variantArg ? (Number(variantArg) as 1 | 2 | 3 | 4) : undefined;
-
-  await ctx.reply(
-    variantOverride
-      ? `카피 생성 중... (Gemini, 양식 ${variantOverride} 강제)`
-      : '카피 생성 중... (Gemini, 양식은 계정×요일 해시로 자동 선택)',
-  );
+  await ctx.reply('카피 생성 중... (본문 + AI 감초 톤 댓글)');
   try {
     const productName = '휴대용 무선 가습기 500ml';
     const deeplinkUrl = 'https://link.coupang.com/a/gzTOZtY7Ai';
@@ -81,7 +74,7 @@ bot.command('copy', async (ctx) => {
 
     const copyResult = await generateCopy({
       sourceText: 'USB 충전 미니 무선 가습기. 조용하고 세척 편함.',
-      sourceImageUrl: 'https://picsum.photos/seed/humidifier/600/600',
+      sourceImageUrl: 'https://ads-partners.coupang.com/image1/T66Ju4qb_ZdJBMXjTzSbewR2XoTQo2xv6WoXcFBAaibSodiHvpvmTOSc0ykq7X-3WP2NNh8ZeonsVNxqQOw7XxTRzYV7-EH4JKyAo4rmjI9t81zSeHs_M_PxCNE3YH-gbrNurgw0a12nPilWLmowyQMmshu5dO0xG2_ZXHi3NuYVVw1Vol07zCIsXFNNRhpJx0YiENiCzv3CdWiVoN2ZImAR4YVbq2Yj4DcZKue4xdv7zyRTWqOTqTRT5jvdii-re1ByI5zoZeI5aQzjwMJte3VEqaNbuLRy9iPpqnCMzMEewzDM3HMAIYvIZA==',
       productName,
       productCategory: '생활용품',
       accountSeed: accountId,
@@ -89,17 +82,16 @@ bot.command('copy', async (ctx) => {
       channel: 'COUPANG',
     });
 
-    // 실전 4가지 양식 중 계정×요일 해시로 선택 (or variantOverride)
-    const reply = composeReply({
-      deeplinkUrl,
+    const reply = await composeReply({
+      body: copyResult.body,
       productName,
+      productCategory: '생활용품',
+      deeplinkUrl,
       accountId,
-      variantOverride:
-        variantOverride && [1, 2, 3, 4].includes(variantOverride) ? variantOverride : undefined,
     });
 
     await ctx.reply(
-      `📝 본문\n\n${copyResult.body}\n\n\n💬 고정 댓글 (양식 ${reply.variantUsed})\n\n${reply.text}`,
+      `📝 본문\n\n${copyResult.body}\n\n\n💬 고정 댓글\n\n${reply.text}`,
     );
   } catch (err) {
     logger.error(err, '/copy failed');
@@ -114,7 +106,7 @@ bot.command('copy3', async (ctx) => {
     const { generateBodyVariants } = await import('../copywriter/index.js');
     const variants = await generateBodyVariants(
       {
-        sourceImageUrl: 'https://picsum.photos/seed/humidifier/600/600',
+        sourceImageUrl: 'https://ads-partners.coupang.com/image1/T66Ju4qb_ZdJBMXjTzSbewR2XoTQo2xv6WoXcFBAaibSodiHvpvmTOSc0ykq7X-3WP2NNh8ZeonsVNxqQOw7XxTRzYV7-EH4JKyAo4rmjI9t81zSeHs_M_PxCNE3YH-gbrNurgw0a12nPilWLmowyQMmshu5dO0xG2_ZXHi3NuYVVw1Vol07zCIsXFNNRhpJx0YiENiCzv3CdWiVoN2ZImAR4YVbq2Yj4DcZKue4xdv7zyRTWqOTqTRT5jvdii-re1ByI5zoZeI5aQzjwMJte3VEqaNbuLRy9iPpqnCMzMEewzDM3HMAIYvIZA==',
         sourceText: 'USB 충전 미니 무선 가습기. 조용하고 세척 편함.',
         productName: '휴대용 무선 가습기 500ml',
         productCategory: '생활용품',
@@ -138,8 +130,8 @@ bot.command('vision', async (ctx) => {
   await ctx.reply('Vision 매칭 중... (Sonnet)');
   try {
     const result = await verifyProductMatch({
-      sourceImageUrl: 'https://picsum.photos/seed/humidifier/600/600',
-      productThumbnailUrl: 'https://picsum.photos/seed/humidifier2/600/600',
+      sourceImageUrl: 'https://ads-partners.coupang.com/image1/T66Ju4qb_ZdJBMXjTzSbewR2XoTQo2xv6WoXcFBAaibSodiHvpvmTOSc0ykq7X-3WP2NNh8ZeonsVNxqQOw7XxTRzYV7-EH4JKyAo4rmjI9t81zSeHs_M_PxCNE3YH-gbrNurgw0a12nPilWLmowyQMmshu5dO0xG2_ZXHi3NuYVVw1Vol07zCIsXFNNRhpJx0YiENiCzv3CdWiVoN2ZImAR4YVbq2Yj4DcZKue4xdv7zyRTWqOTqTRT5jvdii-re1ByI5zoZeI5aQzjwMJte3VEqaNbuLRy9iPpqnCMzMEewzDM3HMAIYvIZA==',
+      productThumbnailUrl: 'https://ads-partners.coupang.com/image1/SUsoHHTK_MmpXOkoSVC7e8PAA-M0-aLul4kYkx6_f6QcAky0tKmtLOK472Cg9SezxdBJckDdqzDXVs93PyfZ8gkBwcFRYrHAQfXG2NWDgD9Bt1Lxb4zAd6YG-RywA7MVAf8G0UcQf2PejCbKmOSlB_ydS3MI0HQlXCh-ZMnkg2maEjTIppafJRf4DoxSTS2gGjR9wWYbMZfwIJreUwkwmi-4u5BWdJcGneStqA7SjN0x6F0W_sFeYz0_fI0WPxoczSF2Mrr3lwYwXgc6olauDivcuV3W74MKCYfmuku0mXDDf29pTjkr8FH0uSM5gtqYBRgpfA==',
     });
     await ctx.reply(
       '👁 Vision 결과\n\n' +
@@ -294,7 +286,7 @@ bot.command('pa', async (ctx) => {
     }
 
     await ctx.reply(
-      `✅ 승인 카드 발송 완료\nPost ID: ${outcome.postId}\n상품: ${outcome.matchedProductName}\nVision score: ${outcome.visionScore.toFixed(2)}\n양식 ${outcome.replyVariant} 사용\n\n승인 카드에서 버튼 클릭 → 상태 전이 검증`,
+      `✅ 승인 카드 발송 완료\nPost ID: ${outcome.postId}\n상품: ${outcome.matchedProductName}\nVision score: ${outcome.visionScore.toFixed(2)}\n감초 리드: "${outcome.replyLead}"\n\n승인 카드에서 버튼 클릭 → 상태 전이 검증`,
     );
   } catch (err) {
     logger.error(err, '/pa failed');
@@ -324,7 +316,7 @@ bot.command('newpost', async (ctx) => {
         productName: '휴대용 무선 가습기 500ml',
         productUrl: 'https://www.coupang.com/vp/products/dummy',
         deeplinkUrl: 'https://link.coupang.com/dummy',
-        thumbnailUrl: 'https://picsum.photos/seed/humidifier/600/600',
+        thumbnailUrl: 'https://ads-partners.coupang.com/image1/T66Ju4qb_ZdJBMXjTzSbewR2XoTQo2xv6WoXcFBAaibSodiHvpvmTOSc0ykq7X-3WP2NNh8ZeonsVNxqQOw7XxTRzYV7-EH4JKyAo4rmjI9t81zSeHs_M_PxCNE3YH-gbrNurgw0a12nPilWLmowyQMmshu5dO0xG2_ZXHi3NuYVVw1Vol07zCIsXFNNRhpJx0YiENiCzv3CdWiVoN2ZImAR4YVbq2Yj4DcZKue4xdv7zyRTWqOTqTRT5jvdii-re1ByI5zoZeI5aQzjwMJte3VEqaNbuLRy9iPpqnCMzMEewzDM3HMAIYvIZA==',
         price: 24900,
         rating: 4.7,
         category: '생활용품',
@@ -336,7 +328,7 @@ bot.command('newpost', async (ctx) => {
         accountId: account.id,
         sourceItemId: source.id,
         commerceProductId: product.id,
-        mediaUrl: 'https://picsum.photos/seed/humidifier/600/600',
+        mediaUrl: 'https://ads-partners.coupang.com/image1/T66Ju4qb_ZdJBMXjTzSbewR2XoTQo2xv6WoXcFBAaibSodiHvpvmTOSc0ykq7X-3WP2NNh8ZeonsVNxqQOw7XxTRzYV7-EH4JKyAo4rmjI9t81zSeHs_M_PxCNE3YH-gbrNurgw0a12nPilWLmowyQMmshu5dO0xG2_ZXHi3NuYVVw1Vol07zCIsXFNNRhpJx0YiENiCzv3CdWiVoN2ZImAR4YVbq2Yj4DcZKue4xdv7zyRTWqOTqTRT5jvdii-re1ByI5zoZeI5aQzjwMJte3VEqaNbuLRy9iPpqnCMzMEewzDM3HMAIYvIZA==',
         generatedBody:
           '요즘 책상 위에 하나씩 놓는 그거 있잖아요.\n작고 조용한데 물안개가 은근 뿜어져 나오는 그 가습기.\n\n올 겨울 실내 건조함 잡는 데 진짜 물건이에요.',
         generatedReply:
