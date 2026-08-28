@@ -1,22 +1,4 @@
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: pinpoint-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: pinpoint
-      POSTGRES_PASSWORD: pinpoint_dev
-      POSTGRES_DB: pinpoint_threads
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U pinpoint -d pinpoint_threads"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
   redis:
     image: redis:7-alpine
     container_name: pinpoint-redis
@@ -33,5 +15,7 @@ services:
       retries: 5
 
 volumes:
-  postgres_data:
   redis_data:
+
+# Postgres는 이제 Neon 클라우드 사용 (ADR 002).
+# 로컬 개발도 .env의 DATABASE_URL(Neon)에 직접 연결.
