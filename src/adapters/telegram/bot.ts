@@ -72,7 +72,7 @@ bot.command('copy', async (ctx) => {
       channel: 'COUPANG',
     });
     await ctx.reply(
-      `📝 *본문*\n${result.body}\n\n💬 *대댓글*\n${result.reply}`,
+      `📝 *본문*\n${result.body}\n\n💬 *고정 댓글*\n${result.reply}`,
       { parse_mode: 'Markdown' },
     );
   } catch (err) {

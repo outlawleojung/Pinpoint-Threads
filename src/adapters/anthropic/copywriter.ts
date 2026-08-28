@@ -9,7 +9,7 @@ import { logger } from '../../config/logger.js';
  * 핵심 설계:
  * - 본문(body): 이미지 1장 기반 짧은 한 문장 (18~60자, 최대 2줄).
  *   광고 티 없이 "친구가 방금 겪은 일" 톤. 링크/브랜드/가격/구매처/홍보 표현 금지.
- * - 대댓글(reply): 결정론적 템플릿으로 조립 (AI 미개입).
+ * - 고정 댓글(reply): 결정론적 템플릿으로 조립 (AI 미개입).
  *   "정보 물어보시는 분들 많아서 링크 남겨요" + 딥링크 + 공정위 필수 문구.
  */
 
@@ -114,7 +114,7 @@ async function generateBody(input: CopywriteInput, seedIndex: number): Promise<s
 }
 
 /**
- * 대댓글은 AI 없이 결정론적 템플릿.
+ * 고정 댓글은 AI 없이 결정론적 템플릿.
  * CLAUDE.md §4.3 법적 필수 문구 강제.
  */
 export function buildReply(deeplinkUrl: string): string {

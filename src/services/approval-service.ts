@@ -24,7 +24,7 @@ function buildPreviewCaption(post: PostWithRelations): string {
   lines.push('*본문*');
   lines.push(post.generatedBody ?? '(비어있음)');
   lines.push('');
-  lines.push('*대댓글*');
+  lines.push('*고정 댓글*');
   lines.push(post.generatedReply ?? '(비어있음)');
   return lines.join('\n');
 }
