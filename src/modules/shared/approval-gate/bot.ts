@@ -10,6 +10,7 @@ import { verifyProductMatch } from '../../pipeline-a/vision-verifier/index.js';
 import { CoupangAdapter } from '../../../infra/commerce/coupang-client.js';
 import { composeReply } from '../../pipeline-a/reply-composer/index.js';
 import { matchProduct } from '../../pipeline-a/product-matcher/index.js';
+import { runPipelineA } from '../../pipeline-a/orchestrator.js';
 
 export const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
 
@@ -247,6 +248,57 @@ bot.command('matcher', async (ctx) => {
   } catch (err) {
     logger.error(err, '/matcher failed');
     await ctx.reply(`❌ 실패: ${(err as Error).message}`);
+  }
+});
+
+// /pa — Pipeline A 전체 e2e (Task #3h)
+// 사용법: /pa <mediaUrl1> <mediaUrl2> [<mediaUrl3>...] || <sourceText>
+bot.command('pa', async (ctx) => {
+  const raw = ctx.match?.trim();
+  if (!raw) {
+    await ctx.reply(
+      '사용법:\n/pa <mediaUrl1> <mediaUrl2> [<mediaUrl3>...] || <sourceText>\n\n' +
+        '예:\n/pa https://.../a.jpg https://.../b.jpg || 요즘 자취방 필수템 무선 미니 가습기 진짜 편해요',
+    );
+    return;
+  }
+  const [mediaPart, ...textParts] = raw.split('||').map((s) => s.trim());
+  const sourceText = textParts.join(' | ').trim();
+  const sourceMediaUrls = (mediaPart ?? '').split(/\s+/).filter(Boolean);
+  if (sourceMediaUrls.length < 2) {
+    await ctx.reply(`❌ 미디어 2개 이상 필요 (지금 ${sourceMediaUrls.length}개)`);
+    return;
+  }
+  if (!sourceText) {
+    await ctx.reply('❌ || 뒤에 sourceText 필요');
+    return;
+  }
+
+  // 더미 계정 확보
+  const account = await ensureDummyAccount();
+
+  await ctx.reply(
+    `🚀 Pipeline A e2e 시작\n계정: ${account.handle}\n미디어: ${sourceMediaUrls.length}개\nsourceText: ${sourceText.slice(0, 80)}...\n\n분류 → 매칭 → 미디어 업로드 → 카피 → 승인 카드`,
+  );
+
+  try {
+    const outcome = await runPipelineA({
+      accountId: account.id,
+      sourceMediaUrls,
+      sourceText,
+    });
+
+    if (outcome.status === 'REJECTED') {
+      await ctx.reply(`❌ Pipeline REJECTED\n단계: ${outcome.stage}\n사유: ${outcome.reason}`);
+      return;
+    }
+
+    await ctx.reply(
+      `✅ 승인 카드 발송 완료\nPost ID: ${outcome.postId}\n상품: ${outcome.matchedProductName}\nVision score: ${outcome.visionScore.toFixed(2)}\n양식 ${outcome.replyVariant} 사용\n\n승인 카드에서 버튼 클릭 → 상태 전이 검증`,
+    );
+  } catch (err) {
+    logger.error(err, '/pa failed');
+    await ctx.reply(`❌ 예외: ${(err as Error).message}`);
   }
 });
 
