@@ -170,10 +170,12 @@ bot.command('coupang', async (ctx) => {
     const summary = results
       .slice(0, 5)
       .map((r, i) =>
-        `${i + 1}. ${r.productName}\n   ₩${r.price?.toLocaleString?.() ?? '?'} · ${r.channel}\n   ${r.productUrl}`,
+        `${i + 1}. ${r.productName}\n   ₩${r.price?.toLocaleString?.() ?? '?'} · ${r.channel}\n   상품: ${r.productUrl}\n   이미지: ${r.thumbnailUrl}`,
       )
       .join('\n\n');
-    await ctx.reply(`🛒 쿠팡 검색 결과 (${results.length})\n\n${summary}`);
+    await ctx.reply(
+      `🛒 쿠팡 검색 결과 (${results.length})\n\n${summary}\n\n💡 이미지 URL을 /matcher 에 넣으면 e2e 검증 가능`,
+    );
   } catch (err) {
     logger.error(err, '/coupang failed');
     await ctx.reply(`❌ 실패: ${(err as Error).message}`);

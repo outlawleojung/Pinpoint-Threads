@@ -19,8 +19,8 @@ const envSchema = z.object({
   ANTHROPIC_MODEL_HAIKU: z.string().default('claude-haiku-4-5-20251001'),
 
   GEMINI_API_KEY: z.string().optional(),
-  GEMINI_MODEL_MAIN: z.string().default('gemini-3.5-flash'),
-  GEMINI_MODEL_FAST: z.string().default('gemini-3.5-flash-lite'),
+  GEMINI_MODEL_MAIN: z.string().default('gemini-3.6-flash'),
+  GEMINI_MODEL_FAST: z.string().default('gemini-3.6-flash'),
 
   META_APP_ID: z.string().optional(),
   META_APP_SECRET: z.string().optional(),

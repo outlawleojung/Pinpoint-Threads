@@ -43,8 +43,17 @@ export class GeminiProvider implements LlmProvider {
       };
       if (input.jsonMode) {
         config.responseMimeType = 'application/json';
-        if (input.jsonSchema) config.responseSchema = normalizeSchema(input.jsonSchema);
+        // responseSchema는 일부 모델에서 400 유발. 프롬프트로 JSON 유도 + extractJson 파싱으로 대체.
       }
+      logger.debug(
+        {
+          model,
+          partsCount: parts.length,
+          partTypes: parts.map((p) => ('text' in p ? 'text' : 'image')),
+          configKeys: Object.keys(config),
+        },
+        'gemini request payload',
+      );
       return client.models.generateContent({
         model,
         contents: [{ role: 'user', parts }],

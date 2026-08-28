@@ -21,10 +21,10 @@ Last synced: 2026-08-28
 ## Priority 3 — Pipeline A 실 구현 (저)
 
 - [x] **3a. Coupang HMAC + Search + Deeplink** — 실 API 통신 검증. `/coupang` `/deeplink` 명령
-- [ ] **3b. Vision Verifier 실 테스트** — `/vision` 실행하면 완료 (Gemini flash 사용)
+- [x] **3b. Vision Verifier 실 테스트** — `/vision` 통과 (Anthropic Sonnet, base64 인라인 방식)
 - [x] **3c. Content Classifier 실 테스트** — `/classify` 검증 완료
 - [x] **3d. Copywriter 카피 품질 검증** — `/copy 1~4` 4양식 실전 검증. thinking mode 끄기 튜닝
-- [ ] **3e. Product Matcher 통합** — `/matcher` 명령 추가 완료. 사용자님 실 검증 대기
+- [x] **3e. Product Matcher 통합** — `/matcher` 실 검증 통과 (score 0.75, 1회 시도, deeplink 생성 완료)
 - [x] **3f. Media Handler** — Cloudinary uploadFromUrl / uploadManyFromUrls / 2개 이상 검증
 - [x] **3g. Reply Composer 4양식** — 계정×요일 해시 다변화, 공정위 강제
 - [ ] **3h. Pipeline A e2e 검증** — 수동 URL → 승인 카드 전체 흐름

@@ -93,7 +93,9 @@ export class CoupangAdapter implements CommerceAdapter {
       channel: 'COUPANG' as const,
       externalId: String(p.productId),
       productName: p.productName,
-      productUrl: p.productUrl,
+      // Search API가 돌려주는 productUrl은 이미 트래킹 형식(`link.coupang.com/re/AFFSDP?...`)이라
+      // Deeplink API가 400 (url convert failed). productId로 canonical 상품 페이지 URL 재구성.
+      productUrl: `https://www.coupang.com/vp/products/${p.productId}`,
       thumbnailUrl: p.productImage,
       price: p.productPrice,
       category: p.categoryName,
