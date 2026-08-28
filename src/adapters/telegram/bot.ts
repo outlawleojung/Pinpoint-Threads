@@ -4,6 +4,9 @@ import { logger } from '../../config/logger.js';
 import { handleApprovalCallback, sendApprovalRequest } from '../../services/approval-service.js';
 import { prisma } from '../../db/prisma.js';
 import { PostState } from '@prisma/client';
+import { classifySourceItem } from '../anthropic/classify.js';
+import { generateCopy } from '../anthropic/copywriter.js';
+import { verifyProductMatch } from '../anthropic/vision-match.js';
 
 export const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
 
@@ -21,13 +24,108 @@ bot.use(async (ctx, next) => {
 bot.command('start', async (ctx) => {
   await ctx.reply(
     'Pinpoint Threads 승인 봇이 연결되었습니다.\n\n' +
-      '- /newpost : 더미 승인 요청 발송 (Phase 2A 테스트)\n' +
-      '- /ping : 헬스체크',
+      '- /ping : 헬스체크\n' +
+      '- /newpost : 더미 승인 요청 발송\n' +
+      '- /classify : Claude 분류 테스트\n' +
+      '- /copy : 게시글 카피 1개 생성\n' +
+      '- /copy3 : 게시글 카피 3개 후보 생성\n' +
+      '- /vision : Claude Vision 이미지 정합성 테스트',
   );
 });
 
 bot.command('ping', async (ctx) => {
   await ctx.reply('pong 🏓');
+});
+
+// Claude 분류 테스트
+bot.command('classify', async (ctx) => {
+  await ctx.reply('분류 중... (Haiku)');
+  try {
+    const result = await classifySourceItem({
+      text: '요즘 자취방 필수템! USB로 충전되는 미니 무선 가습기 진짜 편해요. 물통도 세척 편하고 조용해서 잘 때도 좋음.',
+      mediaUrls: ['https://picsum.photos/seed/humidifier/600/600'],
+    });
+    await ctx.reply(
+      '📊 분류 결과\n\n' +
+        '```json\n' +
+        JSON.stringify(result, null, 2) +
+        '\n```',
+      { parse_mode: 'Markdown' },
+    );
+  } catch (err) {
+    logger.error(err, '/classify failed');
+    await ctx.reply(`❌ 실패: ${(err as Error).message}`);
+  }
+});
+
+// Claude 카피 테스트 (쿠파스 게시글 생성기 스타일)
+bot.command('copy', async (ctx) => {
+  await ctx.reply('카피 생성 중... (Sonnet)');
+  try {
+    const result = await generateCopy({
+      sourceText: 'USB 충전 미니 무선 가습기. 조용하고 세척 편함.',
+      sourceImageUrl: 'https://picsum.photos/seed/humidifier/600/600',
+      productName: '휴대용 무선 가습기 500ml',
+      productCategory: '생활용품',
+      accountSeed: 'dummy_kr_01',
+      deeplinkUrl: 'https://link.coupang.com/dummy',
+      channel: 'COUPANG',
+    });
+    await ctx.reply(
+      `📝 *본문*\n${result.body}\n\n💬 *대댓글*\n${result.reply}`,
+      { parse_mode: 'Markdown' },
+    );
+  } catch (err) {
+    logger.error(err, '/copy failed');
+    await ctx.reply(`❌ 실패: ${(err as Error).message}`);
+  }
+});
+
+// 카피 3개 후보 (재생성 스타일)
+bot.command('copy3', async (ctx) => {
+  await ctx.reply('카피 3개 후보 생성 중... (Sonnet x3)');
+  try {
+    const { generateBodyVariants } = await import('../anthropic/copywriter.js');
+    const variants = await generateBodyVariants(
+      {
+        sourceImageUrl: 'https://picsum.photos/seed/humidifier/600/600',
+        sourceText: 'USB 충전 미니 무선 가습기. 조용하고 세척 편함.',
+        productName: '휴대용 무선 가습기 500ml',
+        productCategory: '생활용품',
+        accountSeed: 'dummy_kr_01',
+        deeplinkUrl: 'https://link.coupang.com/dummy',
+        channel: 'COUPANG',
+      },
+      3,
+    );
+    await ctx.reply(
+      variants.map((v, i) => `${i + 1}. ${v}`).join('\n\n'),
+    );
+  } catch (err) {
+    logger.error(err, '/copy3 failed');
+    await ctx.reply(`❌ 실패: ${(err as Error).message}`);
+  }
+});
+
+// Claude Vision 정합성 테스트
+bot.command('vision', async (ctx) => {
+  await ctx.reply('Vision 매칭 중... (Sonnet)');
+  try {
+    const result = await verifyProductMatch({
+      sourceImageUrl: 'https://picsum.photos/seed/humidifier/600/600',
+      productThumbnailUrl: 'https://picsum.photos/seed/humidifier2/600/600',
+    });
+    await ctx.reply(
+      '👁 Vision 결과\n\n' +
+        '```json\n' +
+        JSON.stringify(result, null, 2) +
+        '\n```',
+      { parse_mode: 'Markdown' },
+    );
+  } catch (err) {
+    logger.error(err, '/vision failed');
+    await ctx.reply(`❌ 실패: ${(err as Error).message}`);
+  }
 });
 
 // /newpost — 테스트용 더미 승인 요청 발송

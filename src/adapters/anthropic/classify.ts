@@ -1,14 +1,104 @@
-// TODO(Phase 2): 원문/미디어 기반 소비재 적합성 판정 + 카테고리 + 쿠팡/무신사 검색용 키워드 추출
-export interface ClassifyResult {
-  suitable: boolean;
-  category?: string;
-  searchKeyword?: string;
-  reason?: string;
-}
+import type Anthropic from '@anthropic-ai/sdk';
+import { z } from 'zod';
+import { anthropic, MODELS } from './client.js';
+import { logger } from '../../config/logger.js';
 
-export async function classifySourceItem(_input: {
+// CLAUDE.md §2 Pipeline A - Step 2: 소비재 적합성 필터링 + 카테고리 + 검색 키워드
+
+export const CATEGORIES = [
+  '의류',
+  '신발',
+  '패션잡화',
+  '뷰티',
+  '생활용품',
+  '가전',
+  '식품',
+  '기타',
+] as const;
+export type Category = (typeof CATEGORIES)[number];
+
+const ClassifyResultSchema = z.object({
+  suitable: z.boolean(),
+  category: z.enum(CATEGORIES).optional(),
+  searchKeyword: z.string().min(1).max(30).optional(),
+  reason: z.string().optional(),
+});
+
+export type ClassifyResult = z.infer<typeof ClassifyResultSchema>;
+
+const SYSTEM_PROMPT = `당신은 쇼핑 큐레이션 파이프라인의 필터/추출 노드입니다.
+
+입력: 해외 소셜미디어(Threads/X)의 원문 텍스트와 이미지 URL 목록.
+목표: 한국 쿠팡/무신사에서 판매 가능한 일반 소비재/생활용품/패션 아이템을 소개하는 콘텐츠인지 판정하고, 매칭 가능한 단일 표준 검색 키워드를 뽑는다.
+
+부적합 예시(반드시 suitable=false):
+- 정치/종교/성인/의약품/총기/도박/투자상품
+- 서비스(여행지, 앱, 강의)
+- 개인 브랜딩/자기 홍보 게시물 (구체적 상품 미언급)
+- 상품 특정 불가능 (일반적 감상, 밈)
+- 국내 유통 불가능 (규제 품목, 초저가 위조품 의심)
+
+적합 판정 시:
+- category: 다음 중 하나만 [의류, 신발, 패션잡화, 뷰티, 생활용품, 가전, 식품, 기타]
+- searchKeyword: 한국어 표준 상품명 1개 (2~5단어). 브랜드명 지양, 일반 명사 위주. 쿠팡/무신사 검색창에 그대로 넣어 매칭될 표현.
+
+JSON 스키마로만 응답 (다른 텍스트 금지):
+{
+  "suitable": boolean,
+  "category": string | undefined,
+  "searchKeyword": string | undefined,
+  "reason": string | undefined
+}`;
+
+export interface ClassifyInput {
   text: string;
   mediaUrls: string[];
-}): Promise<ClassifyResult> {
-  throw new Error('classifySourceItem not implemented (Phase 2)');
+}
+
+type UserContent = Array<
+  | { type: 'text'; text: string }
+  | { type: 'image'; source: { type: 'url'; url: string } }
+>;
+
+export async function classifySourceItem(input: ClassifyInput): Promise<ClassifyResult> {
+  const userContent: UserContent = [];
+
+  for (const url of input.mediaUrls.slice(0, 4)) {
+    userContent.push({
+      type: 'image',
+      source: { type: 'url', url },
+    });
+  }
+  userContent.push({
+    type: 'text',
+    text: `원문:\n"""\n${input.text}\n"""\n\n판정 결과를 JSON으로만 반환.`,
+  });
+
+  const response = await anthropic.messages.create({
+    model: MODELS.HAIKU,
+    max_tokens: 512,
+    system: SYSTEM_PROMPT,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    messages: [{ role: 'user', content: userContent as any }],
+  });
+
+  const raw = extractText(response);
+  const parsed = parseJson(raw);
+  const result = ClassifyResultSchema.parse(parsed);
+  logger.debug({ result }, 'classifySourceItem');
+  return result;
+}
+
+function extractText(resp: Anthropic.Message): string {
+  const block = resp.content.find((b) => b.type === 'text');
+  if (!block || block.type !== 'text') throw new Error('no text block in classify response');
+  return block.text;
+}
+
+function parseJson(raw: string): unknown {
+  const cleaned = raw
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .trim();
+  return JSON.parse(cleaned);
 }
