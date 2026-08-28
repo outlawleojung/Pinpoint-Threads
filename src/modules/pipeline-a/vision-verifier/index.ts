@@ -1,8 +1,9 @@
 import { z } from 'zod';
-import { anthropic, MODELS } from '../../../infra/anthropic-client.js';
+import { llm } from '../../../infra/llm/index.js';
+import type { LlmContentPart } from '../../../infra/llm/index.js';
 import { logger } from '../../../config/logger.js';
 
-// CLAUDE.md §2 Pipeline A - Step 3: 원본 미디어 vs 커머스 썸네일 정합성 Vision 검증
+// Pipeline A - Step 3: 원본 미디어 vs 커머스 썸네일 정합성 Vision 검증
 
 const VisionMatchResultSchema = z.object({
   matched: z.boolean(),
@@ -36,37 +37,31 @@ export interface VisionMatchInput {
   productThumbnailUrl: string;
 }
 
-type UserContent = Array<
-  | { type: 'text'; text: string }
-  | { type: 'image'; source: { type: 'url'; url: string } }
->;
-
 export async function verifyProductMatch(input: VisionMatchInput): Promise<VisionMatchResult> {
-  const userContent: UserContent = [
+  const userParts: LlmContentPart[] = [
     { type: 'text', text: '이미지 A: 원본 소셜미디어 게시물' },
-    { type: 'image', source: { type: 'url', url: input.sourceImageUrl } },
+    { type: 'image', url: input.sourceImageUrl },
     { type: 'text', text: '이미지 B: 쿠팡/무신사 상품 썸네일' },
-    { type: 'image', source: { type: 'url', url: input.productThumbnailUrl } },
+    { type: 'image', url: input.productThumbnailUrl },
     { type: 'text', text: '두 이미지를 비교해 JSON으로만 판정하세요.' },
   ];
 
-  const response = await anthropic.messages.create({
-    model: MODELS.SONNET,
-    max_tokens: 512,
+  const response = await llm().complete({
+    tier: 'main',
     system: SYSTEM_PROMPT,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    messages: [{ role: 'user', content: userContent as any }],
+    userParts,
+    maxOutputTokens: 512,
+    temperature: 0.2,
+    jsonMode: true,
   });
 
-  const block = response.content.find((b) => b.type === 'text');
-  if (!block || block.type !== 'text') throw new Error('no text block in vision-match response');
-  const raw = block.text
+  const raw = response.text
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```\s*$/i, '')
     .trim();
 
   const parsed = JSON.parse(raw);
   const result = VisionMatchResultSchema.parse(parsed);
-  logger.debug({ result }, 'verifyProductMatch');
+  logger.debug({ result, provider: response.provider }, 'verifyProductMatch');
   return result;
 }

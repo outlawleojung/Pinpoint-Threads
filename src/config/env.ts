@@ -12,9 +12,15 @@ const envSchema = z.object({
   REDIS_PORT: z.coerce.number().default(6379),
   REDIS_PASSWORD: z.string().optional(),
 
-  ANTHROPIC_API_KEY: z.string().min(1),
+  LLM_PROVIDER: z.enum(['anthropic', 'gemini']).default('gemini'),
+
+  ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_MODEL_SONNET: z.string().default('claude-sonnet-5'),
   ANTHROPIC_MODEL_HAIKU: z.string().default('claude-haiku-4-5-20251001'),
+
+  GEMINI_API_KEY: z.string().optional(),
+  GEMINI_MODEL_MAIN: z.string().default('gemini-2.5-pro'),
+  GEMINI_MODEL_FAST: z.string().default('gemini-2.5-flash'),
 
   META_APP_ID: z.string().optional(),
   META_APP_SECRET: z.string().optional(),

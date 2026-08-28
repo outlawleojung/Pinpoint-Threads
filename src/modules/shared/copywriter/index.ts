@@ -1,6 +1,6 @@
-import type Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
-import { anthropic, MODELS } from '../../../infra/anthropic-client.js';
+import { llm } from '../../../infra/llm/index.js';
+import type { LlmContentPart } from '../../../infra/llm/index.js';
 import { logger } from '../../../config/logger.js';
 
 /**
@@ -9,8 +9,7 @@ import { logger } from '../../../config/logger.js';
  * 핵심 설계:
  * - 본문(body): 이미지 1장 기반 짧은 한 문장 (18~60자, 최대 2줄).
  *   광고 티 없이 "친구가 방금 겪은 일" 톤. 링크/브랜드/가격/구매처/홍보 표현 금지.
- * - 고정 댓글(reply): 결정론적 템플릿으로 조립 (AI 미개입).
- *   "정보 물어보시는 분들 많아서 링크 남겨요" + 딥링크 + 공정위 필수 문구.
+ * - 고정 댓글(reply): 결정론적 템플릿으로 조립 (AI 미개입, Reply Composer 참조).
  */
 
 export const LEGAL_DISCLAIMER =
@@ -68,42 +67,34 @@ const BASE_SYSTEM_PROMPT = `너는 한국 Threads 피드에 자연스럽게 섞�
 JSON으로만 반환. 다른 텍스트 금지.
 { "body": "여기에 문장 1개" }`;
 
-type UserContent = Array<
-  | { type: 'text'; text: string }
-  | { type: 'image'; source: { type: 'url'; url: string } }
->;
-
 async function generateBody(input: CopywriteInput, seedIndex: number): Promise<string> {
   const persona = input.personaPrompt
     ? `\n\n== 이 계정의 페르소나 (seed=${input.accountSeed}, variant=${seedIndex}) ==\n${input.personaPrompt}`
     : '';
   const system = BASE_SYSTEM_PROMPT + persona;
 
-  const userContent: UserContent = [
-    { type: 'image', source: { type: 'url', url: input.sourceImageUrl } },
-  ];
+  const userParts: LlmContentPart[] = [{ type: 'image', url: input.sourceImageUrl }];
   if (input.sourceText) {
-    userContent.push({
+    userParts.push({
       type: 'text',
       text: `참고 원문(문장 참고용, 그대로 옮기지 말 것):\n"""\n${input.sourceText}\n"""`,
     });
   }
-  userContent.push({
+  userParts.push({
     type: 'text',
     text: `상품 카테고리 참고: ${input.productCategory ?? '알 수 없음'}\n\n이미지 기반으로 문장 1개만 JSON으로.`,
   });
 
-  const response = await anthropic.messages.create({
-    model: MODELS.SONNET,
-    max_tokens: 256,
+  const response = await llm().complete({
+    tier: 'main',
     system,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    messages: [{ role: 'user', content: userContent as any }],
+    userParts,
+    maxOutputTokens: 256,
+    temperature: 0.9 + seedIndex * 0.05,
+    jsonMode: true,
   });
 
-  const block = response.content.find((b) => b.type === 'text');
-  if (!block || block.type !== 'text') throw new Error('no text block in copywriter response');
-  const raw = block.text
+  const raw = response.text
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```\s*$/i, '')
     .trim();
@@ -116,6 +107,8 @@ async function generateBody(input: CopywriteInput, seedIndex: number): Promise<s
 /**
  * 고정 댓글은 AI 없이 결정론적 템플릿.
  * CLAUDE.md §4.3 법적 필수 문구 강제.
+ * (실제 4양식 다변화는 modules/pipeline-a/reply-composer에서 담당.
+ *  여기는 fallback용 단순 조립.)
  */
 export function buildReply(deeplinkUrl: string): string {
   return [
@@ -134,10 +127,6 @@ export async function generateCopy(input: CopywriteInput): Promise<CopywriteResu
   return result;
 }
 
-/**
- * 재생성 요청 시 여러 후보를 한 번에.
- * "쿠파스 게시글 생성기"가 피드백 시 보통 3개 후보를 다시 주는 패턴을 반영.
- */
 export async function generateBodyVariants(
   input: CopywriteInput,
   count = 3,

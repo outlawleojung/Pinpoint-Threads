@@ -1,6 +1,6 @@
-import type Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
-import { anthropic, MODELS } from '../../../infra/anthropic-client.js';
+import { llm } from '../../../infra/llm/index.js';
+import type { LlmContentPart } from '../../../infra/llm/index.js';
 import { logger } from '../../../config/logger.js';
 
 // CLAUDE.md §2 Pipeline A - Step 2: 소비재 적합성 필터링 + 카테고리 + 검색 키워드
@@ -55,44 +55,29 @@ export interface ClassifyInput {
   mediaUrls: string[];
 }
 
-type UserContent = Array<
-  | { type: 'text'; text: string }
-  | { type: 'image'; source: { type: 'url'; url: string } }
->;
-
 export async function classifySourceItem(input: ClassifyInput): Promise<ClassifyResult> {
-  const userContent: UserContent = [];
+  const userParts: LlmContentPart[] = [];
 
   for (const url of input.mediaUrls.slice(0, 4)) {
-    userContent.push({
-      type: 'image',
-      source: { type: 'url', url },
-    });
+    userParts.push({ type: 'image', url });
   }
-  userContent.push({
+  userParts.push({
     type: 'text',
     text: `원문:\n"""\n${input.text}\n"""\n\n판정 결과를 JSON으로만 반환.`,
   });
 
-  const response = await anthropic.messages.create({
-    model: MODELS.HAIKU,
-    max_tokens: 512,
+  const response = await llm().complete({
+    tier: 'fast',
     system: SYSTEM_PROMPT,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    messages: [{ role: 'user', content: userContent as any }],
+    userParts,
+    maxOutputTokens: 512,
+    jsonMode: true,
   });
 
-  const raw = extractText(response);
-  const parsed = parseJson(raw);
+  const parsed = parseJson(response.text);
   const result = ClassifyResultSchema.parse(parsed);
-  logger.debug({ result }, 'classifySourceItem');
+  logger.debug({ result, provider: response.provider }, 'classifySourceItem');
   return result;
-}
-
-function extractText(resp: Anthropic.Message): string {
-  const block = resp.content.find((b) => b.type === 'text');
-  if (!block || block.type !== 'text') throw new Error('no text block in classify response');
-  return block.text;
 }
 
 function parseJson(raw: string): unknown {
