@@ -9,6 +9,7 @@ import { generateCopy } from '../copywriter/index.js';
 import { verifyProductMatch } from '../../pipeline-a/vision-verifier/index.js';
 import { CoupangAdapter } from '../../../infra/commerce/coupang-client.js';
 import { composeReply } from '../../pipeline-a/reply-composer/index.js';
+import { matchProduct } from '../../pipeline-a/product-matcher/index.js';
 
 export const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
 
@@ -196,6 +197,53 @@ bot.command('deeplink', async (ctx) => {
     await ctx.reply(`🔗 딥링크\n${short}`);
   } catch (err) {
     logger.error(err, '/deeplink failed');
+    await ctx.reply(`❌ 실패: ${(err as Error).message}`);
+  }
+});
+
+// /matcher — Product Matcher 통합 검증 (Coupang 검색 + Vision Self-Correction Loop + 딥링크)
+bot.command('matcher', async (ctx) => {
+  const raw = ctx.match?.trim();
+  if (!raw) {
+    await ctx.reply(
+      '사용법: /matcher <이미지URL> | <검색키워드> [ | 카테고리]\n' +
+        '예: /matcher https://picsum.photos/seed/humidifier/600/600 | 무선 가습기 | 생활용품',
+    );
+    return;
+  }
+  const parts = raw.split('|').map((s) => s.trim());
+  const sourceImageUrl = parts[0] ?? '';
+  const searchKeyword = parts[1] || '무선 가습기';
+  const category = parts[2] || '생활용품';
+  if (!sourceImageUrl) {
+    await ctx.reply('이미지 URL이 필요합니다.');
+    return;
+  }
+
+  await ctx.reply(
+    `🔎 매칭 시도\n이미지: ${sourceImageUrl}\n키워드: ${searchKeyword}\n카테고리: ${category}\n\nCoupang 검색 → Vision 검증 → 딥링크 (최대 3회)`,
+  );
+  try {
+    const outcome = await matchProduct({ category, searchKeyword, sourceImageUrl, maxAttempts: 3 });
+
+    if (!outcome.success) {
+      await ctx.reply(
+        `❌ 매칭 실패\n사유: ${outcome.reason}\n시도: ${outcome.attempts}회`,
+      );
+      return;
+    }
+
+    const r = outcome.result;
+    await ctx.reply(
+      `✅ 매칭 성공 (시도 ${r.attempts}회, Vision score ${r.visionScore.toFixed(2)})\n\n` +
+        `상품명: ${r.product.productName}\n` +
+        `가격: ${r.product.price?.toLocaleString?.() ?? '?'}원\n` +
+        `채널: ${r.channel}\n\n` +
+        `원본 URL: ${r.product.productUrl}\n` +
+        `딥링크: ${r.deeplinkUrl}`,
+    );
+  } catch (err) {
+    logger.error(err, '/matcher failed');
     await ctx.reply(`❌ 실패: ${(err as Error).message}`);
   }
 });
