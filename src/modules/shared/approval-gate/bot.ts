@@ -7,6 +7,7 @@ import { PostState } from '@prisma/client';
 import { classifySourceItem } from '../content-classifier/index.js';
 import { generateCopy } from '../copywriter/index.js';
 import { verifyProductMatch } from '../../pipeline-a/vision-verifier/index.js';
+import { CoupangAdapter } from '../../../infra/commerce/coupang-client.js';
 
 export const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
 
@@ -29,7 +30,9 @@ bot.command('start', async (ctx) => {
       '- /classify : Claude 분류 테스트\n' +
       '- /copy : 게시글 카피 1개 생성\n' +
       '- /copy3 : 게시글 카피 3개 후보 생성\n' +
-      '- /vision : Claude Vision 이미지 정합성 테스트',
+      '- /vision : Claude Vision 이미지 정합성 테스트\n' +
+      '- /coupang <검색어> : 쿠팡 상품 검색 실 API 테스트\n' +
+      '- /deeplink <쿠팡URL> : 쿠팡 딥링크 생성 실 API 테스트',
   );
 });
 
@@ -124,6 +127,54 @@ bot.command('vision', async (ctx) => {
     );
   } catch (err) {
     logger.error(err, '/vision failed');
+    await ctx.reply(`❌ 실패: ${(err as Error).message}`);
+  }
+});
+
+// 쿠팡 실 API — 상품 검색
+bot.command('coupang', async (ctx) => {
+  const keyword = ctx.match?.trim() || '무선 가습기';
+  await ctx.reply(`쿠팡 검색 중: "${keyword}"...`);
+  try {
+    const adapter = new CoupangAdapter(
+      env.COUPANG_ACCESS_KEY ?? '',
+      env.COUPANG_SECRET_KEY ?? '',
+    );
+    const results = await adapter.search(keyword, { limit: 5 });
+    if (!results.length) {
+      await ctx.reply('결과 없음');
+      return;
+    }
+    const summary = results
+      .slice(0, 5)
+      .map((r, i) =>
+        `${i + 1}. ${r.productName}\n   ₩${r.price?.toLocaleString?.() ?? '?'} · ${r.channel}\n   ${r.productUrl}`,
+      )
+      .join('\n\n');
+    await ctx.reply(`🛒 쿠팡 검색 결과 (${results.length})\n\n${summary}`);
+  } catch (err) {
+    logger.error(err, '/coupang failed');
+    await ctx.reply(`❌ 실패: ${(err as Error).message}`);
+  }
+});
+
+// 쿠팡 실 API — 딥링크 생성
+bot.command('deeplink', async (ctx) => {
+  const url = ctx.match?.trim();
+  if (!url) {
+    await ctx.reply('사용법: /deeplink <쿠팡상품URL>\n예: /deeplink https://www.coupang.com/vp/products/12345');
+    return;
+  }
+  await ctx.reply(`딥링크 생성 중...`);
+  try {
+    const adapter = new CoupangAdapter(
+      env.COUPANG_ACCESS_KEY ?? '',
+      env.COUPANG_SECRET_KEY ?? '',
+    );
+    const short = await adapter.generateDeeplink(url);
+    await ctx.reply(`🔗 딥링크\n${short}`);
+  } catch (err) {
+    logger.error(err, '/deeplink failed');
     await ctx.reply(`❌ 실패: ${(err as Error).message}`);
   }
 });
