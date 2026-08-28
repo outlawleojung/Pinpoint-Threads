@@ -2,6 +2,13 @@
 
 프로젝트의 모든 설계·규칙·의사결정 문서 카탈로그. 어느 AI든 이 파일을 먼저 읽고 필요한 문서만 부분 로드하세요.
 
+## 🔴 세션 시작 필수 (다른 것보다 먼저)
+
+- [STATE](STATE.md) — 현재 프로젝트 상태 스냅샷 (Phase, 검증 완료, credential 상태)
+- [TASKS](TASKS.md) — 21개 태스크 체크리스트 (완료·미완료·사용자 액션 대기)
+- [session-log/](session-log/) 최신 파일 — 이전 세션 인수인계
+- [ROADMAP](ROADMAP.md) — Priority 매트릭스 (덜 자주 갱신)
+
 ## 00-overview
 - [vision](00-overview/vision.md) — 프로젝트 목적, 수익 모델, 성공 지표
 - [glossary](00-overview/glossary.md) — 스하리, 쿠파스, CIB 등 용어 정의
