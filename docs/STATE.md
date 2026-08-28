@@ -57,12 +57,12 @@ Last commit: `d8b0c3c` (pending: Reply Composer 재설계 반영)
 | `COUPANG_ACCESS_KEY` | ✅ | 실 API 통과 확인 |
 | `COUPANG_SECRET_KEY` | ✅ | HMAC 서명 통과 |
 | `GEMINI_API_KEY` | ✅ | 있으나 현재 미사용 |
-| `ANTHROPIC_API_KEY` | ✅ | **재발급** Claude Code workspace, never expires |
+| `ANTHROPIC_API_KEY` | ✅ | Claude Code workspace, never expires |
 | `CLOUDINARY_CLOUD_NAME` | ✅ | `xwqbwrs1` |
 | `CLOUDINARY_API_KEY` | ✅ | |
-| `CLOUDINARY_API_SECRET` | ⏳ | **사용자님이 .env 직접 입력 필요** |
+| `CLOUDINARY_API_SECRET` | ✅ | 사용자 .env 입력 완료 |
 | `META_APP_ID` | ✅ | 저장됨 |
-| `META_APP_SECRET` | ⚠️ | **노출된 값 재발급 필요** |
+| `META_APP_SECRET` | ✅ | 재발급 완료 |
 | `TELEGRAM_BOT_TOKEN` | ✅ | 봇 롱폴링 정상 |
 | `TELEGRAM_ADMIN_CHAT_ID` | ✅ | |
 
@@ -76,8 +76,6 @@ Last commit: `d8b0c3c` (pending: Reply Composer 재설계 반영)
 
 ## 주의 사항
 
-- **`META_APP_SECRET` 노출 상태** — 사용자님이 재발급 필요
-- **`CLOUDINARY_API_SECRET`** — .env 입력 필요 (Media Handler 실 사용 시)
 - **Telegram 봇 debug 명령** — Phase 4 이후 관리자 전용 or 제거 예정
 
 ## 인프라 로드맵

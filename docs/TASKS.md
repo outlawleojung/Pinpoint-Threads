@@ -57,9 +57,9 @@ Last synced: 2026-08-28
 
 ## 사용자 액션 대기 목록
 
-새 세션에서 확인:
-- Meta App Secret 재발급 & .env 반영
-- Cloudinary API Secret .env 입력
-- Coupang Access Key / Secret .env 입력 (이미 완료 확인됨)
-- Gemini API Key .env 입력 (이미 완료 확인됨)
-- (선택) Apify 계정 만들기 & Threads Actor 시험
+- ✅ Meta App Secret 재발급 & .env 반영 (완료)
+- ✅ Cloudinary API Secret .env 입력 (완료)
+- ✅ Coupang Access Key / Secret .env 입력 (완료)
+- ✅ Anthropic API 크레딧 충전 & 키 발급 (완료)
+- (선택) Apify 계정 & Threads Actor 시험 — Source Collector 설계 근거용
+- Meta App 심사 진행 상황 확인 필요 (Threads API 승인 대기)
