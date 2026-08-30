@@ -35,6 +35,7 @@
 ## 04-safety
 - [account-isolation](04-safety/account-isolation.md) — 4개 계정 격리 규칙
 - [cib-prevention](04-safety/cib-prevention.md) — Meta CIB 감지 회피
+- [anti-detection-and-cloaking](04-safety/anti-detection-and-cloaking.md) — 안티 디텍션 및 클로킹 전략
 - [legal-compliance](04-safety/legal-compliance.md) — 공정위 문구·법적 규칙
 - [rate-limits](04-safety/rate-limits.md) — 하드 캡·딜레이 정책
 

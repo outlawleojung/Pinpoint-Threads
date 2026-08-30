@@ -9,7 +9,7 @@ status: "active"
 **새 세션 시작 시 이 파일을 먼저 읽으세요.**
 
 Last updated: 2026-08-30
-Last commit: `662760d` (pending: 이번 세션 전략 브레인스토밍 반영)
+Last commit: `53dedbb` (docs: 안티 디텍션 및 클로킹 전략 설계 문서 추가)
 
 ## Phase & 진행률
 
