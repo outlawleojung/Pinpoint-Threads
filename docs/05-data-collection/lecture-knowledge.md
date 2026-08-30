@@ -1,0 +1,63 @@
+---
+title: "강의 지식 추출 파이프라인"
+tags: ["data-collection", "knowledge", "lecture", "whisper"]
+related: ["strategy", "rag-design"]
+last_updated: "2026-08-29"
+status: "planned"
+---
+
+# 강의 지식 추출 파이프라인
+
+## 목적
+
+스레드 수익화 강의 (네이버 카페, 8~10개 영상, 각 4~8시간)에서 실전 노하우를 추출하여 AI 모듈(Copywriter, Classifier 등)의 프롬프트 품질을 높인다.
+
+## 왜 중요한가
+
+- 이 프로젝트의 수익은 AI 콘텐츠 품질에 직결
+- 강의에 "터지는 글의 공식", 실전 패턴, 실수 사례 등 알짜 정보가 집약
+- 이 지식이 프롬프트에 반영되면 Copywriter/Classifier의 정밀도가 본질적으로 달라짐
+
+## 실행 계획
+
+### Step 1: 영상 녹화 (사용자 — ~10일)
+
+- 네이버 카페 자체 플레이어 → 직접 다운로드 불가
+- **방법**: 잠자기 전 영상 재생 + OBS 녹화 시작, 아침에 정지
+- 하루 1개씩, 약 10일 소요
+- 팁: 시스템 오디오만 녹음하면 파일 크기 대폭 절감 (BlackHole + OBS 오디오만 캡처)
+
+### Step 2: 음성 → 텍스트 전사 (AI)
+
+- **Whisper large-v3** (한국어 최적)
+- 로컬 실행 or Whisper API
+- 4시간 영상 → 약 A4 50~80페이지 텍스트
+- 타임스탬프 포함 전사 → 나중에 원본 구간 참조 가능
+
+### Step 3: 지식 구조화 (AI)
+
+전사본을 Claude에 넣고 목적별 추출:
+
+| 추출 카테고리 | 대상 모듈 | 예시 |
+|---|---|---|
+| 터지는 글의 패턴/공식 | Copywriter, Classifier | 구조, 훅, 톤, 길이 |
+| 상품 선정 노하우 | Product Matcher | 어떤 상품이 전환되는가 |
+| 절대 하면 안 되는 것 | Safety, Rate Limits | 계정 정지 사례 |
+| 수익화 전환 전략 | Pipeline A 전체 | 링크 배치, CTA |
+| 계정 운영 전략 | Planner Auditor | 발행 빈도, 타이밍 |
+| 팔로워 성장 전술 | Pipeline B | 스하리 실전 패턴 |
+
+### Step 4: 프로젝트 반영
+
+- `docs/05-data-collection/lecture-insights/` 에 카테고리별 정리
+- Copywriter/Classifier 프롬프트에 핵심 패턴 주입
+- RAG 전환 시 벡터 DB에 임베딩 소스로 활용
+
+## 현재 상태
+
+- [ ] OBS + 오디오 캡처 환경 세팅
+- [ ] 영상 녹화 시작 (하루 1개씩)
+- [ ] Whisper 전사 환경 준비
+- [ ] 전사본 지식 추출
+- [ ] 프로젝트 문서 반영
+- [ ] 프롬프트 반영

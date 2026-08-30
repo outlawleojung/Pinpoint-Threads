@@ -1,6 +1,6 @@
 ---
 title: "Current State"
-last_updated: "2026-08-28"
+last_updated: "2026-08-30"
 status: "active"
 ---
 
@@ -8,12 +8,12 @@ status: "active"
 
 **새 세션 시작 시 이 파일을 먼저 읽으세요.**
 
-Last updated: 2026-08-28 17:15
-Last commit: `d8b0c3c` (pending: Reply Composer 재설계 반영)
+Last updated: 2026-08-30
+Last commit: `662760d` (pending: 이번 세션 전략 브레인스토밍 반영)
 
 ## Phase & 진행률
 
-- **Phase**: 3 → 완료 임박 (Priority 3 100% 예상)
+- **Phase**: 3 완료, Phase 4 대기
 - **Task 완료**: 16/21 (76%)
 - **Priority 3 (Pipeline A 실 구현)**: 8/8 ✅
 - **다음 Milestone**: Meta 승인 대기 → Phase 4 (Publisher)
@@ -27,13 +27,13 @@ Last commit: `d8b0c3c` (pending: Reply Composer 재설계 반영)
 | Coupang HMAC + Search + Deeplink | ✅ | 실 API 통신 검증 (`/coupang`, `/deeplink`) |
 | Content Classifier | ✅ | `/classify` JSON 응답 정상 |
 | Copywriter 4양식 다변화 | ✅ | `/copy 1~4` 모두 정확 |
-| Reply Composer | ✅ | 계정×요일 해시 다변화 |
+| Reply Composer | ✅ | AI 감초 톤 매번 생성 |
 | Media Handler | ✅ | uploadFromUrl 구현 |
 | Telegram 승인 UI | ✅ | 인라인 키보드 콜백 → 상태 전이 |
 | 12-module 재구조화 | ✅ | infra/ + modules/ 완료 |
 | Meta App 등록 & 5 테스터 | ✅ | 개발 모드 활성 |
-| **Vision Verifier** | ✅ **NEW** | `/vision` Anthropic Sonnet base64 인라인, 0.05 판정 정확 |
-| **Product Matcher 통합** | ✅ **NEW** | `/matcher` 실 검증, score 0.75, 1회 시도, deeplink 생성 |
+| Vision Verifier | ✅ | `/vision` Anthropic Sonnet base64 인라인, 0.05 판정 정확 |
+| Product Matcher 통합 | ✅ | `/matcher` 실 검증, score 0.75, 1회 시도, deeplink 생성 |
 
 ## LLM Provider 현황
 
@@ -45,9 +45,9 @@ Last commit: `d8b0c3c` (pending: Reply Composer 재설계 반영)
 
 ## 진행 중 / 다음
 
-- 다음 우선 순위 1: **Task #3h Pipeline A e2e** — 모든 노드 조립 검증
-- 다음 우선 순위 2: Task #4 Apify (사용자 액션 대기)
-- Meta 앱 승인 후 Phase 4 진입
+- **Meta 앱 승인 대기 중** → 승인 나면 Phase 4 진입
+- 병행 가능: 강의 영상 녹화 (사용자 — 하루 1개씩, ~10일)
+- 병행 가능: Pipeline B/C 상세 설계
 
 ## Credential 상태
 
@@ -81,21 +81,11 @@ Last commit: `d8b0c3c` (pending: Reply Composer 재설계 반영)
 ## 미결 전략 논의
 
 - **무신사 큐레이터 활용 방식** (2026-08-28 논의 - 공식 가이드 확인)
-  - Attribution: 직접 기여 10% (동일 상품), 간접 기여 2% (다른 상품)
-  - **링크 2종류**:
-    - 상품 개별 제휴 링크 (특정 상품)
-    - 큐레이터샵 링크 (편집샵, 프로필에 걸어두는 용)
-  - **큐레이터샵 = 자동화 없이 즉시 수익 가능**:
-    - 한 번 세팅한 편집샵 링크를 계정 프로필에 등록
-    - 팔로워 프로필 클릭 → 편집샵 → 구매 시 수익
-    - 매 게시글 자동화와 별개로 실행 가능
-  - **상품 개별 링크 API 존재 여부 미확인** — 대시보드에서 확인 필요
-  - 광고 표기 채널별 분기 필요:
-    - 쿠팡: "이 포스팅은 쿠팡 파트너스 활동의 일환으로..."
-    - 무신사 상품: "본 링크는 무신사 큐레이터 활동의 일환으로..."
-    - 무신사 편집샵: "큐레이터샵은 무신사 큐레이터 활동의 일환으로..."
-  - **잠정 전략**: 큐레이터샵 세팅부터 시작 (수동, 이번 주 가능), 상품 개별 자동화는 API 확인 후
-  - 참고: [docs/01-pipelines/A-shopping.md § 9.2](../01-pipelines/A-shopping.md)
+  - 상세: [docs/08-decisions/pending-musinsa-strategy.md](08-decisions/pending-musinsa-strategy.md)
+  - 잠정 전략: 큐레이터샵 세팅부터 시작 (수동), 상품 개별 자동화는 API 확인 후
+- **Threads API 팔로우 엔드포인트 없음** (2026-08-29 확인)
+  - Pipeline B 반하리는 반자동으로 결정 (감지는 시스템, 팔로우는 사용자)
+  - 상세: [docs/01-pipelines/B-suhari.md § 9.3](01-pipelines/B-suhari.md)
 
 ## 인프라 로드맵
 

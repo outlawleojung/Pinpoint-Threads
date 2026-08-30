@@ -23,6 +23,7 @@
 - [state-machine](02-architecture/state-machine.md) — Post 상태 전이 규칙
 - [data-flow](02-architecture/data-flow.md) — 파이프라인별 데이터 흐름도
 - [folder-layout](02-architecture/folder-layout.md) — src 폴더 구조
+- [content-dashboard](02-architecture/content-dashboard.md) — 발행 이력 조회 + 수동 재발행 대시보드
 
 ## 03-infrastructure
 - [local-dev](03-infrastructure/local-dev.md) — 로컬 부팅 가이드
@@ -42,6 +43,7 @@
 - [benchmark-schema](05-data-collection/benchmark-schema.md) — BenchmarkPost 스키마
 - [rag-design](05-data-collection/rag-design.md) — 벡터 검색·Few-shot 설계
 - [self-improvement](05-data-collection/self-improvement.md) — 발행 성과 회수 루프
+- [lecture-knowledge](05-data-collection/lecture-knowledge.md) — 수익화 강의 → Whisper 전사 → 지식 추출 파이프라인
 
 ## 06-accounts
 - [personas](06-accounts/personas.md) — 4계정 페르소나 정의

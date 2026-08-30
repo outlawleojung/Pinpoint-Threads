@@ -41,6 +41,14 @@ model BenchmarkPost {
   category            String?           // 의류·뷰티·생활용품 등
   pipelineFit         Json              // {"A": 0.9, "B": 0.1, "C": 0.5} - 어느 파이프라인에 적합한 지 점수
 
+  // 트렌드 분석 (AI가 수집 시 추출)
+  brandNames          String[]          // 언급된 브랜드명
+  productCategory     String?           // 세분화 카테고리 (예: "여름 샌들", "다이어트 보조제")
+  seasonalTag         String?           // 계절성 태그 (spring/summer/fall/winter/evergreen)
+  trendKeywords       String[]          // 트렌드 키워드 (예: ["올영세일", "여름코디", "쿨톤"])
+  viralFactors        Json?             // AI 분석: 왜 터졌는가 {"hook": "...", "tone": "...", "structure": "...", "cta": "..."}
+  collectedAt         DateTime          // 수집 시점 (트렌드 시계열 분석용)
+
   // 성과 지표
   engagementScore     Float             // 종합 점수 (likes·comments·reposts·author_followers 보정)
   lastReactionSnapshot Json             // {"likes": 342, "comments": 87, "reposts": 15, "capturedAt": "..."}
