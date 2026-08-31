@@ -8,13 +8,14 @@ status: "active"
 
 **새 세션 시작 시 이 파일을 먼저 읽으세요.**
 
-Last updated: 2026-08-31
-Last commit: `146d01b` (config: BENCHMARK_AUTO_PROMOTE_MIN_LIKES 3000 → 500)
+Last updated: 2026-08-31 (데이터 수집 재검증 후)
+Last commit: `8735a2e` (docs: 실서버 배포 전략)
 
 ## Phase & 진행률
 
-- **Phase**: **4 완료 + Lane 1·2 완전 구축** (실 발행 e2e만 남음)
-- **Task 완료**: **40/41 (98%)**
+- **Phase**: **4 — 데이터 수집 재설계 중**
+- **Task 완료**: 40/41 기존 체크리스트 + **데이터 수집 실 검증 결과 5개 소스 고장 발견**
+- **핵심 변경**: 콘텐츠 어댑터 4개 + Google Trends 라이브러리 실 테스트 전멸 → 재설계 진행 중
 - Priority 3 (Pipeline A): 8/8 ✅
 - Priority 4 (발행): 4/5 (실 발행 테스트만 대기)
 - Priority 5 (Source Collector · 벤치마크): 5/5 ✅
@@ -35,9 +36,9 @@ Last commit: `146d01b` (config: BENCHMARK_AUTO_PROMOTE_MIN_LIKES 3000 → 500)
 | Publisher (2-step + carousel + 고정 댓글) | ✅ | 코드 완성, 실 API 호출은 #4c에서 |
 | Publisher 스케줄러 (BullMQ delayed) | ✅ | 활성 시간대 · 계정 시차 · 일일 상한 |
 | Performance Collector (24h/72h) | ✅ | insights 자동 회수 · engagementScore |
-| URL Ingester (4개 플랫폼) | ✅ | Threads · TikTok · IG · 샤오홍슈 |
+| URL Ingester (4개 플랫폼) | 🔴 재설계 | OG 파싱 전멸 → Apify 전환 중 |
 | 다국어·페르소나 Copywriter | ✅ | 원본 언어 무관 · 계정별 재창조 · RAG few-shot |
-| 자율 트렌드 (4개 소스) | ✅ | 네이버·구글·쿠팡·TikTok CC · BullMQ 6h cron |
+| 자율 트렌드 (4개 소스) | 🟡 부분 작동 | 쿠팡 ✅ · Google RSS ✅(교체완료) · 네이버 ⚪미설정 · TikTok CC 미검증 |
 | 트렌드 → 플랫폼 검색 오케스트레이터 | ✅ | 매일 08:30 · Apify 키워드 검색 · 자동 인제스트 |
 | 벤치마크 승격 파이프라인 | ✅ | 자동(likes≥500) + 수동 · 자동 태깅·임베딩 |
 | viralFactors AI 태깅 | ✅ | Claude Haiku 6축 분해 (hook·structure·tone·length·cta·topic) |
@@ -53,20 +54,27 @@ Last commit: `146d01b` (config: BENCHMARK_AUTO_PROMOTE_MIN_LIKES 3000 → 500)
 
 ## 진행 중 / 다음
 
-**남은 유일 태스크: #4c 실 계정 발행 e2e** (사용자 요청으로 보류 중, 준비되면 즉시 재개)
+### 🔴 데이터 수집 재설계 (진행 중)
 
-### 즉시 사용 가능
+실 URL/API 검증 결과 5개 소스 고장 발견. 전략 v2 수립 완료, 구현 진행 중.
 
-- 텔레그램 봇에 URL 던지기 → 자동 인제스트 · 벤치마크 자동 승격
-- `/admin/*` 어드민 UI (로그인 필요)
-- BullMQ 워커 실행 시 매일 트렌드 다이제스트
+**완료:**
+1. ~~Google Trends RSS 교체~~ — `google-trends-api` 라이브러리 제거, RSS 직접 파싱으로 교체
+2. ~~Threads/IG 어댑터 Apify 우선 전환~~ — 코드 작성 완료 (Apify 토큰 설정 시 활성화)
+3. ~~env.ts에 APIFY_ACTOR_THREADS_URL/IG_URL/TIKTOK_URL 추가~~
+
+**다음:**
+4. 텔레그램 `/seed` 텍스트 직접 입력 경로 (Apify 없이 작동하는 최소 경로)
+5. TikTok oEmbed 디버깅 (실패 시 Apify 전환)
+6. 쿠팡 Search productPrice 매핑 수정
+
+**발행 e2e (#4c)**: 데이터 수집 정상화 후 재개
 
 ### 병행 대기 (사용자님)
 
+- **Apify 가입 + 토큰 발급** — Threads/IG/TikTok URL fetch 활성화 핵심 선행
+- 네이버 데이터랩 API 신청 (무료, 5분)
 - Voyage API 키 재발급 (채팅 노출)
-- `.env`의 `VOYAGEAI_API_KEY` → `VOYAGE_API_KEY` 이름 정정
-- Apify 가입 · 샤오홍슈 액터 선정 (Lane 2 완전 활성화)
-- 네이버 데이터랩 API 신청 (Lane 2 국내 트렌드 활성화)
 - 5계정 페르소나 편집 (`/admin/personas`)
 - 실 발행 시작 결정 (#4c)
 

@@ -1,22 +1,7 @@
 import { request } from 'undici';
 import { logger } from '../../../../config/logger.js';
-
-/**
- * Instagram URL Adapter.
- *
- * 지원 URL 형태:
- *   /p/{shortcode}/    (게시글)
- *   /reel/{shortcode}/ (릴스)
- *   /tv/{shortcode}/   (IGTV)
- *   instagr.am 단축링크
- *
- * 전략:
- *   - 게스트로 HTML 페이지 조회 + Open Graph 파싱 (공개 게시글만)
- *   - Instagram은 봇 감지 강함. 실패 시 Apify fallback (미구현)로 안내
- *
- * 획득: og:image · og:description · og:title (caption)
- * 미획득: 좋아요/댓글 수, 다중 미디어 (caroulsel), 저자 팔로워 수
- */
+import { env } from '../../../../config/env.js';
+import { runActorSync, isApifyConfigured } from '../../../../infra/apify-client.js';
 
 export interface InstagramAdapterInput {
   url: string;
@@ -34,11 +19,8 @@ export interface InstagramAdapterResult {
     likes?: number;
     comments?: number;
   };
-  raw: {
-    ogTitle: string | null;
-    ogDescription: string | null;
-    ogImage: string | null;
-  };
+  raw: Record<string, unknown>;
+  fetchMethod: 'apify' | 'og-fallback';
 }
 
 const USER_AGENT =
@@ -54,6 +36,12 @@ export class InstagramFetchError extends Error {
   }
 }
 
+/**
+ * Instagram 게시글 fetch — Apify 우선, OG fallback.
+ *
+ * Meta는 비로그인 서버 요청에 빈 OG 태그를 반환하므로 OG 파싱은 거의 항상 빈 결과.
+ * Apify actor (예: apify/instagram-post-scraper) 가 설정되어 있으면 그것을 사용.
+ */
 export async function fetchInstagramPost(
   input: InstagramAdapterInput,
 ): Promise<InstagramAdapterResult> {
@@ -62,25 +50,160 @@ export async function fetchInstagramPost(
     throw new InstagramFetchError(`Not a recognized Instagram post URL: ${input.url}`);
   }
 
-  const res = await request(input.url, {
+  if (isApifyConfigured() && env.APIFY_ACTOR_IG_URL) {
+    try {
+      return await fetchViaApify(input.url, parsed);
+    } catch (err) {
+      logger.warn({ err, url: input.url }, 'instagram apify fetch failed, falling back to OG');
+    }
+  }
+
+  return fetchViaOg(input.url, parsed);
+}
+
+async function fetchViaApify(url: string, parsed: ParsedUrl): Promise<InstagramAdapterResult> {
+  const items = await runActorSync<Record<string, unknown>>({
+    actorId: env.APIFY_ACTOR_IG_URL!,
+    input: {
+      directUrls: [url],
+      startUrls: [{ url }],
+      urls: [url],
+      maxItems: 1,
+      resultsLimit: 1,
+    },
+    timeoutSecs: 120,
+  });
+
+  if (!items.length) {
+    throw new InstagramFetchError(`Apify actor returned 0 items for ${url}`);
+  }
+
+  const item = items[0] as Record<string, unknown>;
+  return normalizeApifyItem(item, url, parsed);
+}
+
+function normalizeApifyItem(
+  item: Record<string, unknown>,
+  url: string,
+  parsed: ParsedUrl,
+): InstagramAdapterResult {
+  const pick = <T = string>(...names: string[]): T | undefined => {
+    for (const n of names) {
+      const v = item[n];
+      if (v !== undefined && v !== null && v !== '') return v as T;
+    }
+    return undefined;
+  };
+
+  const text = (pick<string>('caption', 'text', 'description', 'content') as string) ?? '';
+  const authorHandle =
+    (pick<string>('ownerUsername', 'username', 'authorHandle', 'author') as string) ?? null;
+
+  const mediaUrls: string[] = [];
+  const imagesRaw = pick<unknown>('images', 'displayUrls', 'mediaUrls', 'sidecarImages', 'carouselMedia');
+  if (Array.isArray(imagesRaw)) {
+    for (const m of imagesRaw) {
+      if (typeof m === 'string') mediaUrls.push(m);
+      else if (m && typeof m === 'object') {
+        const asObj = m as Record<string, unknown>;
+        const u = (asObj.url ?? asObj.src ?? asObj.displayUrl) as string | undefined;
+        if (u) mediaUrls.push(u);
+      }
+    }
+  }
+  const singleImage = pick<string>('displayUrl', 'imageUrl', 'thumbnailUrl', 'image');
+  if (singleImage && !mediaUrls.includes(singleImage)) mediaUrls.unshift(singleImage);
+
+  const videoUrl = pick<string>('videoUrl', 'video');
+  if (videoUrl && !mediaUrls.includes(videoUrl)) mediaUrls.push(videoUrl);
+
+  const publishedRaw = pick<unknown>('timestamp', 'takenAt', 'publishedAt', 'date');
+  const publishedAt = parseDate(publishedRaw);
+
+  const engagement = {
+    likes: toNum(pick<unknown>('likesCount', 'likes', 'likeCount')),
+    comments: toNum(pick<unknown>('commentsCount', 'comments', 'commentCount')),
+  };
+
+  const result: InstagramAdapterResult = {
+    authorHandle,
+    shortcode: (pick<string>('shortCode', 'shortcode', 'id') as string) ?? parsed.shortcode,
+    permalink: (pick<string>('url', 'permalink') as string) ?? url,
+    text,
+    mediaUrls,
+    publishedAt,
+    language: detectLanguage(text),
+    engagement,
+    raw: item,
+    fetchMethod: 'apify',
+  };
+
+  logger.info(
+    {
+      url,
+      author: result.authorHandle,
+      textLen: result.text.length,
+      mediaCount: result.mediaUrls.length,
+      method: 'apify',
+    },
+    'instagram adapter extraction complete',
+  );
+
+  return result;
+}
+
+async function fetchViaOg(url: string, parsed: ParsedUrl): Promise<InstagramAdapterResult> {
+  const res = await request(url, {
     method: 'GET',
     headers: {
       'user-agent': USER_AGENT,
-      accept:
-        'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+      accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       'accept-language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
     },
   });
 
   if (res.statusCode >= 400) {
     throw new InstagramFetchError(
-      `Instagram fetch failed: HTTP ${res.statusCode}. 봇 감지 or 비공개 게시글일 수 있음. Apify 백엔드(Task #5b) 필요.`,
+      `Instagram fetch failed: HTTP ${res.statusCode}`,
       res.statusCode,
     );
   }
 
   const html = await res.body.text();
-  return extractFromHtml(html, input.url, parsed);
+  const ogTitle = matchMeta(html, 'og:title');
+  const ogDescription = matchMeta(html, 'og:description');
+  const ogImage = matchMeta(html, 'og:image');
+  const ogUrl = matchMeta(html, 'og:url') ?? url;
+
+  const authorHandle = extractAuthor(ogTitle, ogDescription);
+  const text = extractCaption(ogDescription);
+  const mediaUrls = ogImage ? [ogImage] : [];
+  const engagement = extractEngagement(ogDescription);
+
+  const result: InstagramAdapterResult = {
+    authorHandle,
+    shortcode: parsed.shortcode,
+    permalink: ogUrl,
+    text,
+    mediaUrls,
+    publishedAt: null,
+    language: detectLanguage(text),
+    engagement,
+    raw: { ogTitle, ogDescription, ogImage },
+    fetchMethod: 'og-fallback',
+  };
+
+  logger.info(
+    {
+      url,
+      author: result.authorHandle,
+      textLen: result.text.length,
+      method: 'og-fallback',
+    },
+    'instagram adapter extraction complete (OG fallback)',
+  );
+
+  return result;
 }
 
 interface ParsedUrl {
@@ -99,62 +222,6 @@ function parseInstagramUrl(url: string): ParsedUrl | null {
   }
 }
 
-function extractFromHtml(
-  html: string,
-  url: string,
-  _parsed: ParsedUrl,
-): InstagramAdapterResult {
-  const ogTitle = matchMeta(html, 'og:title');
-  const ogDescription = matchMeta(html, 'og:description');
-  const ogImage = matchMeta(html, 'og:image');
-  const ogUrl = matchMeta(html, 'og:url') ?? url;
-
-  // og:description 포맷: "3,234 likes, 45 comments - @handle on <date>: "본문"."
-  // og:title 포맷: "@handle on Instagram: ..."
-  const authorHandle = extractAuthor(ogTitle, ogDescription);
-  const text = extractCaption(ogDescription);
-  const mediaUrls = ogImage ? [ogImage] : [];
-  const language = detectLanguage(text);
-  const engagement = extractEngagement(ogDescription);
-
-  const result: InstagramAdapterResult = {
-    authorHandle,
-    shortcode: _parsed.shortcode,
-    permalink: ogUrl,
-    text,
-    mediaUrls,
-    publishedAt: null,
-    language,
-    engagement,
-    raw: {
-      ogTitle,
-      ogDescription,
-      ogImage,
-    },
-  };
-
-  logger.info(
-    {
-      url,
-      author: result.authorHandle,
-      textLen: result.text.length,
-      mediaCount: result.mediaUrls.length,
-      language,
-    },
-    'instagram adapter extraction complete',
-  );
-
-  return result;
-}
-
-/**
- * OG description에서 좋아요·댓글 수 파싱.
- * 흔한 포맷:
- *   "1,234 likes, 45 comments - @handle on 2026-01-01: 본문"
- *   "1.2M likes, 3K comments - ..."
- *   "좋아요 1,234개, 댓글 45개 · @handle..."
- * Threshold: 매칭 실패 시 undefined (자동 승격 안 되게).
- */
 function extractEngagement(ogDescription: string | null): { likes?: number; comments?: number } {
   if (!ogDescription) return {};
   const out: { likes?: number; comments?: number } = {};
@@ -171,7 +238,6 @@ function extractEngagement(ogDescription: string | null): { likes?: number; comm
     return Math.round(num);
   };
 
-  // 영문 패턴
   const likesEn = /([\d.,]+[KMB]?)\s*likes?/i.exec(ogDescription);
   if (likesEn?.[1]) {
     const n = parseNumWithSuffix(likesEn[1]);
@@ -183,23 +249,10 @@ function extractEngagement(ogDescription: string | null): { likes?: number; comm
     if (!isNaN(n)) out.comments = n;
   }
 
-  // 한국어 패턴 (참고 · Instagram이 KR 로케일 요청 시)
-  const likesKo = /좋아요\s*([\d,]+)/i.exec(ogDescription);
-  if (likesKo?.[1] && out.likes === undefined) {
-    const n = parseNumWithSuffix(likesKo[1]);
-    if (!isNaN(n)) out.likes = n;
-  }
-  const commentsKo = /댓글\s*([\d,]+)/i.exec(ogDescription);
-  if (commentsKo?.[1] && out.comments === undefined) {
-    const n = parseNumWithSuffix(commentsKo[1]);
-    if (!isNaN(n)) out.comments = n;
-  }
-
   return out;
 }
 
 function extractAuthor(ogTitle: string | null, ogDescription: string | null): string | null {
-  // og:title 예: "@minyoung.jung on Instagram: "..."
   if (ogTitle) {
     const m = /^@?([^\s]+)\s+on\s+Instagram/i.exec(ogTitle);
     if (m) return m[1] ?? null;
@@ -213,7 +266,6 @@ function extractAuthor(ogTitle: string | null, ogDescription: string | null): st
 
 function extractCaption(ogDescription: string | null): string {
   if (!ogDescription) return '';
-  // 패턴: "1,234 likes, 45 comments - handle on 2026-01-01: "본문"."
   const m = /:\s*"?(.*?)"?\.?\s*$/s.exec(ogDescription);
   if (m && m[1]) return m[1].trim();
   return ogDescription.trim();
@@ -263,4 +315,24 @@ function detectLanguage(text: string): string | null {
   const top = scores[0];
   if (!top || top[1] < 3) return null;
   return top[0];
+}
+
+function parseDate(v: unknown): Date | null {
+  if (!v) return null;
+  if (v instanceof Date) return v;
+  if (typeof v === 'number') return new Date(v > 1e12 ? v : v * 1000);
+  if (typeof v === 'string') {
+    const d = new Date(v);
+    if (!isNaN(d.getTime())) return d;
+  }
+  return null;
+}
+
+function toNum(v: unknown): number | undefined {
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string') {
+    const n = Number(v);
+    if (!isNaN(n)) return n;
+  }
+  return undefined;
 }

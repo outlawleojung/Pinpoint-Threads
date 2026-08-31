@@ -2,9 +2,10 @@
 
 **이 파일은 Task tool의 세션-스코프 상태를 대체합니다.** 새 세션 시작 시 여기서 상태를 확인하고, 완료 시 체크박스를 업데이트.
 
-Last synced: 2026-08-31
+Last synced: 2026-08-31 (데이터 수집 재검증 후)
 
-**진행률: 40/41 완료 (98%)**
+**진행률: 40/41 기존 태스크 + 데이터 수집 재설계 진행 중**
+**⚠️ 주의: Priority 6 (URL 인제스터) · Priority 7 (자율 트렌드) 실 검증 결과 5개 소스 고장 발견.**
 
 ## Priority 1 — 외부 세팅 (사용자 + 저)
 
@@ -55,19 +56,19 @@ Last synced: 2026-08-31
 ## Priority 6 — URL 인제스터 (Lane 1 · 하류 공통)
 
 - [x] **6a. URL Ingester 프레임워크** — 텔레그램 봇 URL 자동 감지 · Adapter registry
-- [x] **6b. Threads URL Adapter** — HTML OG 파싱
+- [x] **6b. Threads URL Adapter** — ~~HTML OG 파싱~~ → 🔴 OG 전멸, Apify 전환 코드 완료 (토큰 설정 대기)
 - [x] **6c. 다국어·계정별 페르소나 Copywriter 확장** ★핵심 — 원본 언어 무관 · 페르소나로 완전 재창조
 - [x] **6d. 계정별 페르소나 정의·관리 UI** — `/admin/personas` · 다국어 프리뷰
-- [x] **6e. TikTok URL Adapter** — oEmbed + 단축링크 해석
-- [x] **6f. 샤오홍슈 URL Adapter** — Apify 필수, 중국어 자동 감지
-- [x] **6g. Instagram URL Adapter** — OG 파싱 + likes/comments 추출
+- [x] **6e. TikTok URL Adapter** — ~~oEmbed~~ → 🔴 HTTP 400 반환, 디버깅 or Apify 전환 필요
+- [x] **6f. 샤오홍슈 URL Adapter** — Apify 필수, APIFY_API_TOKEN 미설정으로 미검증
+- [x] **6g. Instagram URL Adapter** — ~~OG 파싱~~ → 🔴 OG 전멸, Apify 전환 코드 완료 (토큰 설정 대기)
 
 ## Priority 7 — 자율 트렌드 추적 (Lane 2)
 
 ### Stage 1 — 국내 트렌드 소스
 - [x] **7a. TrendSignal 스키마 + 정규화 프레임워크**
 - [x] **7b. 네이버 데이터랩 쇼핑인사이트 통합**
-- [x] **7c. Google Trends 통합**
+- [x] **7c. Google Trends 통합** — ~~google-trends-api 라이브러리~~ → ✅ RSS 직접 파싱으로 교체 완료
 - [x] **7d. 트렌드 기반 플랫폼 콘텐츠 검색기** — 키워드 자동 번역 + Apify 검색
 - [x] **7e. 자동 인제스션 큐 + 승인 대시보드** — BullMQ cron · Telegram 다이제스트
 
@@ -77,6 +78,20 @@ Last synced: 2026-08-31
 
 ### Stage 3 — 시그널 정교화
 - [x] **7h. 크로스플랫폼 상관관계 · 시그널 감쇠** — 자동 · poll 시마다
+
+## 데이터 수집 재설계 (2026-08-31 실 검증 후 추가)
+
+실 URL/API 검증 결과 5개 소스 고장 발견. 전략 v2 수립 완료.
+
+- [x] **R1. Google Trends RSS 교체** — `google-trends-api` 제거, RSS 직접 파싱
+- [x] **R2. Threads 어댑터 Apify 전환** — 코드 완료, APIFY_ACTOR_THREADS_URL 설정 시 활성화
+- [x] **R3. Instagram 어댑터 Apify 전환** — 코드 완료, APIFY_ACTOR_IG_URL 설정 시 활성화
+- [x] **R4. env.ts에 Apify actor env vars 추가** — THREADS_URL, IG_URL, TIKTOK_URL
+- [ ] **R5. 텔레그램 /seed 텍스트 직접 입력** — Apify 없이 데이터 축적 가능한 최소 경로
+- [ ] **R6. TikTok oEmbed 디버깅** — HTTP 400 원인 파악, 실패 시 Apify 전환
+- [ ] **R7. 쿠팡 Search productPrice 매핑 수정** — 경미
+- [ ] **R8. TikTok 어댑터 Apify 전환** — oEmbed 실패 시
+- [ ] **R9. 전체 데이터 소스 실 동작 재검증** — Apify 토큰 발급 후
 
 ## Priority 8+ (나중)
 

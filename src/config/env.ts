@@ -56,7 +56,10 @@ const envSchema = z.object({
 
   APIFY_API_TOKEN: z.string().optional(),
   APIFY_ACTOR_ID: z.string().optional(), // (deprecated, 어댑터별 개별 지정으로 이관)
-  APIFY_ACTOR_XHS_URL: z.string().optional(),     // 샤오홍슈 단건 URL 파싱
+  APIFY_ACTOR_THREADS_URL: z.string().optional(),  // Threads 단건 URL 파싱
+  APIFY_ACTOR_IG_URL: z.string().optional(),       // Instagram 단건 URL 파싱
+  APIFY_ACTOR_TIKTOK_URL: z.string().optional(),   // TikTok 단건 URL 파싱
+  APIFY_ACTOR_XHS_URL: z.string().optional(),      // 샤오홍슈 단건 URL 파싱
   APIFY_ACTOR_XHS_KEYWORD: z.string().optional(), // 샤오홍슈 키워드 검색
   APIFY_ACTOR_TIKTOK_KEYWORD: z.string().optional(),
   APIFY_ACTOR_IG_KEYWORD: z.string().optional(),

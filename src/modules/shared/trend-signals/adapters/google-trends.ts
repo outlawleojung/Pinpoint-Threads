@@ -2,84 +2,100 @@ import { logger } from '../../../../config/logger.js';
 import { TrendSource } from '@prisma/client';
 import type { TrendSourceAdapter, RawTrendSignal } from '../index.js';
 
-// google-trends-api는 @types 미제공 → 최소 shape 선언
-// @ts-ignore
-import googleTrends from 'google-trends-api';
-
-interface DailyTrendsResponse {
-  default: {
-    trendingSearchesDays: Array<{
-      date: string;
-      trendingSearches: Array<{
-        title: { query: string; exploreLink?: string };
-        formattedTraffic: string;
-        image?: { imageUrl?: string; source?: string; newsUrl?: string };
-        articles?: Array<{ title: string; timeAgo?: string; source?: string; url?: string }>;
-        relatedQueries?: Array<{ query: string; exploreLink?: string }>;
-      }>;
-    }>;
-  };
-}
-
 /**
  * Google Trends 한국 급상승 검색어 어댑터.
  *
- * `dailyTrends` API는 인증 불필요 (unofficial, 라이브러리 스크래핑).
- * 간헐적 실패 가능성 있음 → try/catch로 감싸고 skip.
+ * Google Trends RSS 피드 (/trending/rss?geo=KR) 사용.
+ * 인증 불필요, 무료, 안정적. 일간 상위 ~20개 트렌드 반환.
  *
- * formattedTraffic ("50K+", "200K+") 를 수치로 파싱해 currentValue로 사용.
+ * 이전: google-trends-api npm 라이브러리 → Google 내부 API 경로 변경으로 완전히 고장.
+ * 현재: RSS XML 직접 파싱.
  */
 export class GoogleTrendsAdapter implements TrendSourceAdapter {
   readonly source = TrendSource.GOOGLE_TRENDS;
 
   async fetchSignals(): Promise<RawTrendSignal[]> {
     try {
-      const raw = await googleTrends.dailyTrends({
-        geo: 'KR',
-        hl: 'ko',
+      const res = await fetch('https://trends.google.com/trending/rss?geo=KR', {
+        headers: { 'user-agent': 'Pinpoint-Threads/1.0' },
+        signal: AbortSignal.timeout(15_000),
       });
-      const parsed = JSON.parse(raw as string) as DailyTrendsResponse;
 
-      const signals: RawTrendSignal[] = [];
-      for (const day of parsed.default.trendingSearchesDays ?? []) {
-        for (const item of day.trendingSearches ?? []) {
-          const traffic = parseTraffic(item.formattedTraffic);
-          signals.push({
-            source: this.source,
-            keyword: item.title.query,
-            currentValue: traffic,
-            rawPayload: {
-              date: day.date,
-              formattedTraffic: item.formattedTraffic,
-              relatedQueries: item.relatedQueries?.map((q) => q.query),
-              imageUrl: item.image?.imageUrl,
-            },
-          });
-        }
+      if (!res.ok) {
+        logger.warn({ status: res.status }, 'google trends RSS non-OK response');
+        return [];
       }
+
+      const xml = await res.text();
+      const signals = parseRss(xml);
 
       logger.info(
         { fetched: signals.length, top: signals.slice(0, 5).map((s) => s.keyword) },
-        'google trends daily fetched',
+        'google trends RSS fetched',
       );
       return signals;
     } catch (err) {
-      logger.warn({ err }, 'google trends fetch failed (unofficial API 간헐적 실패)');
+      logger.warn({ err }, 'google trends RSS fetch failed');
       return [];
     }
   }
 }
 
+function parseRss(xml: string): RawTrendSignal[] {
+  const signals: RawTrendSignal[] = [];
+
+  // <item> 블록 추출
+  const itemRegex = /<item>([\s\S]*?)<\/item>/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = itemRegex.exec(xml)) !== null) {
+    const block = match[1] ?? '';
+    const title = extractTag(block, 'title');
+    if (!title) continue;
+
+    const traffic = extractTag(block, 'ht:approx_traffic');
+    const newsItemTitle = extractTag(block, 'ht:news_item_title');
+    const newsItemUrl = extractTag(block, 'ht:news_item_url');
+    const pubDate = extractTag(block, 'pubDate');
+
+    signals.push({
+      source: TrendSource.GOOGLE_TRENDS,
+      keyword: decodeEntities(title),
+      currentValue: parseTraffic(traffic),
+      rawPayload: {
+        formattedTraffic: traffic,
+        newsTitle: newsItemTitle ? decodeEntities(newsItemTitle) : undefined,
+        newsUrl: newsItemUrl,
+        pubDate,
+      },
+    });
+  }
+
+  return signals;
+}
+
+function extractTag(xml: string, tag: string): string | null {
+  const regex = new RegExp(`<${tag}><!\\[CDATA\\[([\\s\\S]*?)\\]\\]></${tag}>|<${tag}>([^<]*)</${tag}>`, 'i');
+  const m = regex.exec(xml);
+  if (!m) return null;
+  return (m[1] ?? m[2] ?? '').trim() || null;
+}
+
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
 /**
- * "50K+" → 50000, "1M+" → 1000000
+ * "50,000+" → 50000, "1,000,000+" → 1000000
  */
-function parseTraffic(formatted: string | undefined): number {
+function parseTraffic(formatted: string | null): number {
   if (!formatted) return 0;
-  const m = /^([\d.]+)([KM]?)/i.exec(formatted.trim());
-  if (!m) return 0;
-  const num = parseFloat(m[1] ?? '0');
-  const unit = (m[2] ?? '').toUpperCase();
-  if (unit === 'M') return num * 1_000_000;
-  if (unit === 'K') return num * 1_000;
-  return num;
+  const cleaned = formatted.replace(/[,+\s]/g, '');
+  const n = parseInt(cleaned, 10);
+  return isNaN(n) ? 0 : n;
 }
