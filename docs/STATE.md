@@ -154,8 +154,10 @@ Last commit: `146d01b` (config: BENCHMARK_AUTO_PROMOTE_MIN_LIKES 3000 → 500)
 ## 인프라 로드맵
 
 - 지금: 로컬 개발 완료
-- 다음: 실 발행 e2e (#4c) 검증
-- 그 후: Hetzner VPS 이전 (Cloudflare Tunnel + Access로 admin 이중 보안)
+- 다음: 실 발행 e2e (#4c) 검증 · 각 어댑터·트렌드 소스 실 실행 검증
+- 그 후: **호스팅 이전** ([deployment.md](03-infrastructure/deployment.md) 참조)
+  - 권장: Hetzner CX22 ($5/월) + Cloudflare Tunnel + Access
+  - 무료 대안: Oracle Cloud Always Free ARM (셋업 3~4시간)
 - 스케일 후: 티어 상향 · 프록시
 
 ## 갱신 규칙
