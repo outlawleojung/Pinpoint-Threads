@@ -48,8 +48,8 @@ const envSchema = z.object({
   PUBLISH_ACCOUNT_MAX_GAP_MINUTES: z.coerce.number().default(240),
   PRODUCT_DEDUP_DAYS: z.coerce.number().default(14),
 
-  // InboundLink → BenchmarkPost 자동 승격 임계값 (likes 이상 시 자동 승격)
-  BENCHMARK_AUTO_PROMOTE_MIN_LIKES: z.coerce.number().default(3000),
+  // InboundLink → BenchmarkPost 자동 승격 임계값 (likes 이상 시 자동 승격, 스레드 기준)
+  BENCHMARK_AUTO_PROMOTE_MIN_LIKES: z.coerce.number().default(500),
 
   NAVER_CLIENT_ID: z.string().optional(),
   NAVER_CLIENT_SECRET: z.string().optional(),
