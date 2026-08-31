@@ -36,6 +36,9 @@ Last synced: 2026-08-31
 - [x] **4a. Threads OAuth 흐름** — 5계정 실 연결, `/oauth/threads/accounts` UI
 - [x] **4b. Publisher** — 2-step + carousel + 고정 댓글 + refresh 자동화
 - [ ] **4c. 실 계정 1개 발행 e2e** — 사용자 요청으로 보류
+  - **선행: Publisher dryRun 모드 구현** (container-only, 실 게시 안 함 · 5계정 리스크 0 검증)
+  - 상세: [docs/03-infrastructure/publisher-dryrun-testing.md](03-infrastructure/publisher-dryrun-testing.md)
+  - dry-run 5계정 검증 통과 후 → 최소 팔로워 계정 1개로 실 게시 1회 · 방치
 - [x] **4d. 계정 시차 스케줄링** — BullMQ delayed · 활성 시간대 · 일일 상한
 - [x] **4e. Performance Collector** — 24h/72h insights 자동 회수 · engagementScore
 

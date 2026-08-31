@@ -21,6 +21,10 @@ Last commit: `146d01b` (config: BENCHMARK_AUTO_PROMOTE_MIN_LIKES 3000 → 500)
 - Priority 6 (URL 인제스터): 7/7 ✅
 - Priority 7 (자율 트렌드): 8/8 ✅
 - 남은 유일 태스크: **#4c 실 계정 발행 e2e** (사용자 요청으로 보류)
+  - 접근 전략: [publisher-dryrun-testing.md](03-infrastructure/publisher-dryrun-testing.md)
+    1. Container-only dry-run 모드로 5계정 검증 (리스크 0)
+    2. 최소 팔로워 계정 1개로 실 게시 1회 · 방치
+    3. 스케줄러 정상 가동
 
 ## 지금까지 검증된 것
 
