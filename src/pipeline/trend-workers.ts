@@ -1,6 +1,6 @@
 import { Worker } from 'bullmq';
 import { redisConnection } from '../queues/connection.js';
-import { QUEUE_NAMES, trendPollQueue, trendDigestQueue } from '../queues/queues.js';
+import { QUEUE_NAMES, trendPollQueue, trendDigestQueue, trendSearchQueue } from '../queues/queues.js';
 import { logger } from '../config/logger.js';
 import {
   pollAllAdapters,
@@ -11,6 +11,7 @@ import {
 import { NaverDatalabAdapter } from '../modules/shared/trend-signals/adapters/naver-datalab.js';
 import { GoogleTrendsAdapter } from '../modules/shared/trend-signals/adapters/google-trends.js';
 import { sendDigestMessage } from '../modules/shared/approval-gate/notifier.js';
+import { safeRunTrendSearchIngest } from '../modules/shared/trend-signals/search-orchestrator.js';
 
 /**
  * Lane 2 자율 트렌드 워커 · 스케줄러.
@@ -23,6 +24,7 @@ import { sendDigestMessage } from '../modules/shared/approval-gate/notifier.js';
 
 const POLL_EVERY_MS = 6 * 60 * 60 * 1000; // 6h
 const DIGEST_CRON = '0 8 * * *'; // 매일 08:00 KST
+const SEARCH_CRON = '30 8 * * *'; // 매일 08:30 KST (다이제스트 이후)
 
 function buildAdapters(): TrendSourceAdapter[] {
   return [new NaverDatalabAdapter(), new GoogleTrendsAdapter()];
@@ -83,7 +85,24 @@ export function startTrendWorkers(): Worker[] {
     ),
   );
 
-  logger.info('Started 2 trend workers (trend-poll · trend-digest)');
+  workers.push(
+    new Worker(
+      QUEUE_NAMES.TREND_SEARCH,
+      async (job) => {
+        logger.info({ jobId: job.id, data: job.data }, 'trend-search start');
+        const summary = await safeRunTrendSearchIngest({
+          topSignals: job.data.topSignals ?? 5,
+          perPlatformResults: job.data.perPlatformResults ?? 10,
+          minLikes: job.data.minLikes ?? 100,
+        });
+        logger.info({ jobId: job.id, summary }, 'trend-search done');
+        return summary ?? { skipped: true };
+      },
+      { connection: redisConnection, concurrency: 1 },
+    ),
+  );
+
+  logger.info('Started 3 trend workers (trend-poll · trend-digest · trend-search)');
   return workers;
 }
 
@@ -108,8 +127,18 @@ export async function scheduleTrendJobs(): Promise<void> {
     },
   );
 
+  // daily trend-driven search + auto ingest
+  await trendSearchQueue.add(
+    'trend-search-daily',
+    { topSignals: 5, perPlatformResults: 10, minLikes: 100 },
+    {
+      repeat: { pattern: SEARCH_CRON, tz: 'Asia/Seoul' },
+      jobId: 'trend-search-daily',
+    },
+  );
+
   logger.info(
-    { pollEveryMs: POLL_EVERY_MS, digestCron: DIGEST_CRON },
+    { pollEveryMs: POLL_EVERY_MS, digestCron: DIGEST_CRON, searchCron: SEARCH_CRON },
     'trend jobs scheduled (repeat)',
   );
 }

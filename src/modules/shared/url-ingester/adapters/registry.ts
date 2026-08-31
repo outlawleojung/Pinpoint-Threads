@@ -2,6 +2,7 @@ import { InboundPlatform } from '@prisma/client';
 import { fetchThreadsPost, type ThreadsAdapterResult } from './threads-adapter.js';
 import { fetchTikTokPost, type TikTokAdapterResult } from './tiktok-adapter.js';
 import { fetchInstagramPost, type InstagramAdapterResult } from './instagram-adapter.js';
+import { fetchXhsPost, type XhsAdapterResult } from './xiaohongshu-adapter.js';
 
 /**
  * Adapter Registry — 플랫폼별 fetch 로직 디스패치.
@@ -75,11 +76,26 @@ const instagramAdapter: Adapter = async ({ url }) => {
   };
 };
 
+const xhsAdapter: Adapter = async ({ url }) => {
+  const r: XhsAdapterResult = await fetchXhsPost({ url });
+  return {
+    authorHandle: r.authorHandle,
+    externalPostId: r.noteId,
+    permalink: r.permalink,
+    text: r.text,
+    mediaUrls: r.mediaUrls,
+    publishedAt: r.publishedAt,
+    language: r.language,
+    engagement: r.engagement,
+    raw: r.raw,
+  };
+};
+
 const registry: Partial<Record<InboundPlatform, Adapter>> = {
   [InboundPlatform.THREADS]: threadsAdapter,
   [InboundPlatform.TIKTOK]: tiktokAdapter,
   [InboundPlatform.INSTAGRAM]: instagramAdapter,
-  // XIAOHONGSHU는 Apify 백엔드(Task #5b) 필요 — 별도 구현
+  [InboundPlatform.XIAOHONGSHU]: xhsAdapter,
 };
 
 export function getAdapter(platform: InboundPlatform): Adapter | null {

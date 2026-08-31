@@ -11,6 +11,7 @@ export const QUEUE_NAMES = {
   ENGAGEMENT: 'engagement',
   TREND_POLL: 'trend-poll',
   TREND_DIGEST: 'trend-digest',
+  TREND_SEARCH: 'trend-search',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
@@ -28,6 +29,11 @@ export type EngagementJob = {
 };
 export type TrendPollJob = { triggeredBy?: string };
 export type TrendDigestJob = { limit?: number };
+export type TrendSearchJob = {
+  topSignals?: number;
+  perPlatformResults?: number;
+  minLikes?: number;
+};
 
 const defaultJobOptions = {
   attempts: 3,
@@ -90,6 +96,15 @@ export const trendDigestQueue = new Queue<TrendDigestJob>(QUEUE_NAMES.TREND_DIGE
   },
 });
 
+export const trendSearchQueue = new Queue<TrendSearchJob>(QUEUE_NAMES.TREND_SEARCH, {
+  connection: redisConnection,
+  defaultJobOptions: {
+    attempts: 1, // Apify 비용 있으니 자동 재시도 하지 않음
+    removeOnComplete: { age: 3 * 24 * 3600, count: 50 },
+    removeOnFail: { age: 7 * 24 * 3600 },
+  },
+});
+
 export const queueEvents: Record<QueueName, QueueEvents> = {
   [QUEUE_NAMES.COLLECT]: new QueueEvents(QUEUE_NAMES.COLLECT, { connection: redisConnection }),
   [QUEUE_NAMES.CLASSIFY]: new QueueEvents(QUEUE_NAMES.CLASSIFY, { connection: redisConnection }),
@@ -106,6 +121,9 @@ export const queueEvents: Record<QueueName, QueueEvents> = {
     connection: redisConnection,
   }),
   [QUEUE_NAMES.TREND_DIGEST]: new QueueEvents(QUEUE_NAMES.TREND_DIGEST, {
+    connection: redisConnection,
+  }),
+  [QUEUE_NAMES.TREND_SEARCH]: new QueueEvents(QUEUE_NAMES.TREND_SEARCH, {
     connection: redisConnection,
   }),
 };

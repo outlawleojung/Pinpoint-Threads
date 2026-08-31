@@ -9,6 +9,8 @@ import {
 } from '../trend-signals/index.js';
 import { NaverDatalabAdapter } from '../trend-signals/adapters/naver-datalab.js';
 import { GoogleTrendsAdapter } from '../trend-signals/adapters/google-trends.js';
+import { safeRunTrendSearchIngest } from '../trend-signals/search-orchestrator.js';
+import { isApifyConfigured } from '../../../infra/apify-client.js';
 
 type AnyFastify = FastifyInstance<any, any, any, any, any>;
 
@@ -61,6 +63,10 @@ export async function registerTrendsRoutes(app: AnyFastify): Promise<void> {
           <form method="POST" action="/admin/trends/poll" style="display:inline">
             <button type="submit">🔄 지금 poll 실행</button>
           </form>
+          <form method="POST" action="/admin/trends/search" style="display:inline"
+            onsubmit="return confirm('상위 5개 트렌드로 모든 플랫폼 검색 · 인제스트 실행. Apify 비용 발생 가능. 계속?');">
+            <button type="submit" ${isApifyConfigured() ? '' : 'disabled title="APIFY_API_TOKEN 미설정"'}>🔎 트렌드 검색 · 자동 인제스트</button>
+          </form>
           <form method="POST" action="/admin/trends/decay" style="display:inline">
             <button type="submit">⏳ 14일 이상 오래된 신호 감쇠</button>
           </form>
@@ -110,6 +116,47 @@ export async function registerTrendsRoutes(app: AnyFastify): Promise<void> {
         </table>
         ${errs ? `<h3>에러 로그</h3><pre>${escape(errs)}</pre>` : ''}
         <p><a href="/admin/trends">← 대시보드로</a></p>
+        `,
+      ),
+    );
+  });
+
+  app.post('/admin/trends/search', async (_req, reply) => {
+    logger.info('manual trend search + ingest triggered');
+    const summary = await safeRunTrendSearchIngest({ topSignals: 5, perPlatformResults: 10, minLikes: 100 });
+
+    if (!summary) {
+      return reply
+        .type('text/html')
+        .send(renderPage('트렌드 검색 skip', 'APIFY_API_TOKEN 미설정 또는 실행 중 오류. 서버 로그 확인.'));
+    }
+
+    const rows = summary.perPlatform
+      .map(
+        (p) => `
+      <tr>
+        <td>${escape(p.platform)}</td>
+        <td class="num">${p.searchedKeywords}</td>
+        <td class="num">${p.candidates}</td>
+        <td class="num">${p.ingested}</td>
+        <td>${p.errors.length ? `<span class="err">${p.errors.length}건</span>` : 'OK'}</td>
+      </tr>`,
+      )
+      .join('');
+
+    const errs = summary.perPlatform.flatMap((p) => p.errors.map((e) => `[${p.platform}] ${e}`)).join('\n');
+
+    return reply.type('text/html').send(
+      renderPage(
+        '트렌드 검색 · 인제스트 결과',
+        `
+        <p>처리한 시그널: ${summary.signalsProcessed}개</p>
+        <table>
+          <thead><tr><th>Platform</th><th>Keywords</th><th>Candidates</th><th>Ingested</th><th>Status</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="5" class="muted">설정된 플랫폼 없음</td></tr>'}</tbody>
+        </table>
+        ${errs ? `<h3>에러</h3><pre>${escape(errs)}</pre>` : ''}
+        <p><a href="/admin/trends">← 대시보드</a> · <a href="/admin/inbound?source=AUTONOMOUS_TREND">자율 인제스트 결과</a></p>
         `,
       ),
     );
