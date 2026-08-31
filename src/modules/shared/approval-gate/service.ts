@@ -6,6 +6,7 @@ import { env } from '../../../config/env.js';
 import { logger } from '../../../config/logger.js';
 import { prisma } from '../../../db/prisma.js';
 import { assertTransition } from '../../../state/post-state-machine.js';
+import { scheduleApprovedPost, SchedulerError } from '../publisher/scheduler.js';
 
 type PostWithRelations = Post & {
   account: Account;
@@ -113,15 +114,29 @@ export async function handleApprovalCallback(action: Action, postId: string): Pr
 
   logger.info({ postId, action, from: post.state, to: nextState }, 'post state transitioned');
 
-  // TODO(Phase 3): 각 상태에 해당하는 큐 잡 투입
-  // approve → publishQueue.add(...)
-  // regen-text → copywriteQueue.add(...)
-  // regen-product → matchProductQueue.add(...)
+  // 승인 시 스케줄러가 계정 시차·활성 시간대 반영해서 delayed 발행 큐 등록
+  let scheduleNote = '';
+  if (action === 'approve') {
+    try {
+      const s = await scheduleApprovedPost(postId);
+      const inMin = Math.round(s.delayMs / 60_000);
+      scheduleNote = ` @ ${s.scheduledAt.toISOString().slice(5, 16).replace('T', ' ')} (${inMin}분 후)`;
+    } catch (err) {
+      if (err instanceof SchedulerError) {
+        logger.error({ postId, code: err.code, msg: err.message }, 'schedule failed after approve');
+      } else {
+        logger.error({ postId, err }, 'schedule failed after approve (unexpected)');
+      }
+      scheduleNote = ` ⚠ 스케줄 실패: ${(err as Error).message}`;
+    }
+  }
+
+  // TODO: regen-text · regen-product 큐 잡 투입 (별도 태스크)
 
   const labels: Record<Action, string> = {
-    approve: '✅ 승인 → 발행 큐 대기',
-    'regen-text': '📝 텍스트 재생성 큐 대기',
-    'regen-product': '🔄 상품 재검색 큐 대기',
+    approve: '✅ 승인' + scheduleNote,
+    'regen-text': '📝 텍스트 재생성 (큐 미구현)',
+    'regen-product': '🔄 상품 재검색 (큐 미구현)',
     reject: '🗑 폐기 처리',
   };
   return labels[action];

@@ -62,6 +62,14 @@ export interface ThreadsReplyResult {
 
 export type ContainerStatus = 'IN_PROGRESS' | 'FINISHED' | 'ERROR' | 'EXPIRED' | 'PUBLISHED';
 
+export interface ThreadsInsights {
+  likes?: number;
+  replies?: number;
+  reposts?: number;
+  quotes?: number;
+  views?: number;
+}
+
 interface CreateContainerParams {
   mediaType?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'CAROUSEL';
   text?: string;
@@ -291,6 +299,40 @@ export class ThreadsClient {
 
     const publishedId = await this.publishContainer(accessToken, containerId);
     return { threadsPostId: publishedId };
+  }
+
+  /**
+   * 게시글 insights 회수.
+   * Docs: GET /v1.0/{threads-media-id}/insights?metric=views,likes,replies,reposts,quotes
+   * threads_manage_insights 권한 필요.
+   */
+  async fetchInsights(input: {
+    accessToken: string;
+    threadsPostId: string;
+  }): Promise<ThreadsInsights> {
+    const metrics = ['views', 'likes', 'replies', 'reposts', 'quotes'].join(',');
+    const params = new URLSearchParams({
+      metric: metrics,
+      access_token: input.accessToken,
+    });
+    const res = await request(
+      `${GRAPH_BASE}/v1.0/${input.threadsPostId}/insights?${params.toString()}`,
+      { method: 'GET' },
+    );
+    const json = (await res.body.json()) as any;
+    if (res.statusCode !== 200) {
+      throw new Error(`insights fetch failed: HTTP ${res.statusCode} ${JSON.stringify(json)}`);
+    }
+    const out: ThreadsInsights = {};
+    // 응답 형식: { data: [{ name: 'views', values: [{ value: 123 }] }, ...] }
+    for (const m of json.data ?? []) {
+      const name = String(m.name ?? '') as keyof ThreadsInsights;
+      const val = Number(m.values?.[0]?.value ?? m.total_value?.value ?? 0);
+      if (name && ['likes', 'replies', 'reposts', 'quotes', 'views'].includes(name)) {
+        (out as any)[name] = val;
+      }
+    }
+    return out;
   }
 
   async reply(input: ThreadsReplyInput): Promise<ThreadsReplyResult> {

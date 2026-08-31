@@ -12,6 +12,7 @@ export const QUEUE_NAMES = {
   TREND_POLL: 'trend-poll',
   TREND_DIGEST: 'trend-digest',
   TREND_SEARCH: 'trend-search',
+  PERFORMANCE_COLLECT: 'performance-collect',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
@@ -34,6 +35,7 @@ export type TrendSearchJob = {
   perPlatformResults?: number;
   minLikes?: number;
 };
+export type PerformanceCollectJob = { postId: string; hoursAfterPublish: number };
 
 const defaultJobOptions = {
   attempts: 3,
@@ -105,6 +107,16 @@ export const trendSearchQueue = new Queue<TrendSearchJob>(QUEUE_NAMES.TREND_SEAR
   },
 });
 
+export const performanceQueue = new Queue<PerformanceCollectJob>(QUEUE_NAMES.PERFORMANCE_COLLECT, {
+  connection: redisConnection,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: 'exponential' as const, delay: 60_000 },
+    removeOnComplete: { age: 30 * 24 * 3600, count: 500 },
+    removeOnFail: { age: 60 * 24 * 3600 },
+  },
+});
+
 export const queueEvents: Record<QueueName, QueueEvents> = {
   [QUEUE_NAMES.COLLECT]: new QueueEvents(QUEUE_NAMES.COLLECT, { connection: redisConnection }),
   [QUEUE_NAMES.CLASSIFY]: new QueueEvents(QUEUE_NAMES.CLASSIFY, { connection: redisConnection }),
@@ -124,6 +136,9 @@ export const queueEvents: Record<QueueName, QueueEvents> = {
     connection: redisConnection,
   }),
   [QUEUE_NAMES.TREND_SEARCH]: new QueueEvents(QUEUE_NAMES.TREND_SEARCH, {
+    connection: redisConnection,
+  }),
+  [QUEUE_NAMES.PERFORMANCE_COLLECT]: new QueueEvents(QUEUE_NAMES.PERFORMANCE_COLLECT, {
     connection: redisConnection,
   }),
 };
