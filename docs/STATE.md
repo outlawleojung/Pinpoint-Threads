@@ -1,6 +1,6 @@
 ---
 title: "Current State"
-last_updated: "2026-08-30"
+last_updated: "2026-08-31"
 status: "active"
 ---
 
@@ -8,15 +8,17 @@ status: "active"
 
 **새 세션 시작 시 이 파일을 먼저 읽으세요.**
 
-Last updated: 2026-08-30
-Last commit: `53dedbb` (docs: 안티 디텍션 및 클로킹 전략 설계 문서 추가)
+Last updated: 2026-08-31
+Last commit: Phase 4 진입 커밋 (OAuth + Publisher)
 
 ## Phase & 진행률
 
-- **Phase**: 3 완료, Phase 4 대기
-- **Task 완료**: 16/21 (76%)
+- **Phase**: **4 진입 + Source Collector 시작** (프로젝트 핵심 기능으로 우선순위 재정렬)
+- **Task 완료**: 19/26 (73%)
 - **Priority 3 (Pipeline A 실 구현)**: 8/8 ✅
-- **다음 Milestone**: Meta 승인 대기 → Phase 4 (Publisher)
+- **Priority 4 (발행 파이프라인)**: 2/5 (17 OAuth · 18 Publisher 완료, 19-21 보류)
+- **Priority 5 (Source Collector — ★핵심)**: 1/5 (22 스키마 완료)
+- **다음 Milestone**: Apify 세팅 → Task #5b Source Collector 코어
 
 ## 지금까지 검증된 것
 
@@ -31,7 +33,9 @@ Last commit: `53dedbb` (docs: 안티 디텍션 및 클로킹 전략 설계 문�
 | Media Handler | ✅ | uploadFromUrl 구현 |
 | Telegram 승인 UI | ✅ | 인라인 키보드 콜백 → 상태 전이 |
 | 12-module 재구조화 | ✅ | infra/ + modules/ 완료 |
-| Meta App 등록 & 5 테스터 | ✅ | 개발 모드 활성 |
+| Meta App **Live 게시** | ✅ | 개인정보처리방침 URL 등록 후 통과 |
+| Threads OAuth 흐름 (Task #17) | ✅ | 5계정 실 연결 완료 (60일 토큰) |
+| Publisher 실 구현 (Task #18) | ✅ | 2-step + carousel + 고정 댓글, 실 API 호출은 Task #19에서 |
 | Vision Verifier | ✅ | `/vision` Anthropic Sonnet base64 인라인, 0.05 판정 정확 |
 | Product Matcher 통합 | ✅ | `/matcher` 실 검증, score 0.75, 1회 시도, deeplink 생성 |
 
@@ -45,9 +49,25 @@ Last commit: `53dedbb` (docs: 안티 디텍션 및 클로킹 전략 설계 문�
 
 ## 진행 중 / 다음
 
-- **Meta 앱 승인 대기 중** → 승인 나면 Phase 4 진입
+**우선순위 재정렬 (2026-08-31 세션 후반):** 사용자 요청으로 Source Collector(벤치마크 수집·분석)가 Priority 4 잔여작업보다 우선. 이것이 프로젝트의 핵심 기능(터진 콘텐츠 재생산).
+
+- **Task #5b Source Collector 코어** — 대기: 사용자 Apify 가입 + 액터 선정 (다음 세션)
+- **Task #5c Admin UI · #5d viralFactors 태깅 · #5e 임베딩** — 순차 진행
+- **Task #19-21 (Publisher 잔여)** — Source Collector 안정화 후 재개
 - 병행 가능: 강의 영상 녹화 (사용자 — 하루 1개씩, ~10일)
 - 병행 가능: Pipeline B/C 상세 설계
+
+## 연결된 Threads 계정 (5개)
+
+| handle | Threads UID | 토큰 만료 |
+|---|---|---|
+| minyoung.jung | 28425529907071518 | 2026-10-30 |
+| pikkseetem | 27965317313149614 | 2026-10-30 |
+| sookck.kate | 28466748879586937 | 2026-10-30 |
+| kle0_lee | 38438165592448683 | 2026-10-30 |
+| _blanchatt_ | 37921878777460515 | 2026-10-30 |
+
+7일 이내 만료 시 Publisher가 자동 refresh. 수동 refresh는 `/oauth/threads/accounts` 페이지.
 
 ## Credential 상태
 
@@ -70,7 +90,7 @@ Last commit: `53dedbb` (docs: 안티 디텍션 및 클로킹 전략 설계 문�
 
 - **Neon**: `pinpoint-threads` 프로젝트, ap-southeast-1, Free tier
 - **Redis**: 로컬 Docker (`pinpoint-redis`)
-- **Meta App**: 개발 모드, 5 테스터 수락 완료. Threads API 심사 진행 중 여부 미확인
+- **Meta App**: **Live 게시 완료** (2026-08-31). 개인정보처리방침 URL: `outlawleojung.github.io/pinpoint-legal/privacy.html`. OAuth 콜백은 GitHub Pages 브리지 → localhost 릴레이 방식
 - **Cloudinary**: `xwqbwrs1` 계정, Free tier
 - **Anthropic**: Claude Code workspace, US$5.00 크레딧, LLM_PROVIDER 활성
 

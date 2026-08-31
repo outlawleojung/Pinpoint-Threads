@@ -1,10 +1,49 @@
-// TODO(Phase 2): Meta Threads Graph API 클라이언트
+// Meta Threads Graph API 클라이언트
 // Docs: https://developers.facebook.com/docs/threads
+
+import { request } from 'undici';
+
+const GRAPH_BASE = 'https://graph.threads.net';
+const AUTHORIZE_BASE = 'https://threads.net';
+
+export const THREADS_SCOPES = [
+  'threads_basic',
+  'threads_content_publish',
+  'threads_manage_replies',
+  'threads_read_replies',
+  'threads_manage_insights',
+] as const;
+
+export interface OAuthTokenExchangeInput {
+  appId: string;
+  appSecret: string;
+  code: string;
+  redirectUri: string;
+}
+
+export interface ShortLivedToken {
+  accessToken: string;
+  userId: string;
+}
+
+export interface LongLivedToken {
+  accessToken: string;
+  tokenType: string;
+  expiresIn: number;
+}
+
+export interface ThreadsUserProfile {
+  id: string;
+  username: string;
+  name?: string;
+  threadsProfilePictureUrl?: string;
+  threadsBiography?: string;
+}
 
 export interface ThreadsPublishInput {
   accessToken: string;
   text: string;
-  mediaUrl?: string;
+  mediaUrls?: string[]; // 0 = text-only, 1 = single image, 2+ = carousel
 }
 
 export interface ThreadsPublishResult {
@@ -21,13 +60,250 @@ export interface ThreadsReplyResult {
   threadsReplyId: string;
 }
 
+export type ContainerStatus = 'IN_PROGRESS' | 'FINISHED' | 'ERROR' | 'EXPIRED' | 'PUBLISHED';
+
+interface CreateContainerParams {
+  mediaType?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'CAROUSEL';
+  text?: string;
+  imageUrl?: string;
+  videoUrl?: string;
+  isCarouselItem?: boolean;
+  children?: string[]; // container ids for carousel
+  replyToId?: string;
+  linkAttachment?: string;
+}
+
+const CONTAINER_POLL_INTERVAL_MS = 2000;
+const CONTAINER_POLL_TIMEOUT_MS = 60_000;
+
+export function buildAuthorizeUrl(input: {
+  appId: string;
+  redirectUri: string;
+  state: string;
+  scopes?: readonly string[];
+}): string {
+  const scopes = (input.scopes ?? THREADS_SCOPES).join(',');
+  const params = new URLSearchParams({
+    client_id: input.appId,
+    redirect_uri: input.redirectUri,
+    scope: scopes,
+    response_type: 'code',
+    state: input.state,
+  });
+  return `${AUTHORIZE_BASE}/oauth/authorize?${params.toString()}`;
+}
+
 export class ThreadsClient {
-  async publish(_input: ThreadsPublishInput): Promise<ThreadsPublishResult> {
-    // 2-step: Create container → Publish container
-    throw new Error('ThreadsClient.publish not implemented (Phase 2)');
+  async exchangeCodeForShortLivedToken(input: OAuthTokenExchangeInput): Promise<ShortLivedToken> {
+    const body = new URLSearchParams({
+      client_id: input.appId,
+      client_secret: input.appSecret,
+      grant_type: 'authorization_code',
+      redirect_uri: input.redirectUri,
+      code: input.code,
+    });
+
+    const res = await request(`${GRAPH_BASE}/oauth/access_token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    });
+
+    const json = (await res.body.json()) as any;
+    if (res.statusCode !== 200 || !json.access_token) {
+      throw new Error(`Threads short-lived exchange failed: ${JSON.stringify(json)}`);
+    }
+    return { accessToken: json.access_token, userId: String(json.user_id) };
   }
 
-  async reply(_input: ThreadsReplyInput): Promise<ThreadsReplyResult> {
-    throw new Error('ThreadsClient.reply not implemented (Phase 2)');
+  async exchangeShortForLongLivedToken(input: {
+    appSecret: string;
+    shortLivedToken: string;
+  }): Promise<LongLivedToken> {
+    const params = new URLSearchParams({
+      grant_type: 'th_exchange_token',
+      client_secret: input.appSecret,
+      access_token: input.shortLivedToken,
+    });
+
+    const res = await request(`${GRAPH_BASE}/access_token?${params.toString()}`, {
+      method: 'GET',
+    });
+
+    const json = (await res.body.json()) as any;
+    if (res.statusCode !== 200 || !json.access_token) {
+      throw new Error(`Threads long-lived exchange failed: ${JSON.stringify(json)}`);
+    }
+    return {
+      accessToken: json.access_token,
+      tokenType: json.token_type ?? 'bearer',
+      expiresIn: Number(json.expires_in ?? 5184000),
+    };
   }
+
+  async refreshLongLivedToken(input: { accessToken: string }): Promise<LongLivedToken> {
+    const params = new URLSearchParams({
+      grant_type: 'th_refresh_token',
+      access_token: input.accessToken,
+    });
+
+    const res = await request(`${GRAPH_BASE}/refresh_access_token?${params.toString()}`, {
+      method: 'GET',
+    });
+
+    const json = (await res.body.json()) as any;
+    if (res.statusCode !== 200 || !json.access_token) {
+      throw new Error(`Threads refresh failed: ${JSON.stringify(json)}`);
+    }
+    return {
+      accessToken: json.access_token,
+      tokenType: json.token_type ?? 'bearer',
+      expiresIn: Number(json.expires_in ?? 5184000),
+    };
+  }
+
+  async fetchUserProfile(accessToken: string): Promise<ThreadsUserProfile> {
+    const fields = 'id,username,name,threads_profile_picture_url,threads_biography';
+    const params = new URLSearchParams({ fields, access_token: accessToken });
+
+    const res = await request(`${GRAPH_BASE}/v1.0/me?${params.toString()}`, { method: 'GET' });
+
+    const json = (await res.body.json()) as any;
+    if (res.statusCode !== 200 || !json.id) {
+      throw new Error(`Threads user profile fetch failed: ${JSON.stringify(json)}`);
+    }
+    return {
+      id: String(json.id),
+      username: String(json.username),
+      name: json.name,
+      threadsProfilePictureUrl: json.threads_profile_picture_url,
+      threadsBiography: json.threads_biography,
+    };
+  }
+
+  private async createContainer(
+    accessToken: string,
+    params: CreateContainerParams,
+  ): Promise<string> {
+    const body = new URLSearchParams({ access_token: accessToken });
+    if (params.mediaType) body.set('media_type', params.mediaType);
+    if (params.text !== undefined) body.set('text', params.text);
+    if (params.imageUrl) body.set('image_url', params.imageUrl);
+    if (params.videoUrl) body.set('video_url', params.videoUrl);
+    if (params.isCarouselItem) body.set('is_carousel_item', 'true');
+    if (params.children?.length) body.set('children', params.children.join(','));
+    if (params.replyToId) body.set('reply_to_id', params.replyToId);
+    if (params.linkAttachment) body.set('link_attachment', params.linkAttachment);
+
+    const res = await request(`${GRAPH_BASE}/v1.0/me/threads`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    });
+    const json = (await res.body.json()) as any;
+    if (res.statusCode !== 200 || !json.id) {
+      throw new Error(`Threads createContainer failed: ${res.statusCode} ${JSON.stringify(json)}`);
+    }
+    return String(json.id);
+  }
+
+  private async getContainerStatus(
+    accessToken: string,
+    containerId: string,
+  ): Promise<{ status: ContainerStatus; errorMessage?: string }> {
+    const params = new URLSearchParams({
+      fields: 'status,error_message',
+      access_token: accessToken,
+    });
+    const res = await request(`${GRAPH_BASE}/v1.0/${containerId}?${params.toString()}`, {
+      method: 'GET',
+    });
+    const json = (await res.body.json()) as any;
+    if (res.statusCode !== 200) {
+      throw new Error(`Threads status check failed: ${res.statusCode} ${JSON.stringify(json)}`);
+    }
+    return { status: json.status as ContainerStatus, errorMessage: json.error_message };
+  }
+
+  private async waitForContainerReady(accessToken: string, containerId: string): Promise<void> {
+    const started = Date.now();
+    while (Date.now() - started < CONTAINER_POLL_TIMEOUT_MS) {
+      const { status, errorMessage } = await this.getContainerStatus(accessToken, containerId);
+      if (status === 'FINISHED') return;
+      if (status === 'ERROR' || status === 'EXPIRED') {
+        throw new Error(`Threads container ${containerId} ${status}: ${errorMessage ?? ''}`);
+      }
+      await sleep(CONTAINER_POLL_INTERVAL_MS);
+    }
+    throw new Error(`Threads container ${containerId} did not finish within ${CONTAINER_POLL_TIMEOUT_MS}ms`);
+  }
+
+  private async publishContainer(accessToken: string, containerId: string): Promise<string> {
+    const body = new URLSearchParams({
+      creation_id: containerId,
+      access_token: accessToken,
+    });
+    const res = await request(`${GRAPH_BASE}/v1.0/me/threads_publish`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    });
+    const json = (await res.body.json()) as any;
+    if (res.statusCode !== 200 || !json.id) {
+      throw new Error(`Threads publish failed: ${res.statusCode} ${JSON.stringify(json)}`);
+    }
+    return String(json.id);
+  }
+
+  async publish(input: ThreadsPublishInput): Promise<ThreadsPublishResult> {
+    const { accessToken, text, mediaUrls = [] } = input;
+    let containerId: string;
+
+    if (mediaUrls.length === 0) {
+      containerId = await this.createContainer(accessToken, { mediaType: 'TEXT', text });
+    } else if (mediaUrls.length === 1) {
+      containerId = await this.createContainer(accessToken, {
+        mediaType: 'IMAGE',
+        text,
+        imageUrl: mediaUrls[0],
+      });
+      await this.waitForContainerReady(accessToken, containerId);
+    } else {
+      const childIds: string[] = [];
+      for (const url of mediaUrls) {
+        const childId = await this.createContainer(accessToken, {
+          mediaType: 'IMAGE',
+          imageUrl: url,
+          isCarouselItem: true,
+        });
+        childIds.push(childId);
+      }
+      for (const id of childIds) {
+        await this.waitForContainerReady(accessToken, id);
+      }
+      containerId = await this.createContainer(accessToken, {
+        mediaType: 'CAROUSEL',
+        text,
+        children: childIds,
+      });
+      await this.waitForContainerReady(accessToken, containerId);
+    }
+
+    const publishedId = await this.publishContainer(accessToken, containerId);
+    return { threadsPostId: publishedId };
+  }
+
+  async reply(input: ThreadsReplyInput): Promise<ThreadsReplyResult> {
+    const containerId = await this.createContainer(input.accessToken, {
+      mediaType: 'TEXT',
+      text: input.text,
+      replyToId: input.parentId,
+    });
+    const publishedId = await this.publishContainer(input.accessToken, containerId);
+    return { threadsReplyId: publishedId };
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

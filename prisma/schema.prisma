@@ -168,3 +168,59 @@ model DailyPostCount {
   @@unique([accountId, date])
   @@index([date])
 }
+
+// ==========================================
+// SeedSource: 벤치마크 수집 대상 (Threads 계정)
+// ==========================================
+model SeedSource {
+  id            String    @id @default(cuid())
+  handle        String    @unique
+  notes         String?   @db.Text
+  isActive      Boolean   @default(true)
+  lastPolledAt  DateTime?
+  lastError     String?   @db.Text
+  addedAt       DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  benchmarks    BenchmarkPost[]
+
+  @@index([isActive])
+}
+
+// ==========================================
+// BenchmarkPost: 수집·검증된 벤치마크 게시글
+// (Copywriter 학습·RAG few-shot 소스)
+// ==========================================
+model BenchmarkPost {
+  id                String       @id @default(cuid())
+
+  seedSourceId      String?
+  seedSource        SeedSource?  @relation(fields: [seedSourceId], references: [id])
+  sourceHandle      String
+
+  threadsPostId     String       @unique  // Threads 원본 게시글 ID
+  permalink         String
+  contentHash       String       @unique  // dedup 키 (text + primary media)
+
+  text              String       @db.Text
+  mediaUrls         String[]
+
+  likesCount        Int          @default(0)
+  repliesCount      Int          @default(0)
+  repostsCount      Int          @default(0)
+  quotesCount       Int          @default(0)
+
+  publishedAt       DateTime?
+  collectedAt       DateTime     @default(now())
+
+  // AI viralFactors 분석 결과: { hook_type, structure, tone, length_bucket, cta_type, topic_category }
+  viralFactors      Json?
+  taggedAt          DateTime?
+
+  // 임베딩은 Task #5e에서 pgvector 컬럼 별도 마이그레이션으로 추가
+
+  @@index([sourceHandle, likesCount])
+  @@index([likesCount])
+  @@index([collectedAt])
+  @@index([taggedAt])
+}

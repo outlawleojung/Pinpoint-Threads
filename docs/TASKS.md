@@ -29,15 +29,25 @@ Last synced: 2026-08-28
 - [x] **3g. Reply Composer** — 재설계: 4양식 폐기, AI 감초 톤 매번 생성 (Anthropic Sonnet). 상품·본문 맥락 기반 자연스러운 리드 문장
 - [x] **3h. Pipeline A e2e 검증** — `/pa` 통과. 소스 미디어 2개 → 분류 → 매칭 → Cloudinary → 카피 → AI 감초 댓글 → 승인 카드 (미디어 그룹 프리뷰)
 
-## Priority 4 — 발행 파이프라인 (Meta 승인 후)
+## Priority 4 — 발행 파이프라인
 
-- [ ] **4a. Threads OAuth 흐름** — 5개 계정 Long-lived token 발급, DB Account 저장
-- [ ] **4b. Publisher** — 2-step 발행 + 고정 댓글. 자동 링크 프리뷰 억제 검증
-- [ ] **4c. 실 계정 1개 발행 e2e**
+- [x] **4a. Threads OAuth 흐름** — 5개 계정 실 연결, `/oauth/threads/accounts` UI
+- [x] **4b. Publisher** — 2-step + carousel + 고정 댓글 + refresh 자동화 (실 API 호출 미검증)
+- [ ] **4c. 실 계정 1개 발행 e2e** — 사용자 요청으로 보류 (준비 시 재개)
 - [ ] **4d. 계정 시차 스케줄링** — BullMQ delayed job, 1~4h 랜덤
 - [ ] **4e. Performance Collector** — 24h/72h insights 회수, engagementScore 계산
 
-## Priority 5+ (나중)
+## Priority 5 — Source Collector (벤치마크 수집·분석) ★ 핵심
+
+프로젝트 존재 이유. 터진 콘텐츠 자동 수집·분석 파이프라인. Priority 4 잔여 작업보다 우선.
+
+- [x] **5a. Prisma 스키마** — SeedSource + BenchmarkPost + Neon 마이그레이션 완료
+- [ ] **5b. Apify + Source Collector 코어** — poll → 필터(likes≥1000) → dedup → upsert. 대기: 사용자 Apify 가입 + 액터 선정
+- [ ] **5c. Admin UI** — 시드 관리 · benchmark 뷰
+- [ ] **5d. viralFactors AI 태깅** — Claude로 (훅·구조·톤·길이·CTA·소재) JSON 추출
+- [ ] **5e. Voyage AI 임베딩 + Copywriter RAG 모드** — 데이터 임계 도달 후
+
+## Priority 6+ (나중)
 
 - [ ] Pipeline B (스하리) 실 구현
 - [ ] Pipeline C (일상글) 소스 방식 결정

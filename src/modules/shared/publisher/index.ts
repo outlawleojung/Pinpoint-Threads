@@ -1,50 +1,139 @@
-import { ThreadsClient, type ThreadsPublishResult, type ThreadsReplyResult } from '../../../infra/threads-client.js';
+import { ThreadsClient } from '../../../infra/threads-client.js';
+import { prisma } from '../../../db/prisma.js';
 import { logger } from '../../../config/logger.js';
+import { refreshAccountToken } from './oauth/token-service.js';
 
 /**
  * Publisher — 2-step 발행 오케스트레이션.
- * 1) 본문 + 미디어 발행 → threadsPostId 획득
- * 2) 그 postId에 고정 댓글 즉시 등록
  *
- * Threads Graph API OAuth 완료 후 (Phase 4) 실 사용.
- * 자동 링크 프리뷰 억제 이슈: docs/09-agents/pipeline-a/reply-composer.md 참조.
+ * 흐름:
+ *   1) Account 검증 (활성 · 토큰 유효)
+ *   2) 만료 임박 시 자동 refresh
+ *   3) 본문 + 미디어(carousel 포함) 발행 → threadsPostId
+ *   4) 고정 댓글 발행 → threadsReplyId
+ *   5) Post 레코드 상태 전이 (APPROVED → PUBLISHING → PUBLISHED / FAILED)
  */
 
 const client = new ThreadsClient();
 
+const REFRESH_IF_EXPIRES_WITHIN_MS = 7 * 24 * 60 * 60 * 1000; // 7일
+
 export interface PublishInput {
-  accessToken: string;
-  body: string;
-  mediaUrls: string[];       // 이미 Cloudinary에 업로드된 공개 URL
-  pinnedCommentText: string; // Reply Composer 결과 (고정 댓글)
+  postId: string;
 }
 
 export interface PublishResult {
+  postId: string;
   threadsPostId: string;
-  threadsReplyId: string;
+  threadsReplyId: string | null;
+  publishedAt: Date;
+}
+
+export class PublisherError extends Error {
+  constructor(
+    message: string,
+    public readonly code: 'ACCOUNT_INACTIVE' | 'TOKEN_MISSING' | 'INVALID_STATE' | 'API_ERROR',
+    public readonly cause?: unknown,
+  ) {
+    super(message);
+    this.name = 'PublisherError';
+  }
 }
 
 export async function publish(input: PublishInput): Promise<PublishResult> {
-  // TODO(Phase 4b): ThreadsClient.publish는 아직 stub — Meta 승인 후 실 구현
-  const main = await client.publish({
-    accessToken: input.accessToken,
-    text: input.body,
-    mediaUrl: input.mediaUrls[0], // 다중 미디어는 Threads carousel API 별도
+  const post = await prisma.post.findUnique({
+    where: { id: input.postId },
+    include: { account: true },
   });
 
-  const reply = await client.reply({
-    accessToken: input.accessToken,
-    parentId: main.threadsPostId,
-    text: input.pinnedCommentText,
+  if (!post) throw new PublisherError(`Post ${input.postId} not found`, 'INVALID_STATE');
+  if (post.state !== 'APPROVED' && post.state !== 'FAILED') {
+    throw new PublisherError(
+      `Post ${input.postId} state is ${post.state}, expected APPROVED or FAILED`,
+      'INVALID_STATE',
+    );
+  }
+  if (!post.generatedBody) {
+    throw new PublisherError(`Post ${input.postId} has no generatedBody`, 'INVALID_STATE');
+  }
+  if (!post.account.isActive) {
+    throw new PublisherError(
+      `Account ${post.account.handle} is inactive`,
+      'ACCOUNT_INACTIVE',
+    );
+  }
+  if (!post.account.accessToken || !post.account.tokenExpiresAt) {
+    throw new PublisherError(
+      `Account ${post.account.handle} has no valid token`,
+      'TOKEN_MISSING',
+    );
+  }
+
+  let accessToken = post.account.accessToken;
+  const msUntilExpiry = post.account.tokenExpiresAt.getTime() - Date.now();
+  if (msUntilExpiry < REFRESH_IF_EXPIRES_WITHIN_MS) {
+    try {
+      const refreshed = await refreshAccountToken(post.account.id);
+      const reread = await prisma.account.findUnique({ where: { id: post.account.id } });
+      accessToken = reread!.accessToken;
+      logger.info({ handle: post.account.handle, newExpiry: refreshed.expiresAt }, 'pre-publish refresh');
+    } catch (err) {
+      logger.warn({ err, handle: post.account.handle }, 'pre-publish refresh failed, using existing token');
+    }
+  }
+
+  await prisma.post.update({
+    where: { id: post.id },
+    data: { state: 'PUBLISHING' },
   });
 
-  logger.info(
-    { threadsPostId: main.threadsPostId, replyId: reply.threadsReplyId },
-    'publish success',
-  );
+  let threadsPostId: string;
+  let threadsReplyId: string | null = null;
+  try {
+    const main = await client.publish({
+      accessToken,
+      text: post.generatedBody,
+      mediaUrls: post.mediaUrls ?? [],
+    });
+    threadsPostId = main.threadsPostId;
+    logger.info({ postId: post.id, threadsPostId, handle: post.account.handle }, 'main post published');
 
-  return {
-    threadsPostId: main.threadsPostId,
-    threadsReplyId: reply.threadsReplyId,
-  };
+    if (post.generatedReply) {
+      try {
+        const reply = await client.reply({
+          accessToken,
+          parentId: threadsPostId,
+          text: post.generatedReply,
+        });
+        threadsReplyId = reply.threadsReplyId;
+        logger.info({ postId: post.id, threadsReplyId }, 'pinned reply published');
+      } catch (err) {
+        logger.error({ err, postId: post.id, threadsPostId }, 'pinned reply failed — main post is live but reply missing');
+      }
+    }
+  } catch (err) {
+    await prisma.post.update({
+      where: { id: post.id },
+      data: {
+        state: 'FAILED',
+        rejectionReason: String((err as Error)?.message ?? err),
+        retryCount: { increment: 1 },
+      },
+    });
+    logger.error({ err, postId: post.id }, 'publish failed');
+    throw new PublisherError('Threads publish failed', 'API_ERROR', err);
+  }
+
+  const publishedAt = new Date();
+  await prisma.post.update({
+    where: { id: post.id },
+    data: {
+      state: 'PUBLISHED',
+      publishedAt,
+      threadsPostId,
+      threadsReplyId,
+    },
+  });
+
+  return { postId: post.id, threadsPostId, threadsReplyId, publishedAt };
 }
