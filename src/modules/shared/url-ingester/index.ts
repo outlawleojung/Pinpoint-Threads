@@ -3,6 +3,7 @@ import { prisma } from '../../../db/prisma.js';
 import { logger } from '../../../config/logger.js';
 import { detectPlatform, extractUrls, normalizeUrl } from './platform-detector.js';
 import { getAdapter } from './adapters/registry.js';
+import { maybeAutoPromote } from '../source-collector/promoter.js';
 
 /**
  * URL Ingester — Lane 1 (수동 텔레그램) + Lane 2 (자율 트렌드) 공통 진입점.
@@ -134,6 +135,20 @@ export async function ingestUrl(input: IngestInput): Promise<IngestResult> {
       },
       'URL ingested (FETCHED)',
     );
+
+    // 자동 벤치마크 승격 판정 (best effort)
+    let promoteNote = '';
+    try {
+      const promote = await maybeAutoPromote(updated);
+      if (promote.status === 'promoted') {
+        promoteNote = ` · 🎯 벤치마크 자동 승격됨`;
+      } else if (promote.status === 'already_promoted') {
+        promoteNote = ` · 벤치마크 기존 존재`;
+      }
+    } catch (err) {
+      logger.warn({ err, inboundLinkId: link.id }, 'auto-promote failed');
+    }
+
     return {
       inboundLinkId: link.id,
       platform,
@@ -141,7 +156,8 @@ export async function ingestUrl(input: IngestInput): Promise<IngestResult> {
       isNew: true,
       message:
         `${platform} 조회 완료 — 저자: ${fetched.authorHandle ?? '?'} · ` +
-        `본문 ${fetched.text.length}자 · 미디어 ${fetched.mediaUrls.length}개 · 언어 ${fetched.language ?? '?'}`,
+        `본문 ${fetched.text.length}자 · 미디어 ${fetched.mediaUrls.length}개 · 언어 ${fetched.language ?? '?'}` +
+        promoteNote,
     };
   } catch (err) {
     const errorMessage = (err as Error)?.message ?? String(err);

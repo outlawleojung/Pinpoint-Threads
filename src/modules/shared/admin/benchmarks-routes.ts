@@ -142,7 +142,8 @@ export async function registerBenchmarksRoutes(app: AnyFastify): Promise<void> {
         <dl>
           <dt>Source Handle</dt><dd>${escape(post.sourceHandle)}</dd>
           <dt>Permalink</dt><dd><a href="${escape(post.permalink)}" target="_blank">${escape(post.permalink)}</a></dd>
-          <dt>Threads Post ID</dt><dd><code>${escape(post.threadsPostId)}</code></dd>
+          <dt>Platform · External ID</dt><dd><span class="tag topic">${escape(post.platform)}</span> <code>${escape(post.externalPostId)}</code></dd>
+          ${post.inboundLinkId ? `<dt>원본 InboundLink</dt><dd><a href="/admin/inbound/${escape(post.inboundLinkId)}">${escape(post.inboundLinkId)}</a></dd>` : ''}
           <dt>Engagement</dt><dd>👍 ${post.likesCount.toLocaleString()} · 💬 ${post.repliesCount.toLocaleString()} · 🔁 ${post.repostsCount.toLocaleString()} · ↪ ${post.quotesCount.toLocaleString()}</dd>
           <dt>Published</dt><dd>${post.publishedAt?.toISOString() ?? '-'}</dd>
           <dt>Collected</dt><dd>${post.collectedAt.toISOString()}</dd>

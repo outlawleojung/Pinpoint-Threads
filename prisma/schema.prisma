@@ -360,15 +360,19 @@ model SeedSource {
 // (Copywriter 학습·RAG few-shot 소스)
 // ==========================================
 model BenchmarkPost {
-  id                String       @id @default(cuid())
+  id                String            @id @default(cuid())
 
   seedSourceId      String?
-  seedSource        SeedSource?  @relation(fields: [seedSourceId], references: [id])
+  seedSource        SeedSource?       @relation(fields: [seedSourceId], references: [id])
   sourceHandle      String
 
-  threadsPostId     String       @unique  // Threads 원본 게시글 ID
+  // 승격 원본 (InboundLink → BenchmarkPost 승격 파이프라인)
+  inboundLinkId     String?           @unique
+  platform          InboundPlatform   @default(THREADS)
+
+  externalPostId    String            // 플랫폼별 게시글 원본 ID
   permalink         String
-  contentHash       String       @unique  // dedup 키 (text + primary media)
+  contentHash       String            @unique  // dedup 키 (text + primary media)
 
   text              String       @db.Text
   mediaUrls         String[]
@@ -390,8 +394,10 @@ model BenchmarkPost {
   embedding         Unsupported("vector(1024)")?
   embeddedAt        DateTime?
 
+  @@unique([platform, externalPostId])
   @@index([sourceHandle, likesCount])
   @@index([likesCount])
   @@index([collectedAt])
   @@index([taggedAt])
+  @@index([platform, likesCount])
 }

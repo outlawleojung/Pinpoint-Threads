@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../../../db/prisma.js';
 import { ingestUrl } from '../url-ingester/index.js';
+import { promoteInboundLink } from '../source-collector/promoter.js';
 import { InboundSource, InboundStatus } from '@prisma/client';
 
 type AnyFastify = FastifyInstance<any, any, any, any, any>;
@@ -130,11 +131,37 @@ export async function registerInboundRoutes(app: AnyFastify): Promise<void> {
           <form method="POST" action="/admin/inbound/${escape(link.id)}/reingest" style="display:inline">
             <button type="submit">🔄 재인제스트</button>
           </form>
+          <form method="POST" action="/admin/inbound/${escape(link.id)}/promote" style="display:inline">
+            <button type="submit" ${link.rawText ? '' : 'disabled title="본문 없음"'}>🎯 벤치마크로 승격</button>
+          </form>
           <a href="/admin/inbound">← 목록으로</a>
         </div>
       `,
       ),
     );
+  });
+
+  app.post<{ Params: { id: string } }>('/admin/inbound/:id/promote', async (req, reply) => {
+    try {
+      const result = await promoteInboundLink(req.params.id, 'manual');
+      const detailLink = result.benchmarkPostId
+        ? `<a href="/admin/benchmarks/${escape(result.benchmarkPostId)}">벤치마크 상세</a>`
+        : '';
+      return reply.type('text/html').send(
+        renderPage(
+          '승격 결과',
+          `<p>상태: <strong>${escape(result.status)}</strong></p>
+           <p>${escape(result.reason ?? '')}</p>
+           ${detailLink}
+           <p><a href="/admin/inbound/${escape(req.params.id)}">← InboundLink 상세</a> · <a href="/admin/inbound">목록</a></p>`,
+        ),
+      );
+    } catch (err) {
+      return reply
+        .code(500)
+        .type('text/html')
+        .send(renderPage('승격 실패', escape((err as Error).message)));
+    }
   });
 
   app.post<{ Params: { id: string } }>('/admin/inbound/:id/reingest', async (req, reply) => {
