@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../../../db/prisma.js';
 import { tagBenchmarkPost, tagUntaggedBenchmarks } from '../source-collector/viralfactors-tagger.js';
+import { embedUntaggedBatch, searchSimilar } from '../source-collector/embedder.js';
+import { isVoyageConfigured } from '../../../infra/voyage-client.js';
 import { logger } from '../../../config/logger.js';
 
 type AnyFastify = FastifyInstance<any, any, any, any, any>;
@@ -91,6 +93,9 @@ export async function registerBenchmarksRoutes(app: AnyFastify): Promise<void> {
         <div class="actions">
           <form method="POST" action="/admin/benchmarks/tag-batch" style="display:inline">
             <button type="submit" ${untaggedCount === 0 ? 'disabled' : ''}>🏷 미태깅 상위 20개 자동 태깅 (Claude)</button>
+          </form>
+          <form method="POST" action="/admin/benchmarks/embed-batch" style="display:inline">
+            <button type="submit" ${isVoyageConfigured() ? '' : 'disabled title="VOYAGE_API_KEY 미설정"'}>🧬 미임베딩 상위 16개 임베딩 (Voyage)</button>
           </form>
           <a href="/admin/benchmarks?sort=recent" class="link-btn">최근 수집순</a>
           <a href="/admin/benchmarks?sort=likes" class="link-btn">좋아요순</a>
@@ -184,6 +189,85 @@ export async function registerBenchmarksRoutes(app: AnyFastify): Promise<void> {
     }
   });
 
+  app.post('/admin/benchmarks/embed-batch', async (_req, reply) => {
+    const result = await embedUntaggedBatch(16);
+    return reply
+      .type('text/html')
+      .send(
+        renderPage(
+          '배치 임베딩 결과',
+          `<p>성공: <strong>${result.embedded}</strong> · 실패: ${result.failed} · 소모 토큰: ${result.tokens}</p>
+           <p><a href="/admin/benchmarks">← 벤치마크 목록</a></p>`,
+        ),
+      );
+  });
+
+  app.get<{ Querystring: { q?: string; topK?: string; category?: string } }>(
+    '/admin/benchmarks/search',
+    async (req, reply) => {
+      const q = req.query.q?.trim();
+      const topK = Math.min(Number(req.query.topK) || 5, 20);
+      const category = req.query.category?.trim();
+
+      if (!q) {
+        return reply.type('text/html').send(
+          renderPage(
+            'RAG 유사 검색',
+            `
+            <form method="GET" action="/admin/benchmarks/search">
+              <label>쿼리 텍스트 (한/영/중/일 · 문장으로 입력)</label>
+              <textarea name="q" rows="4" style="width:100%;padding:8px" required></textarea>
+              <label>Top K</label>
+              <input type="number" name="topK" value="5" min="1" max="20" style="padding:6px">
+              <label>카테고리 필터 (viralFactors.topic_category, 선택)</label>
+              <input type="text" name="category" placeholder="예: beauty_skincare" style="padding:6px">
+              <div class="actions" style="margin-top:12px">
+                <button type="submit" ${isVoyageConfigured() ? '' : 'disabled'}>검색</button>
+              </div>
+            </form>
+            `,
+          ),
+        );
+      }
+
+      try {
+        const results = await searchSimilar({
+          queryText: q,
+          topK,
+          categoryFilter: category || undefined,
+        });
+        const cards = results
+          .map(
+            (r) => `
+          <div class="hit">
+            <div class="hit-meta">
+              <strong>${escape(r.sourceHandle)}</strong> · 👍 ${r.likesCount} · dist ${r.distance.toFixed(4)}
+            </div>
+            <pre>${escape(r.text.slice(0, 400))}</pre>
+            <a href="/admin/benchmarks/${escape(r.id)}">상세</a>
+          </div>`,
+          )
+          .join('');
+        return reply.type('text/html').send(
+          renderPage(
+            `RAG 유사 검색 · ${results.length}건`,
+            `
+            <details><summary>쿼리</summary><pre>${escape(q)}</pre></details>
+            ${cards || '<p class="muted">유사한 벤치마크 없음 (임베딩된 데이터가 부족하거나 카테고리 필터에 매칭 없음)</p>'}
+            <p><a href="/admin/benchmarks/search">← 새 검색</a></p>
+            `,
+          ),
+        );
+      } catch (err) {
+        logger.error({ err, q }, 'RAG search failed');
+        return reply
+          .code(500)
+          .type('text/html')
+          .send(renderPage('검색 실패', escape((err as Error).message)));
+      }
+    },
+  );
+
   app.post('/admin/benchmarks/tag-batch', async (_req, reply) => {
     const result = await tagUntaggedBenchmarks(20);
     return reply
@@ -222,6 +306,10 @@ th{background:#fafafa;font-weight:600}
 .tag{display:inline-block;padding:2px 8px;border-radius:10px;font-size:0.72em;margin-right:4px}
 .tag.hook{background:#fce4ec;color:#880e4f}
 .tag.topic{background:#e3f2fd;color:#0d47a1}
+.hit{border:1px solid #ddd;border-radius:8px;padding:12px 16px;margin:12px 0;background:#fafafa}
+.hit-meta{color:#666;font-size:0.85em;margin-bottom:8px}
+.hit pre{background:#fff;margin:8px 0}
+label{display:block;font-weight:600;margin-top:12px;margin-bottom:4px;font-size:0.9em}
 .muted{color:#999}
 pre{background:#f4f4f4;padding:14px;border-radius:6px;white-space:pre-wrap;font-size:0.9em;line-height:1.6}
 dl{display:grid;grid-template-columns:180px 1fr;gap:6px 12px;margin:16px 0}

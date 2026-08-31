@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { llm } from '../../../infra/llm/index.js';
 import type { LlmContentPart } from '../../../infra/llm/index.js';
 import { logger } from '../../../config/logger.js';
+import { searchSimilar, type SimilarBenchmark } from '../source-collector/embedder.js';
+import { isVoyageConfigured } from '../../../infra/voyage-client.js';
 
 /**
  * Copywriter — 원본을 참고해 계정별 페르소나로 완전 재창조하는 카피 노드.
@@ -37,6 +39,8 @@ export interface CopywriteInput {
   deeplinkUrl?: string;
   channel?: 'COUPANG' | 'MUSINSA';
   variantCount?: number;
+  ragEnabled?: boolean; // Voyage RAG로 유사 벤치마크 top-K few-shot
+  ragTopK?: number;
 }
 
 /**
@@ -117,6 +121,25 @@ async function generateBody(input: CopywriteInput, seedIndex: number): Promise<s
     });
   }
 
+  // RAG: 유사 벤치마크 top-K를 few-shot 힌트로 (Voyage 있고 sourceText 있을 때만)
+  if (input.ragEnabled && input.sourceText && isVoyageConfigured()) {
+    try {
+      const similar = await searchSimilar({
+        queryText: input.sourceText,
+        topK: input.ragTopK ?? 3,
+        minLikes: 500,
+      });
+      if (similar.length > 0) {
+        userParts.push({
+          type: 'text',
+          text: renderBenchmarkHints(similar),
+        });
+      }
+    } catch (err) {
+      logger.warn({ err }, 'RAG lookup failed — proceeding without few-shot');
+    }
+  }
+
   const contextLines: string[] = [];
   if (input.productName) contextLines.push(`상품명(참고, 카피에 노출 금지): ${input.productName}`);
   if (input.productCategory) contextLines.push(`상품 카테고리: ${input.productCategory}`);
@@ -146,6 +169,23 @@ async function generateBody(input: CopywriteInput, seedIndex: number): Promise<s
   const parsed = extractJson(response.text);
   const { body } = BodyResultSchema.parse(parsed);
   return body;
+}
+
+/**
+ * 유사 벤치마크를 few-shot 힌트로 렌더 (Copywriter 시스템 프롬프트에 붙임).
+ * 카피 자체는 유사 벤치마크의 톤을 참고할 뿐, 문장 그대로 옮기지 않음.
+ */
+function renderBenchmarkHints(items: SimilarBenchmark[]): string {
+  const lines: string[] = [];
+  lines.push('참고 — 유사 소재로 반응 좋았던 게시글 (톤·훅 패턴만 흡수, 문장 그대로 옮기지 말 것):');
+  items.forEach((it, i) => {
+    const factors = it.viralFactors as { hook_type?: string; tone?: string } | null;
+    const meta = factors
+      ? `[hook:${factors.hook_type ?? '?'} · tone:${factors.tone ?? '?'} · 👍${it.likesCount}]`
+      : `[👍${it.likesCount}]`;
+    lines.push(`\n${i + 1}. ${meta}\n"""\n${it.text.slice(0, 300)}\n"""`);
+  });
+  return lines.join('\n');
 }
 
 function extractJson(raw: string): unknown {

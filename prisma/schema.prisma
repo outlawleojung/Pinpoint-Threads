@@ -385,7 +385,10 @@ model BenchmarkPost {
   viralFactors      Json?
   taggedAt          DateTime?
 
-  // 임베딩은 Task #5e에서 pgvector 컬럼 별도 마이그레이션으로 추가
+  // Voyage AI 임베딩 (1024 dims, voyage-3). pgvector.
+  // Prisma는 vector 타입 미지원 → Unsupported + 원시 SQL로 삽입·검색.
+  embedding         Unsupported("vector(1024)")?
+  embeddedAt        DateTime?
 
   @@index([sourceHandle, likesCount])
   @@index([likesCount])
