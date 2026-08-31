@@ -9,18 +9,18 @@ status: "active"
 **새 세션 시작 시 이 파일을 먼저 읽으세요.**
 
 Last updated: 2026-08-31
-Last commit: Phase 4 진입 커밋 (OAuth + Publisher)
+Last commit: `fff6419` (feat 6a-6d: URL Ingester · Threads Adapter · 페르소나 Copywriter · Persona UI)
 
 ## Phase & 진행률
 
-- **Phase**: **4 진입 + Vision 2-Lane 아키텍처 확정** (2026-08-31, 사용자 없이도 시스템이 자율 운영)
-- **Task 완료**: 19/41 (46%)
+- **Phase**: **4 진입 + Lane 1 앞단 4개 완료** (URL Ingester · Threads Adapter · 페르소나 Copywriter · Persona UI)
+- **Task 완료**: 23/41 (56%)
 - **Priority 3 (Pipeline A 실 구현)**: 8/8 ✅
 - **Priority 4 (발행 파이프라인)**: 2/5 (17 OAuth · 18 Publisher 완료, 19-21 보류)
-- **Priority 5 (Source Collector — 축소·부가)**: 1/5 (스키마 완료, 나머지 재정의)
-- **Priority 6 (URL 인제스터 — Lane 1 · 하류 공통)**: 0/7
-- **Priority 7 (자율 트렌드 추적 — Lane 2)**: 0/8 (신규 · 시스템 자율성의 핵심)
-- **다음 Milestone**: Lane 1(6a-6c) + Lane 2 Stage 1(7a-7e) 병행 착수
+- **Priority 5 (Source Collector — 축소·부가)**: 1/5
+- **Priority 6 (URL 인제스터 · Lane 1)**: 4/7 (6a·6b·6c·6d 완료 / 6e·6f·6g 남음)
+- **Priority 7 (자율 트렌드 · Lane 2)**: 0/8
+- **다음 Milestone**: Lane 1 나머지 어댑터(6e/f/g) + Lane 2 Stage 1 착수(7a-7e)
 
 ## 지금까지 검증된 것
 
@@ -51,25 +51,52 @@ Last commit: Phase 4 진입 커밋 (OAuth + Publisher)
 
 ## 진행 중 / 다음
 
-**2026-08-31 vision 재정립:** 자동 폴링 → **수동 URL 시딩 + AI 재창조** 모델로 대전환. 상세 근거는 [vision.md](00-overview/vision.md) 2026-08-31 재정립 섹션.
+**2026-08-31 vision 재정립:** 자동 폴링 → **2-Lane (수동 큐레이션 + 자율 트렌드 추적)** 모델. 사용자 노동 없이 시스템 자율 운영. 상세는 [vision.md](00-overview/vision.md) 2026-08-31 재정립 섹션.
 
-### 다음 세션 착수 (Priority 6 URL 인제스터)
+### 이번 세션(2026-08-31) 완료된 것
 
-- **#6a URL Ingester 프레임워크** — 텔레그램 봇에 URL 라우팅, 플랫폼 감지
-- **#6b Threads URL Adapter** — 첫 어댑터, 인터페이스 표준 정립
-- **#6c 다국어·페르소나 Copywriter 확장** — 소재만 취하고 계정별 완전 재창조 ★핵심
-- **#6d 계정별 페르소나 관리 UI** — 5계정 각자 컨셉 정의
-- **#6e/f/g** — TikTok · 샤오홍슈 · Instagram Adapter 순차
+- ✅ Meta 앱 Live 게시 (개인정보처리방침 URL 등록)
+- ✅ Task #17 OAuth 흐름 (5계정 실 연결, 60일 토큰)
+- ✅ Task #18 Publisher 실 구현 (2-step + carousel + 고정 댓글 + 자동 refresh)
+- ✅ Task #22 BenchmarkPost·SeedSource 스키마 + 마이그레이션
+- ✅ Task #6a URL Ingester 프레임워크 (텔레그램 봇 URL 자동 감지)
+- ✅ Task #6b Threads URL Adapter (HTML fetch + OG 파싱 + 언어 감지)
+- ✅ Task #6c 다국어·페르소나 Copywriter 확장 (직역 금지, 5계정 다변화)
+- ✅ Task #6d Persona Admin UI (`/admin/personas` + 다국어 프리뷰)
+
+### 즉시 테스트 가능한 것
+
+- `http://localhost:3000/admin/personas` — 5계정 페르소나 편집 + 다국어 프리뷰
+- 텔레그램: Threads URL 붙여넣기 → 자동 인제스트
+- `/ingest <URL>` 명시 명령
+
+### 다음 세션 착수
+
+**Lane 1 남은 어댑터 (Priority 6)**
+- 6e TikTok URL Adapter
+- 6f 샤오홍슈 URL Adapter (Apify 필수)
+- 6g Instagram URL Adapter
+
+**Lane 2 Stage 1 (Priority 7)**
+- 7a TrendSignal 스키마
+- 7b 네이버 데이터랩 통합 ★최우선
+- 7c Google Trends
+- 7d 트렌드 기반 플랫폼 검색기
+- 7e 자동 인제스션 큐
+
+Lane 1 완전 완성 + Lane 2 Stage 1 완성 시 → 24/7 자율 운영 시작.
 
 ### 축소·후순위
 
-- **Priority 5 (Source Collector)**: 시드 5개 소규모 부가 기능화, 자동 폴링 폐기
+- **Priority 5 (Source Collector)**: 축소·부가 기능화
 - **Priority 4 잔여 (#19-21)**: 인제스터 안정화 후 발동
 
 ### 병행 가능 (사용자)
 
 - 강의 영상 녹화 (하루 1개씩 ~10일)
-- 5계정 각각 컨셉·페르소나 방향 잡기 (#6d 착수 시 반영)
+- 5계정 각자 컨셉·페르소나 편집 (`/admin/personas`에서)
+- 네이버 데이터랩 API 신청 (Priority 7 착수 조건, 5분 · 무료)
+- Apify 계정 유지 (샤오홍슈 등 Adapter 백엔드)
 
 ## 연결된 Threads 계정 (5개)
 
