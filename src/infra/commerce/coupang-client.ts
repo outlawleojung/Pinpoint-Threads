@@ -14,6 +14,7 @@ import type { CommerceAdapter, CommerceSearchResult } from './types.js';
 const BASE_URL = 'https://api-gateway.coupang.com';
 const SEARCH_PATH = '/v2/providers/affiliate_open_api/apis/openapi/products/search';
 const DEEPLINK_PATH = '/v2/providers/affiliate_open_api/apis/openapi/v1/deeplink';
+const BEST_CATEGORIES_PATH = '/v2/providers/affiliate_open_api/apis/openapi/products/bestcategories';
 
 interface CoupangSearchResponse {
   rCode: string;
@@ -33,6 +34,24 @@ interface CoupangSearchResponse {
       categoryName?: string;
     }>;
   };
+}
+
+export interface CoupangBestProduct {
+  productId: number;
+  productName: string;
+  productPrice: number;
+  productImage: string;
+  productUrl: string;
+  categoryName?: string;
+  rank: number;
+  isRocket: boolean;
+  isFreeShipping: boolean;
+}
+
+interface CoupangBestCategoriesResponse {
+  rCode: string;
+  rMessage: string;
+  data: CoupangBestProduct[];
 }
 
 interface CoupangDeeplinkResponse {
@@ -100,6 +119,48 @@ export class CoupangAdapter implements CommerceAdapter {
       price: p.productPrice,
       category: p.categoryName,
     }));
+  }
+
+  /**
+   * 카테고리별 베스트셀러 조회.
+   * Docs: /v2/providers/affiliate_open_api/apis/openapi/products/bestcategories/{categoryId}
+   * @param categoryId 카테고리 코드 (예: 1010=뷰티, 1011=출산/유아동)
+   * @param limit 최대 50
+   */
+  async getBestByCategory(
+    categoryId: number,
+    opts?: { limit?: number; imageSize?: string },
+  ): Promise<CoupangBestProduct[]> {
+    this.assertCredentials();
+    const limit = Math.min(opts?.limit ?? 20, 50);
+    const imageSize = opts?.imageSize ?? '512x512';
+    const query = `limit=${limit}&imageSize=${encodeURIComponent(imageSize)}`;
+    const path = `${BEST_CATEGORIES_PATH}/${categoryId}`;
+    const authorization = buildCoupangAuthHeader({
+      method: 'GET',
+      path,
+      query,
+      accessKey: this.accessKey,
+      secretKey: this.secretKey,
+    });
+
+    const url = `${BASE_URL}${path}?${query}`;
+    const resp = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: authorization,
+        'Content-Type': 'application/json;charset=UTF-8',
+      },
+    });
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '');
+      throw new CoupangApiError(`bestcategories HTTP ${resp.status}: ${body.slice(0, 500)}`);
+    }
+    const json = (await resp.json()) as CoupangBestCategoriesResponse;
+    if (json.rCode !== '0') {
+      throw new CoupangApiError(`bestcategories rCode=${json.rCode} msg=${json.rMessage}`);
+    }
+    return json.data;
   }
 
   async generateDeeplink(productUrl: string): Promise<string> {

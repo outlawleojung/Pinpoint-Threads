@@ -9,6 +9,8 @@ import {
 } from '../trend-signals/index.js';
 import { NaverDatalabAdapter } from '../trend-signals/adapters/naver-datalab.js';
 import { GoogleTrendsAdapter } from '../trend-signals/adapters/google-trends.js';
+import { CoupangRankingAdapter } from '../trend-signals/adapters/coupang-ranking.js';
+import { TikTokCreativeCenterAdapter } from '../trend-signals/adapters/tiktok-creative-center.js';
 import { safeRunTrendSearchIngest } from '../trend-signals/search-orchestrator.js';
 import { isApifyConfigured } from '../../../infra/apify-client.js';
 
@@ -22,7 +24,12 @@ type AnyFastify = FastifyInstance<any, any, any, any, any>;
  */
 
 function buildAdapters(): TrendSourceAdapter[] {
-  return [new NaverDatalabAdapter(), new GoogleTrendsAdapter()];
+  return [
+    new NaverDatalabAdapter(),
+    new GoogleTrendsAdapter(),
+    new CoupangRankingAdapter(),
+    new TikTokCreativeCenterAdapter(),
+  ];
 }
 
 export async function registerTrendsRoutes(app: AnyFastify): Promise<void> {

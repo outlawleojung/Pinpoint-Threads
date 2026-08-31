@@ -58,6 +58,7 @@ const envSchema = z.object({
   APIFY_ACTOR_TIKTOK_KEYWORD: z.string().optional(),
   APIFY_ACTOR_IG_KEYWORD: z.string().optional(),
   APIFY_ACTOR_THREADS_KEYWORD: z.string().optional(),
+  APIFY_ACTOR_TIKTOK_CC: z.string().optional(),
 
   VOYAGE_API_KEY: z.string().optional(),
   VOYAGE_MODEL: z.string().default('voyage-3'),

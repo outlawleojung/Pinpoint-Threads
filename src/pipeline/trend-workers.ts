@@ -10,6 +10,8 @@ import {
 } from '../modules/shared/trend-signals/index.js';
 import { NaverDatalabAdapter } from '../modules/shared/trend-signals/adapters/naver-datalab.js';
 import { GoogleTrendsAdapter } from '../modules/shared/trend-signals/adapters/google-trends.js';
+import { CoupangRankingAdapter } from '../modules/shared/trend-signals/adapters/coupang-ranking.js';
+import { TikTokCreativeCenterAdapter } from '../modules/shared/trend-signals/adapters/tiktok-creative-center.js';
 import { sendDigestMessage } from '../modules/shared/approval-gate/notifier.js';
 import { safeRunTrendSearchIngest } from '../modules/shared/trend-signals/search-orchestrator.js';
 
@@ -27,7 +29,12 @@ const DIGEST_CRON = '0 8 * * *'; // 매일 08:00 KST
 const SEARCH_CRON = '30 8 * * *'; // 매일 08:30 KST (다이제스트 이후)
 
 function buildAdapters(): TrendSourceAdapter[] {
-  return [new NaverDatalabAdapter(), new GoogleTrendsAdapter()];
+  return [
+    new NaverDatalabAdapter(),
+    new GoogleTrendsAdapter(),
+    new CoupangRankingAdapter(),
+    new TikTokCreativeCenterAdapter(),
+  ];
 }
 
 export function startTrendWorkers(): Worker[] {
