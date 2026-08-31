@@ -53,10 +53,25 @@ export async function registerAdminAuth(app: AnyFastify): Promise<void> {
     authenticate: { realm: 'Pinpoint Threads Admin' },
   });
 
-  const basicAuthHook = (app as any).basicAuth as (
+  // @fastify/basic-auth v6는 callback-style hook: (req, reply, next).
+  // async 함수에서 쓰려면 Promise로 감싸야 함.
+  const basicAuthCallback = (app as any).basicAuth as (
     req: FastifyRequest,
     reply: FastifyReply,
-  ) => Promise<void>;
+    next: (err?: Error | null) => void,
+  ) => void;
+
+  const invokeBasicAuth = (req: FastifyRequest, reply: FastifyReply): Promise<void> =>
+    new Promise((resolve, reject) => {
+      try {
+        basicAuthCallback(req, reply, (err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      } catch (err) {
+        reject(err as Error);
+      }
+    });
 
   app.addHook('onRequest', async (req: FastifyRequest, reply: FastifyReply) => {
     const url = req.url.split('?')[0] ?? '';
@@ -71,12 +86,10 @@ export async function registerAdminAuth(app: AnyFastify): Promise<void> {
       return reply;
     }
 
-    // Basic Auth 강제. 실패 시 basicAuthHook이 throw → Fastify 에러 핸들러가 401 처리.
+    // Basic Auth 강제. 실패 시 reject → 401 응답.
     try {
-      await basicAuthHook(req, reply);
+      await invokeBasicAuth(req, reply);
     } catch (err: any) {
-      // basicAuth 실패 시 자체 401 응답을 보낼 수도, throw만 할 수도 있음.
-      // reply.sent 검사 후 미전송이면 우리가 401 보냄.
       if (!reply.sent) {
         logger.debug({ url, err: err?.message }, 'basic auth failed');
         reply.header('WWW-Authenticate', 'Basic realm="Pinpoint Threads Admin"');
