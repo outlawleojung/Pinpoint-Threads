@@ -11,6 +11,9 @@ import { CoupangAdapter } from '../../../infra/commerce/coupang-client.js';
 import { composeReply } from '../../pipeline-a/reply-composer/index.js';
 import { matchProduct } from '../../pipeline-a/product-matcher/index.js';
 import { runPipelineA } from '../../pipeline-a/orchestrator.js';
+import { ingestUrlsFromText, ingestUrl } from '../url-ingester/index.js';
+import { InboundSource } from '@prisma/client';
+import { detectPlatform, extractUrls } from '../url-ingester/platform-detector.js';
 
 export const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
 
@@ -35,7 +38,9 @@ bot.command('start', async (ctx) => {
       '- /copy3 : 게시글 카피 3개 후보 생성\n' +
       '- /vision : Claude Vision 이미지 정합성 테스트\n' +
       '- /coupang <검색어> : 쿠팡 상품 검색 실 API 테스트\n' +
-      '- /deeplink <쿠팡URL> : 쿠팡 딥링크 생성 실 API 테스트',
+      '- /deeplink <쿠팡URL> : 쿠팡 딥링크 생성 실 API 테스트\n' +
+      '- /ingest <URL> : URL 인제스터 수동 테스트 (Threads·TikTok·샤오홍슈·Instagram)\n\n' +
+      '💡 URL만 그대로 메시지에 붙여넣어도 자동 인제스트됩니다.',
   );
 });
 
@@ -341,6 +346,57 @@ bot.command('newpost', async (ctx) => {
     logger.error(err, '/newpost failed');
     await ctx.reply(`❌ 실패: ${(err as Error).message}`);
   }
+});
+
+// /ingest — URL 인제스터 수동 명령
+bot.command('ingest', async (ctx) => {
+  const url = ctx.match?.trim();
+  if (!url) {
+    await ctx.reply('사용법: /ingest <URL>\n예: /ingest https://www.threads.net/@user/post/xxx');
+    return;
+  }
+  await ctx.reply(`🔍 인제스트 중: ${url}`);
+  try {
+    const result = await ingestUrl({ url, source: InboundSource.MANUAL_TELEGRAM });
+    await ctx.reply(
+      `${result.isNew ? '✅' : 'ℹ️'} ${result.message}\n\n` +
+        `Platform: ${result.platform}\n` +
+        `Status: ${result.status}\n` +
+        `Inbound ID: \`${result.inboundLinkId}\``,
+      { parse_mode: 'Markdown' },
+    );
+  } catch (err) {
+    logger.error(err, '/ingest failed');
+    await ctx.reply(`❌ 실패: ${(err as Error).message}`);
+  }
+});
+
+// 일반 메시지에 URL 있으면 자동 인제스트 (커맨드 아닌 텍스트만)
+bot.on('message:text', async (ctx, next) => {
+  const text = ctx.message.text;
+  if (text.startsWith('/')) {
+    await next();
+    return;
+  }
+  const urls = extractUrls(text);
+  if (urls.length === 0) {
+    // URL 없는 일반 메시지는 무시 (필요 시 다른 핸들러 추가)
+    return;
+  }
+  const supported = urls.filter((u) => detectPlatform(u) !== 'UNKNOWN');
+  if (supported.length === 0) {
+    await ctx.reply(`⚠️ 지원 플랫폼 URL을 찾지 못했습니다.\n감지된 URL: ${urls.length}개`);
+    return;
+  }
+  await ctx.reply(`🔍 URL ${supported.length}개 자동 인제스트 시작...`);
+  const { results } = await ingestUrlsFromText(text, InboundSource.MANUAL_TELEGRAM);
+  const summary = results
+    .map(
+      (r, i) =>
+        `${i + 1}. ${r.isNew ? '✅' : 'ℹ️'} [${r.platform}] ${r.status}\n   ${r.message}`,
+    )
+    .join('\n\n');
+  await ctx.reply(`📥 인제스트 결과 (${results.length}건)\n\n${summary}`);
 });
 
 // 승인/거부 콜백

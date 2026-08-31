@@ -4,19 +4,21 @@ import type { LlmContentPart } from '../../../infra/llm/index.js';
 import { logger } from '../../../config/logger.js';
 
 /**
- * "쿠파스 게시글 생성기" Custom GPT 스타일을 이식한 카피 노드.
+ * Copywriter — 원본을 참고해 계정별 페르소나로 완전 재창조하는 카피 노드.
  *
- * 핵심 설계:
- * - 본문(body): 이미지 1장 기반 짧은 한 문장 (18~60자, 최대 2줄).
- *   광고 티 없이 "친구가 방금 겪은 일" 톤. 링크/브랜드/가격/구매처/홍보 표현 금지.
- * - 고정 댓글(reply): 결정론적 템플릿으로 조립 (AI 미개입, Reply Composer 참조).
+ * 원칙 (2026-08-31 재정의):
+ * - 원본 소재·훅만 참고. 직역·복붙 금지. 소스 언어(ko/en/zh/ja) 무관.
+ * - 한국 Threads 피드에 자연스럽게 섞이는 짧은 문장 1개 생성.
+ * - **페르소나 프롬프트가 톤·타겟의 유일한 결정 요소.**
+ *   같은 원본이라도 계정별로 완전히 다른 카피가 나와야 함.
+ * - 상품 정보(있으면) 반영, 단 광고 카피처럼 보이지 않게.
  */
 
 export const LEGAL_DISCLAIMER =
   '이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.';
 
 const BodyResultSchema = z.object({
-  body: z.string().min(6).max(80),
+  body: z.string().min(6).max(200),
 });
 
 export type CopywriteResult = {
@@ -26,76 +28,116 @@ export type CopywriteResult = {
 
 export interface CopywriteInput {
   sourceText?: string;
-  sourceImageUrl: string;
-  productName: string;
+  sourceLanguage?: string | null;
+  sourceImageUrl?: string;
+  productName?: string;
   productCategory?: string;
   personaPrompt?: string;
   accountSeed: string;
-  deeplinkUrl: string;
-  channel: 'COUPANG' | 'MUSINSA';
+  deeplinkUrl?: string;
+  channel?: 'COUPANG' | 'MUSINSA';
   variantCount?: number;
 }
 
-const BASE_SYSTEM_PROMPT = `너는 한국 Threads 피드에 자연스럽게 섞일 짧은 게시글 한 문장을 만드는 도구다.
+/**
+ * 페르소나가 없을 때 사용할 최소 기본값.
+ * 실제 운영에서는 각 Account.personaPrompt를 반드시 전달해야 함.
+ */
+const NEUTRAL_PERSONA =
+  '한국 Threads 사용자. 담백한 구어체. 특정 성별·연령대 지향 없음. 이모지 절제.';
 
-핵심 원칙:
-- 이미지 1장 기반, 문장 1개, 최대 2줄, 대략 18~45자 (넘어가도 60자 이내).
-- 제목/설명/해설/해시태그/부연 코멘트 절대 금지. 오로지 문장 1개만 출력.
-- 광고 카피처럼 보이면 안 됨. 친구가 방금 겪은 일을 툭 던진 느낌.
-- 제품·성능·성분·스펙·기능 설명 금지. 상황·행동·감정·발견 중심.
+/**
+ * 플랫폼 규칙 (누구에게나 공통).
+ * 페르소나 특유 톤·연령대·성별 언급 없음 — 그건 personaPrompt 담당.
+ */
+const UNIVERSAL_PRINCIPLES = `너는 한국 Threads 피드에 자연스럽게 섞일 짧은 게시글 한 문장을 만드는 도구다.
+
+플랫폼 규칙:
+- 문장 1개, 최대 2~3줄, 대략 18~80자 (넘어가도 150자 이내).
+- 제목/설명/해설/해시태그/부연 코멘트 절대 금지. 오로지 본문 문장만.
+- 광고 카피처럼 보이면 안 됨. 친구가 툭 던진 느낌.
 - 브랜드명·제품명·모델명·가격·할인·최저가·구매처·구매 링크 언급 금지.
 - 로고가 보여도 브랜드명 꺼내지 않음.
+- 제품 스펙·성분·기능 나열 금지. 상황·행동·감정·발견 중심.
 
-문체:
-- 한국어 반말 + 인터넷 구어체.
-- 어미 예: ~임 / ~했음 / ~네 / ~냐 / ~지? / ~였네 / ~아니지?
-- 이모지는 안 쓰거나 최대 1개. 지나친 감성/은유/시적 표현 금지.
-- ㅋㅋ, ㄷㄷ, ;; 등 인터넷 표현은 필요할 때만 가볍게.
+원본 처리 원칙 (매우 중요):
+- 원본이 한국어가 아닐 수 있음 (영어·중국어·일본어 등). 언어 상관없이 처리.
+- 원본은 **소재와 훅만** 참고. 문장 구조·표현을 그대로 옮기지 말 것.
+- 직역 금지. 원본이 말하는 상황·감정·발견을 잡아서 아래 페르소나 톤으로 완전히 새로 작성.
+- 원본에 있는 감탄사·이모지·문화 코드를 그대로 옮기지 말 것 (예: "太绝了" → 한국식 감탄으로 치환).
+- 원본이 강조하는 훅(놀람·발견·공감·질문 등)의 종류는 유지하되 표현은 완전히 재창조.
 
-금지 어휘:
+금지 어휘 (홍보 냄새):
 - 강추, 추천, 가성비, 혜자, 필수템, 존예, 미쳤다, 갓템, 인생템,
-  최저가, 할인, 무료배송, 리뷰, 후기, 사용법, 스펙 등 홍보/후기 냄새 나는 단어.
-
-권장 문장 구조 (참고, 강제 아님):
-- 상황 → 깨달음: "~인 줄 알았는데 ~였네"
-- 실수/사건 → 감정: "방금 ~하고 현타 옴"
-- 공감 유도: "이거 나만 그랬냐…"
-- 궁금증 질문: "이거 해본 사람 있음?"
-- 미완의 결론: "별거 아닌데 이게 은근 스트레스였음"
+  최저가, 할인, 무료배송, 리뷰, 후기, 사용법, 스펙.
 
 출력 포맷:
 JSON으로만 반환. 다른 텍스트 금지.
-{ "body": "여기에 문장 1개" }`;
+{ "body": "여기에 본문 문장" }`;
+
+function buildSystemPrompt(input: {
+  personaPrompt?: string;
+  accountSeed: string;
+  variantIndex: number;
+  sourceLanguage?: string | null;
+}): string {
+  const persona = input.personaPrompt?.trim() || NEUTRAL_PERSONA;
+  const langHint = input.sourceLanguage
+    ? `\n\n원본 감지 언어: ${input.sourceLanguage} (직역 금지, 아래 페르소나로 재창조)`
+    : '';
+
+  return `${UNIVERSAL_PRINCIPLES}
+
+== 이 계정의 페르소나 (seed=${input.accountSeed}, variant=${input.variantIndex}) ==
+${persona}
+
+이 페르소나는 톤·타겟·문체의 유일한 기준이다.
+페르소나가 지시하는 대상 독자·어투·이모지 사용 규칙·문화 코드를 정확히 따를 것.${langHint}`;
+}
 
 async function generateBody(input: CopywriteInput, seedIndex: number): Promise<string> {
-  const persona = input.personaPrompt
-    ? `\n\n== 이 계정의 페르소나 (seed=${input.accountSeed}, variant=${seedIndex}) ==\n${input.personaPrompt}`
-    : '';
-  const system = BASE_SYSTEM_PROMPT + persona;
+  const system = buildSystemPrompt({
+    personaPrompt: input.personaPrompt,
+    accountSeed: input.accountSeed,
+    variantIndex: seedIndex,
+    sourceLanguage: input.sourceLanguage ?? null,
+  });
 
-  const userParts: LlmContentPart[] = [{ type: 'image', url: input.sourceImageUrl }];
+  const userParts: LlmContentPart[] = [];
+
+  if (input.sourceImageUrl) {
+    userParts.push({ type: 'image', url: input.sourceImageUrl });
+  }
+
   if (input.sourceText) {
+    const langLabel = input.sourceLanguage ? ` (${input.sourceLanguage})` : '';
     userParts.push({
       type: 'text',
-      text: `참고 원문(문장 참고용, 그대로 옮기지 말 것):\n"""\n${input.sourceText}\n"""`,
+      text: `참고 원문${langLabel} — 소재·훅 참고용, 직역 금지, 페르소나로 완전 재창조:\n"""\n${input.sourceText}\n"""`,
     });
   }
-  userParts.push({
-    type: 'text',
-    text: `상품 카테고리 참고: ${input.productCategory ?? '알 수 없음'}\n\n이미지 기반으로 문장 1개만 JSON으로.`,
-  });
+
+  const contextLines: string[] = [];
+  if (input.productName) contextLines.push(`상품명(참고, 카피에 노출 금지): ${input.productName}`);
+  if (input.productCategory) contextLines.push(`상품 카테고리: ${input.productCategory}`);
+  contextLines.push('본문 문장 1개를 JSON으로만 반환.');
+  userParts.push({ type: 'text', text: contextLines.join('\n') });
+
+  if (userParts.length === 0) {
+    throw new Error('Copywriter needs at least sourceImageUrl or sourceText');
+  }
 
   const response = await llm().complete({
     tier: 'main',
     system,
     userParts,
-    maxOutputTokens: 256,
+    maxOutputTokens: 512,
     temperature: 0.9 + seedIndex * 0.05,
     jsonMode: true,
     jsonSchema: {
       type: 'object',
       properties: {
-        body: { type: 'string', description: 'Threads 게시글 본문 1문장, 6~80자' },
+        body: { type: 'string', description: 'Threads 게시글 본문 문장, 6~200자' },
       },
       required: ['body'],
     },
@@ -106,7 +148,6 @@ async function generateBody(input: CopywriteInput, seedIndex: number): Promise<s
   return body;
 }
 
-/** Gemini가 채팅형 텍스트로 감싸 응답해도 JSON 객체만 추출. */
 function extractJson(raw: string): unknown {
   const stripped = raw
     .replace(/^```(?:json)?\s*/i, '')
@@ -115,7 +156,6 @@ function extractJson(raw: string): unknown {
   try {
     return JSON.parse(stripped);
   } catch {
-    // "Here is the JSON: { ... }" 같은 경우 첫 { 부터 마지막 } 까지 추출
     const start = stripped.indexOf('{');
     const end = stripped.lastIndexOf('}');
     if (start === -1 || end === -1 || end < start) {
@@ -125,13 +165,10 @@ function extractJson(raw: string): unknown {
   }
 }
 
-/**
- * 고정 댓글은 AI 없이 결정론적 템플릿.
- * CLAUDE.md §4.3 법적 필수 문구 강제.
- * (실제 4양식 다변화는 modules/pipeline-a/reply-composer에서 담당.
- *  여기는 fallback용 단순 조립.)
- */
-export function buildReply(deeplinkUrl: string): string {
+export function buildReply(deeplinkUrl: string | undefined): string {
+  if (!deeplinkUrl) {
+    return LEGAL_DISCLAIMER;
+  }
   return [
     '정보 물어보시는 분들 많아서 링크 남겨요 🙌',
     deeplinkUrl,
@@ -157,4 +194,38 @@ export async function generateBodyVariants(
     variants.push(await generateBody(input, i));
   }
   return variants;
+}
+
+/**
+ * 여러 계정 각각의 페르소나로 카피 생성.
+ * 같은 원본을 5계정에 각기 다르게 재창조할 때 사용.
+ */
+export interface PerAccountInput {
+  accountId: string;
+  personaPrompt: string;
+}
+
+export interface PerAccountResult {
+  accountId: string;
+  body: string;
+  reply: string;
+}
+
+export async function generateForAccounts(
+  input: Omit<CopywriteInput, 'personaPrompt' | 'accountSeed'>,
+  accounts: PerAccountInput[],
+): Promise<PerAccountResult[]> {
+  const results: PerAccountResult[] = [];
+  for (const acc of accounts) {
+    const body = await generateBody(
+      { ...input, personaPrompt: acc.personaPrompt, accountSeed: acc.accountId },
+      0,
+    );
+    results.push({
+      accountId: acc.accountId,
+      body,
+      reply: buildReply(input.deeplinkUrl),
+    });
+  }
+  return results;
 }

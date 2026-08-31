@@ -170,6 +170,69 @@ model DailyPostCount {
 }
 
 // ==========================================
+// InboundLink: 시스템에 유입된 콘텐츠 URL 추적
+// Lane 1 (사용자 텔레그램) + Lane 2 (자율 트렌드) 공통
+// ==========================================
+enum InboundPlatform {
+  THREADS
+  TIKTOK
+  XIAOHONGSHU
+  INSTAGRAM
+  UNKNOWN
+}
+
+enum InboundSource {
+  MANUAL_TELEGRAM     // Lane 1
+  AUTONOMOUS_TREND    // Lane 2
+}
+
+enum InboundStatus {
+  RECEIVED
+  FETCHING
+  FETCHED
+  CLASSIFYING
+  MATCHING
+  READY_FOR_APPROVAL
+  APPROVED
+  PUBLISHED
+  REJECTED
+  FAILED
+}
+
+model InboundLink {
+  id              String           @id @default(cuid())
+  url             String
+  normalizedUrl   String           @unique
+  platform        InboundPlatform
+  source          InboundSource
+  status          InboundStatus    @default(RECEIVED)
+
+  // Adapter fetch 결과
+  rawText         String?          @db.Text
+  rawLanguage     String?
+  mediaUrls       String[]
+  authorHandle    String?
+  authorFollowers Int?
+  engagement      Json?
+  publishedAt     DateTime?
+
+  // 하류 참조
+  sourceItemId    String?
+  postIds         String[]
+
+  // Lane 2 context
+  trendSignalId   String?
+
+  errorMessage    String?          @db.Text
+  receivedAt      DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([status, platform])
+  @@index([source, receivedAt])
+  @@index([receivedAt])
+}
+
+// ==========================================
 // SeedSource: 벤치마크 수집 대상 (Threads 계정)
 // ==========================================
 model SeedSource {
