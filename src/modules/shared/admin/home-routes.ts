@@ -89,6 +89,11 @@ h1{margin-bottom:8px;font-size:1.6em}
     <div class="stat">${stats.accounts}<small>활성</small></div>
     <p>5계정 페르소나 편집 · 다국어 프리뷰</p>
   </a>
+  <a class="card" href="/admin/benchmarks">
+    <h2>벤치마크</h2>
+    <div class="stat">-<small>수집·태깅</small></div>
+    <p>터진 게시글 · viralFactors 분석</p>
+  </a>
   <a class="card" href="/oauth/threads/accounts">
     <h2>Threads OAuth</h2>
     <div class="stat">${stats.accounts}<small>연결</small></div>

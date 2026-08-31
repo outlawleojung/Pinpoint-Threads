@@ -12,6 +12,7 @@ import { registerPersonaRoutes } from './modules/shared/admin/persona-routes.js'
 import { registerTrendsRoutes } from './modules/shared/admin/trends-routes.js';
 import { registerInboundRoutes } from './modules/shared/admin/inbound-routes.js';
 import { registerAdminHomeRoutes } from './modules/shared/admin/home-routes.js';
+import { registerBenchmarksRoutes } from './modules/shared/admin/benchmarks-routes.js';
 import { registerAdminAuth } from './modules/shared/admin/auth-plugin.js';
 import { registerPasswordRoutes } from './modules/shared/admin/password-routes.js';
 import { registerLoginRoutes } from './modules/shared/admin/login-routes.js';
@@ -33,6 +34,7 @@ async function bootstrap() {
   await registerInboundRoutes(app);
   await registerAdminHomeRoutes(app);
   await registerPasswordRoutes(app);
+  await registerBenchmarksRoutes(app);
 
   await app.listen({ port: env.APP_PORT, host: '0.0.0.0' });
   logger.info(`🚀 API listening on :${env.APP_PORT}`);
