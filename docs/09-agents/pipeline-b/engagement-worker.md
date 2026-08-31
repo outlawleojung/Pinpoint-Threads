@@ -2,96 +2,99 @@
 title: "engagement-worker"
 pipelines: ["B"]
 ai_model: "none"
-tags: ["agent", "runtime-module", "suhari", "rate-limit-critical"]
+tags: ["agent", "runtime-module", "suhari", "manual-action"]
 related: ["B-suhari", "rate-limits", "cib-prevention", "threads"]
-last_updated: "2026-08-28"
-status: "draft"
+last_updated: "2026-08-31"
+status: "revised"
 ---
 
 # engagement-worker
 
-Pipeline B의 발행 후 감시 & 팔로우백 실행 모듈.
-결정론적 로직. AI 미사용.
-**계정 정지 리스크 가장 큰 모듈** — 하드 캡·랜덤 지터 필수.
+Pipeline B의 발행 후 감시 & 팔로우백 후보 추천 모듈.
+**팔로우 액션 자체는 수행하지 않음** (사용자 수동, 하루 3~5명).
+
+## 재설계 배경 (2026-08-31)
+
+Threads Graph API 정밀 조사 결과:
+- 자동 팔로우/언팔로우 엔드포인트 없음
+- 팔로워/팔로잉 목록 조회 API 없음
+- 특정 사용자 팔로우 여부 검증 API 없음
+- 댓글 작성자 정보는 `username`만 제공 (프로필 상세 불가)
+
+따라서 초기 설계(Comment Watcher → Follow Verifier → Reciprocation Executor 3단 자동)는 **폐기**하고, "**후보 추천 + 수동 실행**" 모델로 재설계.
 
 ## 목적
 
-내 스하리 게시글에 달린 댓글을 폴링하고, 실제 팔로우한 사용자에 한해 팔로우백 실행. 하루 3~5회 상한 엄수.
+내 스하리 게시글에 달린 댓글 작성자를 수집하여 사용자에게 팔로우백 후보로 알림.
+팔로우 액션은 사용자가 Threads 앱에서 직접 수행.
 
 ## 세 개의 서브 컴포넌트
 
-### 1) Comment Watcher
+### 1) Comment Watcher (자동)
+
 - 30분 간격 폴링 (cron)
-- 오늘 스하리 게시글(state=PUBLISHED, pipeline=B)의 댓글 조회
-- 새 댓글 감지 시 Job 큐에 투입
+- 오늘 스하리 게시글(state=PUBLISHED, pipeline=B)의 댓글을 `/{threads-media-id}/replies` 로 조회
+- 응답에서 얻을 수 있는 것:
+  - 댓글 텍스트, timestamp, permalink
+  - 작성자 `username` (numeric id, bio, 팔로워 수는 미제공)
+- 새 댓글이면 DB에 `EngagementCandidate` 레코드 생성
 
-### 2) Follow Verifier
-- Threads Graph API로 해당 사용자의 팔로우 관계 조회
-- 나를 팔로우한 상태여야만 다음 단계 진행
-- 안 되어 있으면 무시 (일방적 팔로우백 금지)
+### 2) Candidate Notifier (자동)
 
-### 3) Reciprocation Executor
-- 오늘 그 계정의 팔로우백 카운터 확인
-- 카운터가 오늘 상한 이하이면 팔로우백 실행
-- 랜덤 10~30분 지터 후 실행
-- 카운터 +1
+- 오늘 새 후보들을 모아 Telegram 요약 알림
+- 예: "오늘 스하리 게시글에 3명이 스하리 댓글 남김: @user_a, @user_b, @user_c"
+- 각 후보별로 permalink 링크 첨부 → 앱에서 바로 열기 가능
+- 오늘 남은 팔로우백 슬롯 카운트다운 표시 (3~5)
 
-## 하드 룰 (계정 정지 방지)
+### 3) Manual Action Recorder (반자동)
 
-- **하루 상한: 3~5회 (매일 아침 랜덤 결정)** — 예측 가능한 고정 숫자 금지
-- **초과 시 즉시 셧다운** — 그날 나머지 댓글 모두 무시 (에러 아님, 정상 종료)
-- **랜덤 지터 10~30분** — 감지 즉시 실행 금지
-- **팔로우 검증 필수** — 상대가 팔로우 안 했으면 팔로우백 안 함
-- **자체 4개 계정끼리 절대 금지** — 상대 handle이 우리 계정 중 하나면 즉시 스킵
-- **팔로우백만 실행** — 하트·리포스트·답글 안 함
+- 사용자가 Threads 앱에서 팔로우 여부 확인 후 팔로우백 실행
+- 텔레그램에서 **"완료" 버튼** 클릭 → DB에 EngagementLog 기록 + 카운터 +1
+- 하루 상한 도달 시 다음 카운트다운 = 0, 다음날 리셋
+
+## 하드 룰 (계정 안전)
+
+- **자동 팔로우 절대 금지** — 공식 API 미지원, 비공식 API/브라우저 자동화 금지
+- **하루 상한 3~5회** — 매일 아침 랜덤 결정. 초과 시 시스템이 더 이상 후보 추천 안 함.
+- **자체 4~5개 계정끼리 절대 금지** — 후보 필터에서 우리 계정 자동 제외
+- **팔로우 검증도 사람 눈으로** — API가 없으므로 사용자가 앱에서 확인
 
 ## 입력 (Job payload)
 
+Comment Watcher가 새 댓글 감지 시:
+
 ```typescript
-interface ReciprocationJob {
-  accountId: string;         // 우리 발행 계정
-  suhariPostId: string;      // 오늘 스하리 게시글
-  commenterHandle: string;   // 댓글 남긴 사용자
-  commenterThreadsUserId: string;
-  commentText: string;       // 참고용 로그
-  detectedAt: string;        // ISO datetime
+interface CandidateJob {
+  accountId: string;           // 우리 발행 계정
+  suhariPostId: string;        // 오늘 스하리 게시글
+  commenterUsername: string;   // 댓글 작성자 (username만)
+  commentText: string;
+  permalink: string;           // 앱에서 바로 열 링크
+  detectedAt: string;          // ISO datetime
 }
 ```
 
 ## 출력
 
-DB `EngagementLog` 레코드 생성 (action=FOLLOW).
-`DailyPostCount.engagementCount` +1.
+- `EngagementCandidate` 레코드 (아직 실행 안 함)
+- Telegram 알림
+- 사용자 "완료" 콜백 시 `EngagementLog` 레코드 (action=FOLLOW_MANUAL)
 
 ## 실패 모드 & 폴백
 
-- 팔로우 API 호출 실패 → 재시도 최대 2회 (backoff 5분)
-- 3회 연속 실패 → 그날 그 계정의 워커 셧다운 + Telegram 알림
-- Threads API rate limit 도달 → 다음 폴링 주기까지 대기
-- 자체 계정 감지 → 즉시 스킵 (에러 아님)
+- Threads API rate limit (사용자당 24h rolling 1,000): 폴링 주기 조절
+- 3회 연속 API 실패: Telegram 알림 후 다음 폴링 주기 대기
+- 자체 계정 감지: 후보 목록에서 자동 제외 (에러 아님)
 
 ## 관찰 지표
 
-- 계정별 일일 팔로우백 실행 수
-- 팔로우 검증 실패율 (스팸 댓글 비율 지표)
-- 셧다운 발생 이력 (rate limit 위험 신호)
-- Meta API 응답 시간·에러율
-
-## 미결 (Open Questions)
-
-### 팔로우백 실행 방법
-Threads Graph API가 팔로우 관련 write 엔드포인트를 제공하는지 미확인.
-- `POST /me/follows/{user_id}` 같은 엔드포인트 존재 여부
-- 없다면 Playwright로 발행 계정 로그인 후 UI 자동화 (리스크 큼)
-- `threads-api-expert` 서브에이전트로 확정 예정
-
-### 폴링 주기 최적화
-30분 간격이 적정한지, 아니면 이벤트 기반 웹훅이 가능한지.
-- Threads Graph API의 comment webhook 지원 여부 확인 필요
+- 계정별 일일 스하리 댓글 수
+- 팔로우백 실행 완료율 (후보 대비 실행 비율)
+- 카운터 소진 이력
 
 ## 관련 문서
 
-- [B-suhari](../../01-pipelines/B-suhari.md) — 파이프라인 전체 흐름
+- [B-suhari](../../01-pipelines/B-suhari.md) — 파이프라인 전체 흐름 (§ 9.3 결정 근거)
 - [rate-limits](../../04-safety/rate-limits.md) — 하드 캡 정책
 - [cib-prevention](../../04-safety/cib-prevention.md) — CIB 감지 회피
-- [threads](../../07-external-apis/threads.md) — API 스펙
+- [threads](../../07-external-apis/threads.md) — API 스펙 및 미지원 목록
