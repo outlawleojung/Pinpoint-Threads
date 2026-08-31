@@ -64,7 +64,7 @@ const envSchema = z.object({
 
   ADMIN_USERNAME: z.string().optional(),
   ADMIN_PASSWORD: z.string().optional(),
-  SESSION_SECRET: z.string().min(32).default('CHANGE_ME_TO_32_PLUS_CHAR_RANDOM_SECRET_LOCAL_ONLY'),
+  SESSION_SECRET: z.string().default('CHANGE_ME_TO_32_PLUS_CHAR_RANDOM_SECRET_LOCAL_DEV_ONLY_XYZ'),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -75,3 +75,9 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data;
+
+if (env.SESSION_SECRET.length < 32) {
+  console.warn(
+    `⚠️ SESSION_SECRET too short (${env.SESSION_SECRET.length} chars, need 32+). 세션 위조 리스크. .env 재설정 권장.`,
+  );
+}

@@ -75,7 +75,8 @@ bot.command('copy', async (ctx) => {
   try {
     const productName = '휴대용 무선 가습기 500ml';
     const deeplinkUrl = 'https://link.coupang.com/a/gzTOZtY7Ai';
-    const accountId = 'dummy_kr_01';
+    const testAccount = await getAnyActiveAccount();
+    const accountId = testAccount.id;
 
     const copyResult = await generateCopy({
       sourceText: 'USB 충전 미니 무선 가습기. 조용하고 세척 편함.',
@@ -115,7 +116,7 @@ bot.command('copy3', async (ctx) => {
         sourceText: 'USB 충전 미니 무선 가습기. 조용하고 세척 편함.',
         productName: '휴대용 무선 가습기 500ml',
         productCategory: '생활용품',
-        accountSeed: 'dummy_kr_01',
+        accountSeed: (await getAnyActiveAccount()).id,
         deeplinkUrl: 'https://link.coupang.com/dummy',
         channel: 'COUPANG',
       },
@@ -272,7 +273,7 @@ bot.command('pa', async (ctx) => {
   }
 
   // 더미 계정 확보
-  const account = await ensureDummyAccount();
+  const account = await getAnyActiveAccount();
 
   await ctx.reply(
     `🚀 Pipeline A e2e 시작\n계정: ${account.handle}\n미디어: ${sourceMediaUrls.length}개\nsourceText: ${sourceText.slice(0, 80)}...\n\n분류 → 매칭 → 미디어 업로드 → 카피 → 승인 카드`,
@@ -303,7 +304,7 @@ bot.command('pa', async (ctx) => {
 bot.command('newpost', async (ctx) => {
   await ctx.reply('더미 Post 생성 중...');
   try {
-    const account = await ensureDummyAccount();
+    const account = await getAnyActiveAccount();
     const source = await prisma.sourceItem.create({
       data: {
         sourceUrl: `https://example.com/dummy/${Date.now()}`,
@@ -419,21 +420,20 @@ bot.callbackQuery(/^(approve|regen-text|regen-product|reject):(.+)$/, async (ctx
   }
 });
 
-async function ensureDummyAccount() {
-  const existing = await prisma.account.findFirst({ where: { handle: 'dummy_kr_01' } });
-  if (existing) return existing;
-  return prisma.account.create({
-    data: {
-      handle: 'dummy_kr_01',
-      threadsUserId: 'dummy-threads-user-01',
-      accessToken: 'dummy-token',
-      personaPrompt:
-        '20대 후반 자취녀 톤. 편안한 구어체, 이모지 절제(1~2개), 첫 줄 후킹.',
-      timezone: 'Asia/Seoul',
-      activeHourStart: 8,
-      activeHourEnd: 23,
-    },
+/**
+ * 테스트 명령(/copy, /pa, /newpost)이 쓸 계정 선택.
+ * 실 발행하지 않고 카피 · 승인카드 렌더링에만 사용.
+ * dummy 계정 자동 생성 로직은 폐기됨 — 활성 계정 중 첫 번째 사용.
+ */
+async function getAnyActiveAccount() {
+  const account = await prisma.account.findFirst({
+    where: { isActive: true },
+    orderBy: { createdAt: 'asc' },
   });
+  if (!account) {
+    throw new Error('활성 Threads 계정이 없습니다. /oauth/threads/start 로 계정 연결 필요.');
+  }
+  return account;
 }
 
 bot.catch((err) => {
