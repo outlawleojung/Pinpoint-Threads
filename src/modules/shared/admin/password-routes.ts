@@ -1,15 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { logger } from '../../../config/logger.js';
-import { prisma } from '../../../db/prisma.js';
-import { changePassword, listAdmins, createAdminUser } from './admin-user-service.js';
+import { changePassword, listAdmins } from './admin-user-service.js';
 
 type AnyFastify = FastifyInstance<any, any, any, any, any>;
 
 /**
- * Admin 계정 관리 UI.
- * - 현재 계정 목록 + 마지막 로그인 · 로그인 수
- * - 비밀번호 변경 폼
- * - 신규 관리자 추가 (여러 관리자 가능)
+ * Admin 비밀번호 변경 UI.
+ * 단일 관리자 시스템. 신규 계정 추가 기능 없음 (필요 시 CLI: pnpm admin:create).
  */
 
 export async function registerPasswordRoutes(app: AnyFastify): Promise<void> {
@@ -34,18 +31,18 @@ export async function registerPasswordRoutes(app: AnyFastify): Promise<void> {
 
     return reply.type('text/html').send(
       renderPage(
-        'Admin 계정 관리',
+        '비밀번호 변경',
         `
-        <h2>등록된 관리자</h2>
+        <h2>계정 정보</h2>
         <table>
           <thead><tr>
-            <th>Username</th><th>표시명</th><th>활성</th><th>로그인 수</th><th>마지막 로그인</th><th>생성일</th>
+            <th>Username</th><th>로그인 수</th><th>마지막 로그인</th><th>생성일</th>
           </tr></thead>
           <tbody>${rows}</tbody>
         </table>
 
         ${me ? `
-        <h2>내 비밀번호 변경</h2>
+        <h2>비밀번호 변경</h2>
         <form method="POST" action="/admin/password/change">
           <label>현재 비밀번호</label>
           <input type="password" name="currentPassword" required>
@@ -60,21 +57,8 @@ export async function registerPasswordRoutes(app: AnyFastify): Promise<void> {
         </form>
         ` : ''}
 
-        <h2>신규 관리자 추가</h2>
-        <form method="POST" action="/admin/password/create">
-          <label>Username</label>
-          <input type="text" name="username" required pattern="[a-zA-Z0-9_.-]+" minlength="3">
-          <label>표시명 (선택)</label>
-          <input type="text" name="displayName">
-          <label>초기 비밀번호 (12자 이상)</label>
-          <input type="password" name="password" required minlength="12">
-          <div class="actions">
-            <button type="submit">계정 추가</button>
-          </div>
-        </form>
-
         <div class="hint">
-          <strong>보안 팁:</strong> 부트스트랩 후 <code>.env</code>의 <code>ADMIN_PASSWORD</code>는 비워도 됩니다. DB 크레덴셜이 유일 진실 원본이 됩니다.
+          <strong>보안 팁:</strong> <code>.env</code>의 <code>ADMIN_PASSWORD</code>는 부트스트랩용. 여기서 비번 변경 후 <code>.env</code>에서 지우세요.
         </div>
         `,
       ),
@@ -112,28 +96,6 @@ export async function registerPasswordRoutes(app: AnyFastify): Promise<void> {
     },
   );
 
-  app.post<{ Body: { username?: string; displayName?: string; password?: string } }>(
-    '/admin/password/create',
-    async (req, reply) => {
-      const b = req.body ?? {};
-      if (!b.username || !b.password) {
-        return reply.code(400).type('text/html').send(renderPage('실패', 'username · password 필수.'));
-      }
-      if (b.password.length < 12) {
-        return reply.code(400).type('text/html').send(renderPage('실패', '비밀번호는 12자 이상.'));
-      }
-      const existing = await prisma.adminUser.findUnique({ where: { username: b.username } });
-      if (existing) {
-        return reply.code(400).type('text/html').send(renderPage('실패', `이미 존재하는 username: ${escape(b.username)}`));
-      }
-      await createAdminUser({
-        username: b.username,
-        password: b.password,
-        displayName: b.displayName,
-      });
-      return reply.redirect('/admin/password');
-    },
-  );
 }
 
 function extractBasicAuthUsername(header: string | undefined): string | null {
