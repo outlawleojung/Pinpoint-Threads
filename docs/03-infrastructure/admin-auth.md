@@ -10,16 +10,31 @@ status: "active"
 
 `/admin/*` 및 `/oauth/threads/accounts` 라우트는 이중 방어로 보호.
 
-## Layer 1: Basic Auth (앱 레벨, 항상)
+## Layer 1: Basic Auth · DB backed (앱 레벨, 항상)
 
-`@fastify/basic-auth` 플러그인. 모든 환경에서 필수.
+`@fastify/basic-auth` 플러그인 + `AdminUser` 테이블 (bcrypt 해싱).
+`.env`는 **부트스트랩용**이지 항구 저장소가 아님.
 
-### 설정
+### 부트스트랩 (첫 실행)
 ```
 # .env
 ADMIN_USERNAME=admin
-ADMIN_PASSWORD=<강한 랜덤 문자열>
+ADMIN_PASSWORD=<12자 이상 임시 비번>
 ```
+첫 실행 시 `AdminUser` 테이블에 upsert. 이후 `.env` 값 변경해도 재실행 시 덮어씀.
+
+### 정식 운영 (부트스트랩 후)
+1. `/admin/password`에서 강한 새 비번으로 변경
+2. `.env`의 `ADMIN_PASSWORD` **비움**
+3. 이후 크레덴셜 유일 진실 원본 = `AdminUser` 테이블 (bcrypt 해시)
+4. 여러 관리자 필요 시 `/admin/password`에서 계정 추가
+
+### 특징
+- **bcrypt (12 rounds) 해싱** — 파일 유출돼도 사실상 크랙 불가
+- **로그인 이력** — `lastLoginAt`, `loginCount` 자동 기록
+- **다중 관리자** — 여러 계정 지원
+- **웹 UI로 변경** — 재배포 없이 즉시 회전
+- **계정 비활성** — `isActive=false`로 즉시 차단
 
 ### 보호 경로
 - `/admin/*` (전체)

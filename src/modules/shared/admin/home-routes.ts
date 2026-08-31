@@ -87,6 +87,7 @@ h1{margin-bottom:8px;font-size:1.6em}
     <a href="/admin/personas">페르소나 프리뷰</a>
     <a href="/admin/inbound?status=FAILED">실패한 인제스트</a>
     <a href="/admin/inbound?status=FETCHED">인제스트 성공한 것</a>
+    <a href="/admin/password">계정·비밀번호 관리</a>
     <a href="/healthz">healthz</a>
   </div>
 </div>

@@ -170,6 +170,23 @@ model DailyPostCount {
 }
 
 // ==========================================
+// AdminUser: 관리 UI 접근 계정 (Basic Auth backing)
+// ==========================================
+model AdminUser {
+  id            String    @id @default(cuid())
+  username      String    @unique
+  passwordHash  String    // bcrypt
+  displayName   String?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastLoginAt   DateTime?
+  loginCount    Int       @default(0)
+
+  @@index([isActive])
+}
+
+// ==========================================
 // TrendSignal: 자율 트렌드 감지 (Lane 2)
 // 여러 소스(네이버·구글·TikTok CC·쿠팡 랭킹 등)의 신호를 정규화
 // ==========================================

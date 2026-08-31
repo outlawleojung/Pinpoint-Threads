@@ -2,50 +2,59 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import basicAuth from '@fastify/basic-auth';
 import { env } from '../../../config/env.js';
 import { logger } from '../../../config/logger.js';
+import {
+  verifyCredentials,
+  upsertAdminUserFromEnv,
+  hasAnyAdmin,
+} from './admin-user-service.js';
 
 type AnyFastify = FastifyInstance<any, any, any, any, any>;
 
 /**
- * Admin 라우트 보호 (Basic Auth).
+ * Admin 라우트 보호 (DB backed Basic Auth).
+ *
+ * 크레덴셜은 AdminUser 테이블에 bcrypt 해싱 저장.
+ * .env의 ADMIN_USERNAME/PASSWORD는 부트스트랩용 (첫 실행 시 DB에 upsert).
+ * 이후 웹 UI(/admin/password)에서 변경 · env에서 제거 권장.
  *
  * 보호 경로:
  *   - /admin/*
  *   - /oauth/threads/accounts, /oauth/threads/accounts/*
- *   (/oauth/threads/start, /callback은 Meta 리다이렉트라 인증 걸면 안 됨)
  *
- * ADMIN_USERNAME · ADMIN_PASSWORD 미설정 시:
- *   - 개발 편의로 인증 skip
- *   - 로그에 경고 출력
- *   - 프로덕션에서는 반드시 설정
+ * 예외:
+ *   - /oauth/threads/start, /oauth/threads/callback (Meta 리다이렉트)
+ *   - /healthz
  */
 
-const PROTECTED_PREFIXES = [
-  '/admin',
-  '/oauth/threads/accounts',
-];
+const PROTECTED_PREFIXES = ['/admin', '/oauth/threads/accounts'];
 
-// 인증에서 제외할 정확한 경로 (Meta OAuth 콜백 등)
 const EXEMPT_PATHS = new Set([
   '/oauth/threads/start',
   '/oauth/threads/callback',
 ]);
 
 export async function registerAdminAuth(app: AnyFastify): Promise<void> {
-  const username = env.ADMIN_USERNAME;
-  const password = env.ADMIN_PASSWORD;
+  // 부트스트랩: env에 초기 크레덴셜 있으면 DB에 upsert
+  if (env.ADMIN_USERNAME && env.ADMIN_PASSWORD) {
+    try {
+      await upsertAdminUserFromEnv(env.ADMIN_USERNAME, env.ADMIN_PASSWORD);
+    } catch (err) {
+      logger.error({ err }, 'admin bootstrap failed');
+    }
+  }
 
-  if (!username || !password) {
+  const adminExists = await hasAnyAdmin();
+  if (!adminExists) {
     logger.warn(
-      '⚠️ ADMIN_USERNAME/ADMIN_PASSWORD 미설정 — /admin/* 및 /oauth/threads/accounts 인증 없음. 프로덕션 이전 전 반드시 설정.',
+      '⚠️ DB에 AdminUser 없음 + .env에도 크레덴셜 없음 → /admin/* 인증 skip. 프로덕션 이전 전 반드시 설정.',
     );
     return;
   }
 
   await app.register(basicAuth, {
-    validate: async (user, pass) => {
-      if (user !== username || pass !== password) {
-        throw new Error('invalid credentials');
-      }
+    validate: async (username, password) => {
+      const user = await verifyCredentials(username, password);
+      if (!user) throw new Error('invalid credentials');
     },
     authenticate: { realm: 'Pinpoint Threads Admin' },
   });
@@ -57,5 +66,5 @@ export async function registerAdminAuth(app: AnyFastify): Promise<void> {
     await (app as any).basicAuth(req, reply);
   });
 
-  logger.info({ user: username, protected: PROTECTED_PREFIXES }, 'admin basic auth enabled');
+  logger.info({ protected: PROTECTED_PREFIXES }, 'admin basic auth enabled (DB backed)');
 }

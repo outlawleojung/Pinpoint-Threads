@@ -12,6 +12,7 @@ import { registerTrendsRoutes } from './modules/shared/admin/trends-routes.js';
 import { registerInboundRoutes } from './modules/shared/admin/inbound-routes.js';
 import { registerAdminHomeRoutes } from './modules/shared/admin/home-routes.js';
 import { registerAdminAuth } from './modules/shared/admin/auth-plugin.js';
+import { registerPasswordRoutes } from './modules/shared/admin/password-routes.js';
 
 async function bootstrap() {
   const app = Fastify({ loggerInstance: logger });
@@ -27,6 +28,7 @@ async function bootstrap() {
   await registerTrendsRoutes(app);
   await registerInboundRoutes(app);
   await registerAdminHomeRoutes(app);
+  await registerPasswordRoutes(app);
 
   await app.listen({ port: env.APP_PORT, host: '0.0.0.0' });
   logger.info(`🚀 API listening on :${env.APP_PORT}`);
