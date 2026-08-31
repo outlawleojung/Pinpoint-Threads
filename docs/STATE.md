@@ -13,13 +13,14 @@ Last commit: Phase 4 진입 커밋 (OAuth + Publisher)
 
 ## Phase & 진행률
 
-- **Phase**: **4 진입 + Vision 재정립** (2026-08-31 세션 후반, URL 인제스터 최우선으로 대전환)
-- **Task 완료**: 19/33 (58%)
+- **Phase**: **4 진입 + Vision 2-Lane 아키텍처 확정** (2026-08-31, 사용자 없이도 시스템이 자율 운영)
+- **Task 완료**: 19/41 (46%)
 - **Priority 3 (Pipeline A 실 구현)**: 8/8 ✅
 - **Priority 4 (발행 파이프라인)**: 2/5 (17 OAuth · 18 Publisher 완료, 19-21 보류)
-- **Priority 5 (Source Collector — 축소·부가)**: 1/5 (22 스키마 완료, 나머지 재정의)
-- **Priority 6 (URL 인제스터 — ★★최우선)**: 0/7 (신규)
-- **다음 Milestone**: Task #6a URL Ingester 프레임워크 · #6b Threads Adapter · #6c 페르소나 Copywriter
+- **Priority 5 (Source Collector — 축소·부가)**: 1/5 (스키마 완료, 나머지 재정의)
+- **Priority 6 (URL 인제스터 — Lane 1 · 하류 공통)**: 0/7
+- **Priority 7 (자율 트렌드 추적 — Lane 2)**: 0/8 (신규 · 시스템 자율성의 핵심)
+- **다음 Milestone**: Lane 1(6a-6c) + Lane 2 Stage 1(7a-7e) 병행 착수
 
 ## 지금까지 검증된 것
 
