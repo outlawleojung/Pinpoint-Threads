@@ -13,12 +13,13 @@ Last commit: Phase 4 진입 커밋 (OAuth + Publisher)
 
 ## Phase & 진행률
 
-- **Phase**: **4 진입 + Source Collector 시작** (프로젝트 핵심 기능으로 우선순위 재정렬)
-- **Task 완료**: 19/26 (73%)
+- **Phase**: **4 진입 + Vision 재정립** (2026-08-31 세션 후반, URL 인제스터 최우선으로 대전환)
+- **Task 완료**: 19/33 (58%)
 - **Priority 3 (Pipeline A 실 구현)**: 8/8 ✅
 - **Priority 4 (발행 파이프라인)**: 2/5 (17 OAuth · 18 Publisher 완료, 19-21 보류)
-- **Priority 5 (Source Collector — ★핵심)**: 1/5 (22 스키마 완료)
-- **다음 Milestone**: Apify 세팅 → Task #5b Source Collector 코어
+- **Priority 5 (Source Collector — 축소·부가)**: 1/5 (22 스키마 완료, 나머지 재정의)
+- **Priority 6 (URL 인제스터 — ★★최우선)**: 0/7 (신규)
+- **다음 Milestone**: Task #6a URL Ingester 프레임워크 · #6b Threads Adapter · #6c 페르소나 Copywriter
 
 ## 지금까지 검증된 것
 
@@ -49,13 +50,25 @@ Last commit: Phase 4 진입 커밋 (OAuth + Publisher)
 
 ## 진행 중 / 다음
 
-**우선순위 재정렬 (2026-08-31 세션 후반):** 사용자 요청으로 Source Collector(벤치마크 수집·분석)가 Priority 4 잔여작업보다 우선. 이것이 프로젝트의 핵심 기능(터진 콘텐츠 재생산).
+**2026-08-31 vision 재정립:** 자동 폴링 → **수동 URL 시딩 + AI 재창조** 모델로 대전환. 상세 근거는 [vision.md](00-overview/vision.md) 2026-08-31 재정립 섹션.
 
-- **Task #5b Source Collector 코어** — 대기: 사용자 Apify 가입 + 액터 선정 (다음 세션)
-- **Task #5c Admin UI · #5d viralFactors 태깅 · #5e 임베딩** — 순차 진행
-- **Task #19-21 (Publisher 잔여)** — Source Collector 안정화 후 재개
-- 병행 가능: 강의 영상 녹화 (사용자 — 하루 1개씩, ~10일)
-- 병행 가능: Pipeline B/C 상세 설계
+### 다음 세션 착수 (Priority 6 URL 인제스터)
+
+- **#6a URL Ingester 프레임워크** — 텔레그램 봇에 URL 라우팅, 플랫폼 감지
+- **#6b Threads URL Adapter** — 첫 어댑터, 인터페이스 표준 정립
+- **#6c 다국어·페르소나 Copywriter 확장** — 소재만 취하고 계정별 완전 재창조 ★핵심
+- **#6d 계정별 페르소나 관리 UI** — 5계정 각자 컨셉 정의
+- **#6e/f/g** — TikTok · 샤오홍슈 · Instagram Adapter 순차
+
+### 축소·후순위
+
+- **Priority 5 (Source Collector)**: 시드 5개 소규모 부가 기능화, 자동 폴링 폐기
+- **Priority 4 잔여 (#19-21)**: 인제스터 안정화 후 발동
+
+### 병행 가능 (사용자)
+
+- 강의 영상 녹화 (하루 1개씩 ~10일)
+- 5계정 각각 컨셉·페르소나 방향 잡기 (#6d 착수 시 반영)
 
 ## 연결된 Threads 계정 (5개)
 

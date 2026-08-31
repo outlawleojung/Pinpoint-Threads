@@ -37,17 +37,29 @@ Last synced: 2026-08-28
 - [ ] **4d. 계정 시차 스케줄링** — BullMQ delayed job, 1~4h 랜덤
 - [ ] **4e. Performance Collector** — 24h/72h insights 회수, engagementScore 계산
 
-## Priority 5 — Source Collector (벤치마크 수집·분석) ★ 핵심
+## Priority 5 — Source Collector 축소·부가 기능화 (기존 계획 재편)
 
-프로젝트 존재 이유. 터진 콘텐츠 자동 수집·분석 파이프라인. Priority 4 잔여 작업보다 우선.
+2026-08-31 vision 재정립으로 Source Collector는 **부가 기능**으로 강등. 주력은 Priority 6 URL 인제스터.
 
-- [x] **5a. Prisma 스키마** — SeedSource + BenchmarkPost + Neon 마이그레이션 완료
-- [ ] **5b. Apify + Source Collector 코어** — poll → 필터(likes≥1000) → dedup → upsert. 대기: 사용자 Apify 가입 + 액터 선정
-- [ ] **5c. Admin UI** — 시드 관리 · benchmark 뷰
-- [ ] **5d. viralFactors AI 태깅** — Claude로 (훅·구조·톤·길이·CTA·소재) JSON 추출
+- [x] **5a. Prisma 스키마** — SeedSource + BenchmarkPost 완료
+- [ ] **5b. Apify 단건 URL fetch 백엔드** — 원래 30계정 폴링 폐기, URL 인제스터의 백엔드로 재정의
+- [ ] **5c. Admin UI (축소)** — 시드 관리 최소화, benchmark 뷰 유지
+- [ ] **5d. viralFactors AI 태깅** — Claude로 (훅·구조·톤·길이·CTA·소재) JSON 추출 (수집된 벤치마크 대상)
 - [ ] **5e. Voyage AI 임베딩 + Copywriter RAG 모드** — 데이터 임계 도달 후
 
-## Priority 6+ (나중)
+## Priority 6 — URL 인제스터 (수동 시딩 파이프라인) ★★ 최우선
+
+**주력 파이프라인.** 사용자가 각 플랫폼에서 발견한 좋은 게시글 URL을 텔레그램 봇에 던지면 자동 파싱·번역·상품매칭·재창조·발행.
+
+- [ ] **6a. URL Ingester 프레임워크 + 텔레그램 봇 확장** — 도메인 파싱 → Adapter 라우팅
+- [ ] **6b. Threads URL Adapter** — 게시글 단건 fetch (첫 어댑터, 인터페이스 표준 정립)
+- [ ] **6c. 다국어·계정별 페르소나 Copywriter 확장** ★핵심 — 소재·훅만 추출, 계정별 완전 재창조, 직역 금지
+- [ ] **6d. 계정별 페르소나 정의·관리 UI** — 5계정 각자 다른 컨셉·타겟·톤 관리
+- [ ] **6e. TikTok URL Adapter**
+- [ ] **6f. 샤오홍슈 URL Adapter** — Apify 필수, 중국어 자동 감지
+- [ ] **6g. Instagram URL Adapter**
+
+## Priority 7+ (나중)
 
 - [ ] Pipeline B (스하리) 실 구현
 - [ ] Pipeline C (일상글) 소스 방식 결정
