@@ -53,6 +53,11 @@ export async function registerAdminAuth(app: AnyFastify): Promise<void> {
     authenticate: { realm: 'Pinpoint Threads Admin' },
   });
 
+  const basicAuthHook = (app as any).basicAuth as (
+    req: FastifyRequest,
+    reply: FastifyReply,
+  ) => Promise<void>;
+
   app.addHook('onRequest', async (req: FastifyRequest, reply: FastifyReply) => {
     const url = req.url.split('?')[0] ?? '';
     if (EXEMPT_PATHS.has(url)) return;
@@ -62,11 +67,23 @@ export async function registerAdminAuth(app: AnyFastify): Promise<void> {
     const adminExists = await hasAnyAdmin();
     if (!adminExists) {
       logger.warn({ url }, 'admin access blocked — no AdminUser bootstrapped yet');
-      return reply.code(503).type('text/html').send(uninitializedPage());
+      reply.code(503).type('text/html').send(uninitializedPage());
+      return reply;
     }
 
-    // Basic Auth 강제
-    await (app as any).basicAuth(req, reply);
+    // Basic Auth 강제. 실패 시 basicAuthHook이 throw → Fastify 에러 핸들러가 401 처리.
+    try {
+      await basicAuthHook(req, reply);
+    } catch (err: any) {
+      // basicAuth 실패 시 자체 401 응답을 보낼 수도, throw만 할 수도 있음.
+      // reply.sent 검사 후 미전송이면 우리가 401 보냄.
+      if (!reply.sent) {
+        logger.debug({ url, err: err?.message }, 'basic auth failed');
+        reply.header('WWW-Authenticate', 'Basic realm="Pinpoint Threads Admin"');
+        reply.code(401).send({ error: 'Unauthorized' });
+      }
+      return reply;
+    }
   });
 
   logger.info({ protected: PROTECTED_PREFIXES }, 'admin basic auth enabled (DB backed, no skip)');
