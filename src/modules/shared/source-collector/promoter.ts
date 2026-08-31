@@ -5,7 +5,7 @@ import { env } from '../../../config/env.js';
 import { tagBenchmarkPost } from './viralfactors-tagger.js';
 import { embedBenchmark } from './embedder.js';
 import { isVoyageConfigured } from '../../../infra/voyage-client.js';
-import type { InboundLink } from '@prisma/client';
+import { InboundSource, type InboundLink } from '@prisma/client';
 
 /**
  * InboundLink → BenchmarkPost 승격 파이프라인.
@@ -28,6 +28,11 @@ export interface PromoteResult {
 }
 
 export async function maybeAutoPromote(inboundLink: InboundLink): Promise<PromoteResult> {
+  // 원칙: 사용자 수동 시딩(MANUAL_TELEGRAM)은 이미 인간 큐레이션이라 무조건 승격.
+  //       자율 트렌드(AUTONOMOUS_TREND)만 likes 임계 검사.
+  if (inboundLink.source === InboundSource.MANUAL_TELEGRAM) {
+    return promoteInboundLink(inboundLink.id, 'auto');
+  }
   const likes = extractLikes(inboundLink.engagement);
   if (likes === null || likes < AUTO_MIN_LIKES) {
     return { status: 'skipped_low_likes', reason: `likes=${likes ?? '?'} < ${AUTO_MIN_LIKES}` };

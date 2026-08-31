@@ -30,7 +30,10 @@ export interface InstagramAdapterResult {
   mediaUrls: string[];
   publishedAt: Date | null;
   language: string | null;
-  engagement: {};
+  engagement: {
+    likes?: number;
+    comments?: number;
+  };
   raw: {
     ogTitle: string | null;
     ogDescription: string | null;
@@ -112,6 +115,7 @@ function extractFromHtml(
   const text = extractCaption(ogDescription);
   const mediaUrls = ogImage ? [ogImage] : [];
   const language = detectLanguage(text);
+  const engagement = extractEngagement(ogDescription);
 
   const result: InstagramAdapterResult = {
     authorHandle,
@@ -121,7 +125,7 @@ function extractFromHtml(
     mediaUrls,
     publishedAt: null,
     language,
-    engagement: {},
+    engagement,
     raw: {
       ogTitle,
       ogDescription,
@@ -141,6 +145,57 @@ function extractFromHtml(
   );
 
   return result;
+}
+
+/**
+ * OG description에서 좋아요·댓글 수 파싱.
+ * 흔한 포맷:
+ *   "1,234 likes, 45 comments - @handle on 2026-01-01: 본문"
+ *   "1.2M likes, 3K comments - ..."
+ *   "좋아요 1,234개, 댓글 45개 · @handle..."
+ * Threshold: 매칭 실패 시 undefined (자동 승격 안 되게).
+ */
+function extractEngagement(ogDescription: string | null): { likes?: number; comments?: number } {
+  if (!ogDescription) return {};
+  const out: { likes?: number; comments?: number } = {};
+
+  const parseNumWithSuffix = (n: string): number => {
+    const clean = n.replace(/,/g, '').trim();
+    const m = /^([\d.]+)([KMB]?)$/i.exec(clean);
+    if (!m) return NaN;
+    const num = parseFloat(m[1] ?? '0');
+    const unit = (m[2] ?? '').toUpperCase();
+    if (unit === 'K') return Math.round(num * 1_000);
+    if (unit === 'M') return Math.round(num * 1_000_000);
+    if (unit === 'B') return Math.round(num * 1_000_000_000);
+    return Math.round(num);
+  };
+
+  // 영문 패턴
+  const likesEn = /([\d.,]+[KMB]?)\s*likes?/i.exec(ogDescription);
+  if (likesEn?.[1]) {
+    const n = parseNumWithSuffix(likesEn[1]);
+    if (!isNaN(n)) out.likes = n;
+  }
+  const commentsEn = /([\d.,]+[KMB]?)\s*comments?/i.exec(ogDescription);
+  if (commentsEn?.[1]) {
+    const n = parseNumWithSuffix(commentsEn[1]);
+    if (!isNaN(n)) out.comments = n;
+  }
+
+  // 한국어 패턴 (참고 · Instagram이 KR 로케일 요청 시)
+  const likesKo = /좋아요\s*([\d,]+)/i.exec(ogDescription);
+  if (likesKo?.[1] && out.likes === undefined) {
+    const n = parseNumWithSuffix(likesKo[1]);
+    if (!isNaN(n)) out.likes = n;
+  }
+  const commentsKo = /댓글\s*([\d,]+)/i.exec(ogDescription);
+  if (commentsKo?.[1] && out.comments === undefined) {
+    const n = parseNumWithSuffix(commentsKo[1]);
+    if (!isNaN(n)) out.comments = n;
+  }
+
+  return out;
 }
 
 function extractAuthor(ogTitle: string | null, ogDescription: string | null): string | null {
