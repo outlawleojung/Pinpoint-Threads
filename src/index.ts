@@ -9,6 +9,8 @@ import { logger } from './config/logger.js';
 import { registerThreadsOAuthRoutes } from './modules/shared/publisher/oauth/routes.js';
 import { registerPersonaRoutes } from './modules/shared/admin/persona-routes.js';
 import { registerTrendsRoutes } from './modules/shared/admin/trends-routes.js';
+import { registerInboundRoutes } from './modules/shared/admin/inbound-routes.js';
+import { registerAdminHomeRoutes } from './modules/shared/admin/home-routes.js';
 
 async function bootstrap() {
   const app = Fastify({ loggerInstance: logger });
@@ -21,6 +23,8 @@ async function bootstrap() {
   await registerThreadsOAuthRoutes(app);
   await registerPersonaRoutes(app);
   await registerTrendsRoutes(app);
+  await registerInboundRoutes(app);
+  await registerAdminHomeRoutes(app);
 
   await app.listen({ port: env.APP_PORT, host: '0.0.0.0' });
   logger.info(`🚀 API listening on :${env.APP_PORT}`);

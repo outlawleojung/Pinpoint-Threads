@@ -9,6 +9,8 @@ export const QUEUE_NAMES = {
   APPROVE: 'approve',
   PUBLISH: 'publish',
   ENGAGEMENT: 'engagement',
+  TREND_POLL: 'trend-poll',
+  TREND_DIGEST: 'trend-digest',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
@@ -24,6 +26,8 @@ export type EngagementJob = {
   targetHandle: string;
   targetPostId: string;
 };
+export type TrendPollJob = { triggeredBy?: string };
+export type TrendDigestJob = { limit?: number };
 
 const defaultJobOptions = {
   attempts: 3,
@@ -67,6 +71,25 @@ export const engagementQueue = new Queue<EngagementJob>(QUEUE_NAMES.ENGAGEMENT, 
   defaultJobOptions,
 });
 
+export const trendPollQueue = new Queue<TrendPollJob>(QUEUE_NAMES.TREND_POLL, {
+  connection: redisConnection,
+  defaultJobOptions: {
+    attempts: 2,
+    backoff: { type: 'exponential' as const, delay: 30_000 },
+    removeOnComplete: { age: 3 * 24 * 3600, count: 100 },
+    removeOnFail: { age: 7 * 24 * 3600 },
+  },
+});
+
+export const trendDigestQueue = new Queue<TrendDigestJob>(QUEUE_NAMES.TREND_DIGEST, {
+  connection: redisConnection,
+  defaultJobOptions: {
+    attempts: 2,
+    removeOnComplete: { age: 3 * 24 * 3600, count: 30 },
+    removeOnFail: { age: 7 * 24 * 3600 },
+  },
+});
+
 export const queueEvents: Record<QueueName, QueueEvents> = {
   [QUEUE_NAMES.COLLECT]: new QueueEvents(QUEUE_NAMES.COLLECT, { connection: redisConnection }),
   [QUEUE_NAMES.CLASSIFY]: new QueueEvents(QUEUE_NAMES.CLASSIFY, { connection: redisConnection }),
@@ -77,6 +100,12 @@ export const queueEvents: Record<QueueName, QueueEvents> = {
   [QUEUE_NAMES.APPROVE]: new QueueEvents(QUEUE_NAMES.APPROVE, { connection: redisConnection }),
   [QUEUE_NAMES.PUBLISH]: new QueueEvents(QUEUE_NAMES.PUBLISH, { connection: redisConnection }),
   [QUEUE_NAMES.ENGAGEMENT]: new QueueEvents(QUEUE_NAMES.ENGAGEMENT, {
+    connection: redisConnection,
+  }),
+  [QUEUE_NAMES.TREND_POLL]: new QueueEvents(QUEUE_NAMES.TREND_POLL, {
+    connection: redisConnection,
+  }),
+  [QUEUE_NAMES.TREND_DIGEST]: new QueueEvents(QUEUE_NAMES.TREND_DIGEST, {
     connection: redisConnection,
   }),
 };
