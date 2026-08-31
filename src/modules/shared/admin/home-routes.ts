@@ -8,7 +8,8 @@ type AnyFastify = FastifyInstance<any, any, any, any, any>;
  */
 
 export async function registerAdminHomeRoutes(app: AnyFastify): Promise<void> {
-  app.get('/admin', async (_req, reply) => {
+  app.get('/admin', async (req, reply) => {
+    const currentUser = req.session?.n ?? null;
     const [accounts, activeSignals, decayedSignals, inbound, recentInbound] = await Promise.all([
       prisma.account.count({ where: { isActive: true } }),
       prisma.trendSignal.count({ where: { decayedAt: null } }),
@@ -20,7 +21,7 @@ export async function registerAdminHomeRoutes(app: AnyFastify): Promise<void> {
     ]);
 
     return reply.type('text/html').send(
-      renderHome({ accounts, activeSignals, decayedSignals, inbound, recentInbound }),
+      renderHome({ accounts, activeSignals, decayedSignals, inbound, recentInbound, currentUser }),
     );
   });
 }
@@ -31,6 +32,7 @@ function renderHome(stats: {
   decayedSignals: number;
   inbound: number;
   recentInbound: number;
+  currentUser: string | null;
 }): string {
   return `<!doctype html>
 <html lang="ko"><head>
@@ -51,10 +53,25 @@ h1{margin-bottom:8px;font-size:1.6em}
 .links{display:flex;flex-wrap:wrap;gap:12px}
 .links a{padding:8px 14px;background:#f0f0f0;color:#333;border-radius:6px;text-decoration:none;font-size:0.9em}
 .links a:hover{background:#e0e0e0}
+.topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.user-info{font-size:0.9em;color:#666}
+.user-info strong{color:#0969da;margin-right:8px}
+.logout-btn{padding:6px 12px;background:#f0f0f0;color:#555;border:none;border-radius:6px;cursor:pointer;font-size:0.85em}
+.logout-btn:hover{background:#e0e0e0;color:#c62828}
 </style>
 </head><body>
-<h1>Pinpoint Threads · Admin</h1>
-<p class="sub">시스템 상태 · 데이터 · 관리</p>
+<div class="topbar">
+  <div>
+    <h1 style="margin-bottom:0">Pinpoint Threads · Admin</h1>
+    <p class="sub" style="margin-top:4px">시스템 상태 · 데이터 · 관리</p>
+  </div>
+  <div class="user-info">
+    <strong>${stats.currentUser ? '@' + stats.currentUser : ''}</strong>
+    <form method="POST" action="/admin/logout" style="display:inline">
+      <button type="submit" class="logout-btn">로그아웃</button>
+    </form>
+  </div>
+</div>
 
 <div class="grid">
   <a class="card" href="/admin/inbound">

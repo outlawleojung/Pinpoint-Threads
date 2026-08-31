@@ -64,6 +64,7 @@ const envSchema = z.object({
 
   ADMIN_USERNAME: z.string().optional(),
   ADMIN_PASSWORD: z.string().optional(),
+  SESSION_SECRET: z.string().min(32).default('CHANGE_ME_TO_32_PLUS_CHAR_RANDOM_SECRET_LOCAL_ONLY'),
 });
 
 const parsed = envSchema.safeParse(process.env);
