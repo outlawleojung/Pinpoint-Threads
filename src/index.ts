@@ -11,6 +11,7 @@ import { registerPersonaRoutes } from './modules/shared/admin/persona-routes.js'
 import { registerTrendsRoutes } from './modules/shared/admin/trends-routes.js';
 import { registerInboundRoutes } from './modules/shared/admin/inbound-routes.js';
 import { registerAdminHomeRoutes } from './modules/shared/admin/home-routes.js';
+import { registerAdminAuth } from './modules/shared/admin/auth-plugin.js';
 
 async function bootstrap() {
   const app = Fastify({ loggerInstance: logger });
@@ -20,6 +21,7 @@ async function bootstrap() {
 
   app.get('/healthz', async () => ({ status: 'ok', ts: new Date().toISOString() }));
 
+  await registerAdminAuth(app);
   await registerThreadsOAuthRoutes(app);
   await registerPersonaRoutes(app);
   await registerTrendsRoutes(app);

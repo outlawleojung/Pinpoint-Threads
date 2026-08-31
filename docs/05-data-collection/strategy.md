@@ -1,6 +1,6 @@
 ---
 title: "데이터 수집 전략"
-tags: ["data-collection", "scraping", "apify", "playwright", "manual-seed"]
+tags: ["data-collection", "scraping", "apify", "manual-seed"]
 related: ["rag-design", "benchmark-schema", "lecture-knowledge"]
 last_updated: "2026-08-29"
 status: "active"

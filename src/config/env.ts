@@ -61,6 +61,9 @@ const envSchema = z.object({
 
   VOYAGE_API_KEY: z.string().optional(),
   VOYAGE_MODEL: z.string().default('voyage-3'),
+
+  ADMIN_USERNAME: z.string().optional(),
+  ADMIN_PASSWORD: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
