@@ -170,6 +170,67 @@ model DailyPostCount {
 }
 
 // ==========================================
+// TrendSignal: 자율 트렌드 감지 (Lane 2)
+// 여러 소스(네이버·구글·TikTok CC·쿠팡 랭킹 등)의 신호를 정규화
+// ==========================================
+enum TrendSource {
+  NAVER_DATALAB
+  GOOGLE_TRENDS
+  TIKTOK_CREATIVE_CENTER
+  COUPANG_RANKING
+  MUSINSA_RANKING
+  XIAOHONGSHU_DISCOVER
+  INSTAGRAM_REELS
+  MANUAL
+}
+
+enum TrendCategory {
+  BEAUTY_SKINCARE
+  BEAUTY_MAKEUP
+  FASHION
+  HOME
+  KITCHEN
+  BABY_KIDS
+  HEALTH
+  FOOD
+  TECH
+  MONEY
+  OTHER
+}
+
+model TrendSignal {
+  id                 String          @id @default(cuid())
+  source             TrendSource
+  category           TrendCategory?
+  keyword            String
+  brand              String?
+  productHint        String?
+
+  // 신호 강도 (adapter별 의미 다름: 검색순위·조회수·랭킹 등)
+  currentValue       Float
+  previousValue      Float?
+  velocityPct        Float?
+
+  // 크로스 플랫폼
+  crossPlatformScore Int             @default(1)
+  relatedSignalIds   String[]
+
+  // 시계열
+  firstSeenAt        DateTime        @default(now())
+  lastSeenAt         DateTime        @default(now())
+  observationCount   Int             @default(1)
+  decayedAt          DateTime?
+
+  // 원본 payload
+  rawPayload         Json?
+
+  @@unique([source, keyword])
+  @@index([category, velocityPct])
+  @@index([lastSeenAt])
+  @@index([source, lastSeenAt])
+}
+
+// ==========================================
 // InboundLink: 시스템에 유입된 콘텐츠 URL 추적
 // Lane 1 (사용자 텔레그램) + Lane 2 (자율 트렌드) 공통
 // ==========================================

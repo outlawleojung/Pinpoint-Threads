@@ -47,6 +47,15 @@ const envSchema = z.object({
   PUBLISH_ACCOUNT_MIN_GAP_MINUTES: z.coerce.number().default(60),
   PUBLISH_ACCOUNT_MAX_GAP_MINUTES: z.coerce.number().default(240),
   PRODUCT_DEDUP_DAYS: z.coerce.number().default(14),
+
+  NAVER_CLIENT_ID: z.string().optional(),
+  NAVER_CLIENT_SECRET: z.string().optional(),
+
+  APIFY_API_TOKEN: z.string().optional(),
+  APIFY_ACTOR_ID: z.string().optional(),
+
+  VOYAGE_API_KEY: z.string().optional(),
+  VOYAGE_MODEL: z.string().default('voyage-3'),
 });
 
 const parsed = envSchema.safeParse(process.env);
