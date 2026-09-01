@@ -17,59 +17,84 @@ import { llm } from '../../../infra/llm/index.js';
  *   - Voyage RAG(#26) 도입 전까지 카테고리 필터 기반 검색
  */
 
+const HOOK_TYPES = [
+  'shock_discovery',   // "이거 진짜 미쳤어" · 충격 발견
+  'personal_story',    // 개인 경험 · 사연
+  'question',          // 질문형 훅
+  'contradiction',     // 통념 뒤집기 · 반전
+  'list',              // "3가지" · "5개" 리스트
+  'confession',        // 고백 · 후회
+  'observation',       // 관찰 · 일상 발견
+  'recommendation',    // 추천 · "이거 사세요"
+  'warning',           // 경고 · 주의 · "이거 조심"
+  'comparison',        // A vs B 비교
+  'tip',               // 노하우 · 꿀팁 공유
+  'other',
+] as const;
+
+const STRUCTURES = [
+  'problem_solution',
+  'story_reveal',
+  'question_answer',
+  'listicle',
+  'comparison',
+  'before_after',
+  'tip_share',
+  'monologue',
+  'other',
+] as const;
+
+const TONES = [
+  'friendly_casual',
+  'authoritative',
+  'humorous',
+  'emotional',
+  'analytical',
+  'confessional',
+  'inspirational',
+  'sarcastic',
+  'other',
+] as const;
+
+const LENGTH_BUCKETS = ['short_1_2_sentences', 'medium_3_5_sentences', 'long_6_plus'] as const;
+
+const CTA_TYPES = [
+  'implicit_curiosity',
+  'question_to_reader',
+  'invitation',
+  'direct_link',
+  'no_cta',
+  'other',
+] as const;
+
+const TOPIC_CATEGORIES = [
+  'beauty_skincare',
+  'beauty_makeup',
+  'fashion',
+  'home',
+  'kitchen',
+  'baby_kids',
+  'parenting',
+  'pet',
+  'health',
+  'food',
+  'tech',
+  'money',
+  'travel',
+  'entertainment',
+  'self_development',
+  'shopping_review', // 제품 비교·리뷰 (중립 카테고리 애매할 때)
+  'lifestyle',
+  'other',
+] as const;
+
 const ViralFactorsSchema = z.object({
-  hook_type: z.enum([
-    'shock_discovery',   // 충격 발견 ("이거 진짜 미쳤어")
-    'personal_story',    // 개인 경험 스토리
-    'question',          // 질문형 훅
-    'contradiction',     // 반전 · 통념 뒤집기
-    'list',              // 리스트형 (3가지, 5가지 등)
-    'confession',        // 고백 · 후회
-    'observation',       // 관찰 · 발견
-    'other',
-  ]),
-  structure: z.enum([
-    'problem_solution',
-    'story_reveal',
-    'question_answer',
-    'listicle',
-    'comparison',
-    'monologue',
-    'other',
-  ]),
-  tone: z.enum([
-    'friendly_casual',
-    'authoritative',
-    'humorous',
-    'emotional',
-    'analytical',
-    'confessional',
-    'inspirational',
-    'other',
-  ]),
-  length_bucket: z.enum(['short_1_2_sentences', 'medium_3_5_sentences', 'long_6_plus']),
-  cta_type: z.enum([
-    'implicit_curiosity',
-    'question_to_reader',
-    'invitation',
-    'direct_link',
-    'no_cta',
-    'other',
-  ]),
-  topic_category: z.enum([
-    'beauty_skincare',
-    'beauty_makeup',
-    'fashion',
-    'home',
-    'kitchen',
-    'baby_kids',
-    'health',
-    'food',
-    'tech',
-    'money',
-    'lifestyle',
-    'other',
-  ]),
+  hook_type: z.enum(HOOK_TYPES),
+  structure: z.enum(STRUCTURES),
+  tone: z.enum(TONES),
+  length_bucket: z.enum(LENGTH_BUCKETS),
+  cta_type: z.enum(CTA_TYPES),
+  topic_category: z.enum(TOPIC_CATEGORIES),
   key_phrase: z.string().max(80),
   reasoning: z.string().max(200),
 });
@@ -79,19 +104,38 @@ export type ViralFactors = z.infer<typeof ViralFactorsSchema>;
 const SYSTEM_PROMPT = `너는 SNS(Threads·인스타) 콘텐츠 분석가다.
 주어진 게시글이 왜 반응이 좋았는지 구조적으로 분해해 JSON으로 반환한다.
 
-축:
-- hook_type: 첫 문장·훅의 유형
-- structure: 전체 흐름 구조
-- tone: 문체·감정
-- length_bucket: 분량
-- cta_type: 독자를 어떤 방식으로 움직이는가
-- topic_category: 소재
-- key_phrase: 이 게시글의 시그니처 표현 (최대 80자)
-- reasoning: 왜 이 분류인지 (최대 200자)
+각 축의 값은 반드시 아래 목록에서만 골라라. 목록에 없는 값·자유형 문자열 금지.
+애매하면 가장 가까운 것을 고르고, 정말 어느 쪽도 아닐 때만 "other".
+"other"는 마지막 수단이다. 조금이라도 해당하는 카테고리가 있으면 그것을 선택하라.
+
+hook_type (첫 문장·훅 유형):
+${HOOK_TYPES.map((v) => `  - ${v}`).join('\n')}
+
+structure (전체 흐름):
+${STRUCTURES.map((v) => `  - ${v}`).join('\n')}
+
+tone (문체·감정):
+${TONES.map((v) => `  - ${v}`).join('\n')}
+
+length_bucket (분량):
+${LENGTH_BUCKETS.map((v) => `  - ${v}`).join('\n')}
+
+cta_type (독자 유도 방식):
+${CTA_TYPES.map((v) => `  - ${v}`).join('\n')}
+
+topic_category (소재):
+${TOPIC_CATEGORIES.map((v) => `  - ${v}`).join('\n')}
+  * 제품 비교·리뷰는 shopping_review
+  * 유아·육아는 baby_kids 또는 parenting
+  * 반려동물은 pet
+  * 여행 후기·정보는 travel
+  * 신발·의류·가방은 fashion (health 아님, 발 건강 언급 있어도 신발은 fashion)
+
+key_phrase: 이 게시글의 시그니처 표현 (최대 80자, 원문 언어)
+reasoning: 왜 이 분류인지 (최대 200자)
 
 원본 언어 무관 (한/영/중/일 지원). 분류만 정확히.
-
-출력: JSON 오브젝트만. 다른 텍스트 금지.`;
+출력: JSON 오브젝트만. 다른 텍스트·마크다운 금지.`;
 
 export async function tagBenchmarkPost(benchmarkPostId: string): Promise<ViralFactors> {
   const post = await prisma.benchmarkPost.findUnique({ where: { id: benchmarkPostId } });
@@ -115,14 +159,14 @@ export async function tagBenchmarkPost(benchmarkPostId: string): Promise<ViralFa
     jsonSchema: {
       type: 'object',
       properties: {
-        hook_type: { type: 'string' },
-        structure: { type: 'string' },
-        tone: { type: 'string' },
-        length_bucket: { type: 'string' },
-        cta_type: { type: 'string' },
-        topic_category: { type: 'string' },
-        key_phrase: { type: 'string' },
-        reasoning: { type: 'string' },
+        hook_type: { type: 'string', enum: [...HOOK_TYPES] },
+        structure: { type: 'string', enum: [...STRUCTURES] },
+        tone: { type: 'string', enum: [...TONES] },
+        length_bucket: { type: 'string', enum: [...LENGTH_BUCKETS] },
+        cta_type: { type: 'string', enum: [...CTA_TYPES] },
+        topic_category: { type: 'string', enum: [...TOPIC_CATEGORIES] },
+        key_phrase: { type: 'string', maxLength: 80 },
+        reasoning: { type: 'string', maxLength: 200 },
       },
       required: [
         'hook_type',
@@ -187,36 +231,12 @@ function coerceWithFallback(raw: Record<string, unknown>): ViralFactors {
     return typeof v === 'string' && (allowed as readonly string[]).includes(v) ? (v as T) : def;
   };
   return {
-    hook_type: safe(
-      raw.hook_type,
-      ['shock_discovery', 'personal_story', 'question', 'contradiction', 'list', 'confession', 'observation', 'other'] as const,
-      'other',
-    ),
-    structure: safe(
-      raw.structure,
-      ['problem_solution', 'story_reveal', 'question_answer', 'listicle', 'comparison', 'monologue', 'other'] as const,
-      'other',
-    ),
-    tone: safe(
-      raw.tone,
-      ['friendly_casual', 'authoritative', 'humorous', 'emotional', 'analytical', 'confessional', 'inspirational', 'other'] as const,
-      'other',
-    ),
-    length_bucket: safe(
-      raw.length_bucket,
-      ['short_1_2_sentences', 'medium_3_5_sentences', 'long_6_plus'] as const,
-      'medium_3_5_sentences',
-    ),
-    cta_type: safe(
-      raw.cta_type,
-      ['implicit_curiosity', 'question_to_reader', 'invitation', 'direct_link', 'no_cta', 'other'] as const,
-      'other',
-    ),
-    topic_category: safe(
-      raw.topic_category,
-      ['beauty_skincare', 'beauty_makeup', 'fashion', 'home', 'kitchen', 'baby_kids', 'health', 'food', 'tech', 'money', 'lifestyle', 'other'] as const,
-      'other',
-    ),
+    hook_type: safe(raw.hook_type, HOOK_TYPES, 'other'),
+    structure: safe(raw.structure, STRUCTURES, 'other'),
+    tone: safe(raw.tone, TONES, 'other'),
+    length_bucket: safe(raw.length_bucket, LENGTH_BUCKETS, 'medium_3_5_sentences'),
+    cta_type: safe(raw.cta_type, CTA_TYPES, 'other'),
+    topic_category: safe(raw.topic_category, TOPIC_CATEGORIES, 'other'),
     key_phrase: String(raw.key_phrase ?? '').slice(0, 80),
     reasoning: String(raw.reasoning ?? '').slice(0, 200),
   };

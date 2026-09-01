@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { ingestUrl } from '../src/modules/shared/url-ingester/index.js';
 
-const TEST_URL = 'https://www.threads.net/@zuck/post/C1JmR2pPZSi';
+const TEST_URL = process.argv[2] ?? 'https://www.threads.com/@yuji.ni1122/post/DcsmMV5kQ6N';
 
 async function main() {
   console.log(`\n=== Lane 1 테스트: Threads URL 인제스트 ===`);

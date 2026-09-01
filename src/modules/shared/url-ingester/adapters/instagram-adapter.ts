@@ -65,20 +65,22 @@ async function fetchViaApify(url: string, parsed: ParsedUrl): Promise<InstagramA
   const items = await runActorSync<Record<string, unknown>>({
     actorId: env.APIFY_ACTOR_IG_URL!,
     input: {
-      directUrls: [url],
-      startUrls: [{ url }],
-      urls: [url],
-      maxItems: 1,
+      username: [url],
       resultsLimit: 1,
+      skipPinnedPosts: false,
+      dataDetailLevel: 'detailedData',
     },
-    timeoutSecs: 120,
+    timeoutSecs: 180,
   });
 
-  if (!items.length) {
-    throw new InstagramFetchError(`Apify actor returned 0 items for ${url}`);
+  const postItems = items.filter(
+    (it) => (it as Record<string, unknown>)._type !== 'info',
+  );
+  if (!postItems.length) {
+    throw new InstagramFetchError(`Apify actor returned 0 post items for ${url}`);
   }
 
-  const item = items[0] as Record<string, unknown>;
+  const item = postItems[0] as Record<string, unknown>;
   return normalizeApifyItem(item, url, parsed);
 }
 

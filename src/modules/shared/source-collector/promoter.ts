@@ -5,7 +5,8 @@ import { env } from '../../../config/env.js';
 import { tagBenchmarkPost } from './viralfactors-tagger.js';
 import { embedBenchmark } from './embedder.js';
 import { isVoyageConfigured } from '../../../infra/voyage-client.js';
-import { InboundSource, type InboundLink } from '@prisma/client';
+import { classifyContentType } from '../content-classifier/index.js';
+import { ContentType, type InboundLink } from '@prisma/client';
 
 /**
  * InboundLink → BenchmarkPost 승격 파이프라인.
@@ -28,16 +29,29 @@ export interface PromoteResult {
 }
 
 export async function maybeAutoPromote(inboundLink: InboundLink): Promise<PromoteResult> {
-  // 원칙: 사용자 수동 시딩(MANUAL_TELEGRAM)은 이미 인간 큐레이션이라 무조건 승격.
-  //       자율 트렌드(AUTONOMOUS_TREND)만 likes 임계 검사.
-  if (inboundLink.source === InboundSource.MANUAL_TELEGRAM) {
-    return promoteInboundLink(inboundLink.id, 'auto');
-  }
+  // 원칙: 사용자 큐레이션 여부와 무관하게 실측 반응(likes)이 임계 이상일 때만 자동 승격.
+  // 사용자 판단은 참고, 최종 판정은 지표. 임계 미만은 InboundLink만 남기고 /admin/inbound
+  // 대시보드에서 수동 승격 가능.
   const likes = extractLikes(inboundLink.engagement);
   if (likes === null || likes < AUTO_MIN_LIKES) {
     return { status: 'skipped_low_likes', reason: `likes=${likes ?? '?'} < ${AUTO_MIN_LIKES}` };
   }
   return promoteInboundLink(inboundLink.id, 'auto');
+}
+
+/**
+ * 승격 전 contentType 판정. UNSUITABLE 이면 승격 스킵.
+ * SHOPPING · DAILY 는 BenchmarkPost 로 저장하되 라우팅 태그로 사용됨.
+ */
+async function classifyForRouting(text: string, mediaUrls: string[]): Promise<ContentType> {
+  try {
+    const result = await classifyContentType({ text, mediaUrls });
+    logger.info({ contentType: result.contentType, reason: result.reason }, 'content type classified');
+    return result.contentType as ContentType;
+  } catch (err) {
+    logger.warn({ err }, 'content type classify failed → fallback SHOPPING');
+    return ContentType.SHOPPING; // 안전 기본값
+  }
 }
 
 export async function promoteInboundLink(
@@ -66,6 +80,13 @@ export async function promoteInboundLink(
   const engagement = (link.engagement as Record<string, number> | null) ?? {};
   const contentHash = computeContentHash(link.rawText, link.mediaUrls);
   const externalPostId = deriveExternalPostId(link);
+
+  // 승격 전 콘텐츠 성격 판정 (SHOPPING / DAILY / UNSUITABLE)
+  const contentType = await classifyForRouting(link.rawText, link.mediaUrls);
+  if (contentType === ContentType.UNSUITABLE) {
+    logger.info({ inboundLinkId }, 'promotion skipped: UNSUITABLE content');
+    return { status: 'skipped_no_content', reason: 'contentType=UNSUITABLE (정치/성인/홍보 등)' };
+  }
 
   // platform+externalPostId 또는 contentHash 로 dedup
   const dupByPk = externalPostId
@@ -102,6 +123,7 @@ export async function promoteInboundLink(
       contentHash,
       text: link.rawText,
       mediaUrls: link.mediaUrls,
+      contentType,
       likesCount: toNum(engagement.likes),
       repliesCount: toNum(engagement.replies),
       repostsCount: toNum(engagement.reposts),

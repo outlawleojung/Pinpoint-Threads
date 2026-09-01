@@ -55,6 +55,84 @@ export interface ClassifyInput {
   mediaUrls: string[];
 }
 
+/**
+ * 3-tier 콘텐츠 성격 분류.
+ *
+ * SHOPPING: 상품 소개/추천/구매 유도가 목적 (Pipeline A)
+ * DAILY: 재미·트렌드·이슈·개인 생활 · 특정 상품 없음 (Pipeline C)
+ * UNSUITABLE: 정치·성인·개인 홍보·의약품·투자 등 저장·발행 부적합
+ */
+export const CONTENT_TYPES = ['SHOPPING', 'DAILY', 'UNSUITABLE'] as const;
+export type ContentTypeTag = (typeof CONTENT_TYPES)[number];
+
+export interface ContentTypeResult {
+  contentType: ContentTypeTag;
+  reason: string;
+}
+
+const CONTENT_TYPE_PROMPT = `너는 SNS 게시글의 성격을 3가지로 분류하는 라우터다.
+
+분류:
+- SHOPPING : 특정 상품/브랜드 소개, 추천, 구매 유도, 사용 후기, 언박싱, 쇼핑 큐레이션.
+             상품이 명시적으로 나오고 독자에게 "이거 좋다/살만하다" 느낌을 준다.
+- DAILY    : 일상 · 재미 · 트렌드 · 이슈 · 유머 · 관찰 · 뉴스 반응 · 개인 감상 · 유명인 화제 등.
+             특정 상품이 없거나, 있어도 부수적 (예: "카페 왔는데 커피 맛있다" — 카페 언급이 목적 아님).
+             주제어(예: "마운자로", "다이어트약")가 잠깐 언급돼도 게시글의 **주된 의도**가
+             일상 관찰·궁금증·감상이면 DAILY.
+- UNSUITABLE : 게시글의 **주된 의도**가 아래에 해당할 때만.
+             · 정치 견해·선거·특정 정치인 옹호/비판
+             · 종교 교리·개종 유도
+             · 성인 · 노출 · 성적 콘텐츠
+             · 의약품·건강기능식품의 **판매·직접 추천·복용 후기** (단순 언급은 제외)
+             · 투자 상품 (주식·코인·부동산) 매매 유도
+             · 도박·베팅
+             · 개인 사업·강의·컨설팅 판매 홍보
+             · 특정 인물 저격·명예훼손·차별
+             · 소셜 이슈 논쟁성 게시물
+
+판정 원칙: 애매하면 DAILY. UNSUITABLE 은 명확한 판매·주장·유도 있을 때만.
+
+JSON 오브젝트로만 반환:
+{ "contentType": "SHOPPING" | "DAILY" | "UNSUITABLE", "reason": "1문장 판단 근거 (한국어)" }`;
+
+export async function classifyContentType(input: {
+  text: string;
+  mediaUrls?: string[];
+}): Promise<ContentTypeResult> {
+  const userParts: LlmContentPart[] = [];
+  for (const url of (input.mediaUrls ?? []).slice(0, 2)) {
+    userParts.push({ type: 'image', url });
+  }
+  userParts.push({
+    type: 'text',
+    text: `게시글:\n"""\n${input.text}\n"""\n\n분류 결과를 JSON으로만 반환.`,
+  });
+
+  const response = await llm().complete({
+    tier: 'fast',
+    system: CONTENT_TYPE_PROMPT,
+    userParts,
+    maxOutputTokens: 200,
+    temperature: 0.1,
+    jsonMode: true,
+    jsonSchema: {
+      type: 'object',
+      properties: {
+        contentType: { type: 'string', enum: [...CONTENT_TYPES] },
+        reason: { type: 'string', maxLength: 200 },
+      },
+      required: ['contentType', 'reason'],
+    },
+  });
+
+  const parsed = extractJson(response.text) as Record<string, unknown>;
+  const ct = typeof parsed.contentType === 'string' && (CONTENT_TYPES as readonly string[]).includes(parsed.contentType)
+    ? (parsed.contentType as ContentTypeTag)
+    : 'DAILY';
+  const reason = typeof parsed.reason === 'string' ? parsed.reason.slice(0, 200) : '';
+  return { contentType: ct, reason };
+}
+
 export async function classifySourceItem(input: ClassifyInput): Promise<ClassifyResult> {
   const userParts: LlmContentPart[] = [];
 

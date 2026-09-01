@@ -304,6 +304,16 @@ enum InboundStatus {
   FAILED
 }
 
+// 콘텐츠 성격 분류 — Pipeline 라우팅에 사용
+//   SHOPPING     : 쇼핑 소개 콘텐츠 → Pipeline A (제품 매칭·쿠팡 딥링크·고정 댓글)
+//   DAILY        : 일상·재미·트렌드 콘텐츠 → Pipeline C (엔게이지먼트 발행)
+//   UNSUITABLE   : 정치·성인·개인 홍보 등 저장·발행 부적합
+enum ContentType {
+  SHOPPING
+  DAILY
+  UNSUITABLE
+}
+
 model InboundLink {
   id              String           @id @default(cuid())
   url             String
@@ -384,6 +394,9 @@ model BenchmarkPost {
 
   publishedAt       DateTime?
   collectedAt       DateTime     @default(now())
+
+  // 콘텐츠 성격 (SHOPPING / DAILY) — 발행 파이프라인 라우팅에 사용
+  contentType       ContentType? @default(SHOPPING)
 
   // AI viralFactors 분석 결과: { hook_type, structure, tone, length_bucket, cta_type, topic_category }
   viralFactors      Json?

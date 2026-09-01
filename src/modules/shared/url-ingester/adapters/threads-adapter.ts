@@ -67,19 +67,24 @@ async function fetchViaApify(url: string, parsed: ParsedUrl): Promise<ThreadsAda
   const items = await runActorSync<Record<string, unknown>>({
     actorId: env.APIFY_ACTOR_THREADS_URL!,
     input: {
-      startUrls: [{ url }],
-      urls: [url],
-      directUrls: [url],
-      maxItems: 1,
+      mode: 'post',
+      postUrls: [url],
+      maxPosts: 1,
+      includeReplies: false,
+      includeReposts: false,
+      proxyConfiguration: { useApifyProxy: true },
     },
     timeoutSecs: 120,
   });
 
-  if (!items.length) {
-    throw new ThreadsFetchError(`Apify actor returned 0 items for ${url}`);
+  const postItems = items.filter(
+    (it) => (it as Record<string, unknown>)._type !== 'info',
+  );
+  if (!postItems.length) {
+    throw new ThreadsFetchError(`Apify actor returned 0 post items for ${url}`);
   }
 
-  const item = items[0] as Record<string, unknown>;
+  const item = postItems[0] as Record<string, unknown>;
   return normalizeApifyItem(item, url, parsed);
 }
 
@@ -98,11 +103,18 @@ function normalizeApifyItem(
 
   const text = (pick<string>('text', 'caption', 'content', 'description', 'postText') as string) ?? '';
   const authorHandle =
-    (pick<string>('username', 'authorHandle', 'author', 'ownerUsername') as string) ??
+    (pick<string>('username', 'authorHandle', 'author', 'ownerUsername', 'user_name') as string) ??
     parsed.authorHandle;
 
   const mediaUrls: string[] = [];
-  const imagesRaw = pick<unknown>('images', 'imageUrls', 'mediaUrls', 'media', 'carouselMedia');
+  const imagesRaw = pick<unknown>(
+    'media_urls',
+    'mediaUrls',
+    'images',
+    'imageUrls',
+    'media',
+    'carouselMedia',
+  );
   if (Array.isArray(imagesRaw)) {
     for (const m of imagesRaw) {
       if (typeof m === 'string') mediaUrls.push(m);
@@ -116,22 +128,35 @@ function normalizeApifyItem(
   const singleImage = pick<string>('imageUrl', 'thumbnailUrl', 'displayUrl', 'image');
   if (singleImage && !mediaUrls.includes(singleImage)) mediaUrls.unshift(singleImage);
 
-  const videoUrl = pick<string>('videoUrl', 'video');
+  const videoUrl = pick<string>('video_url', 'videoUrl', 'video');
   if (videoUrl && !mediaUrls.includes(videoUrl)) mediaUrls.push(videoUrl);
 
-  const publishedRaw = pick<unknown>('publishedAt', 'timestamp', 'takenAt', 'createdAt', 'date');
+  const publishedRaw = pick<unknown>(
+    'posted_at',
+    'publishedAt',
+    'timestamp',
+    'takenAt',
+    'createdAt',
+    'date',
+  );
   const publishedAt = parseDate(publishedRaw);
 
   const engagement = {
-    likes: toNum(pick<unknown>('likes', 'likeCount', 'likesCount')),
-    replies: toNum(pick<unknown>('replies', 'replyCount', 'repliesCount', 'commentsCount')),
-    reposts: toNum(pick<unknown>('reposts', 'repostCount', 'repostsCount', 'sharesCount')),
-    quotes: toNum(pick<unknown>('quotes', 'quoteCount')),
+    likes: toNum(pick<unknown>('like_count', 'likes', 'likeCount', 'likesCount')),
+    replies: toNum(
+      pick<unknown>('reply_count', 'replies', 'replyCount', 'repliesCount', 'commentsCount'),
+    ),
+    reposts: toNum(
+      pick<unknown>('repost_count', 'reposts', 'repostCount', 'repostsCount', 'sharesCount'),
+    ),
+    quotes: toNum(pick<unknown>('quote_count', 'quotes', 'quoteCount')),
   };
 
   const result: ThreadsAdapterResult = {
     authorHandle,
-    threadsPostId: (pick<string>('id', 'postId', 'shortcode') as string) ?? parsed.postShortcode,
+    threadsPostId:
+      (pick<string>('code', 'shortcode', 'post_id', 'id', 'postId') as string) ??
+      parsed.postShortcode,
     permalink: (pick<string>('url', 'permalink') as string) ?? url,
     text,
     mediaUrls,
