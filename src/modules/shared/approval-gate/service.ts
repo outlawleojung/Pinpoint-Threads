@@ -10,7 +10,7 @@ import { scheduleApprovedPost, SchedulerError } from '../publisher/scheduler.js'
 
 type PostWithRelations = Post & {
   account: Account;
-  sourceItem: SourceItem;
+  sourceItem: SourceItem | null;
   commerceProduct: CommerceProduct | null;
 };
 

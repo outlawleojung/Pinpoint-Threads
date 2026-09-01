@@ -99,15 +99,22 @@ enum PostState {
   FAILED
 }
 
+enum PostKind {
+  SHOPPING   // Pipeline A: 벤치마크 소스 URL + 커머스 매칭 + 딥링크 고정 댓글
+  SHARING    // Pipeline B: 스하리(맞팔·소통) 글 · 소스 URL 없음
+  DAILY      // Pipeline C: 일상글 · 소스 URL 있을 수도 있음
+}
+
 model Post {
   id                  String            @id @default(cuid())
   state               PostState         @default(DRAFT)
+  kind                PostKind          @default(SHOPPING)
 
   accountId           String
   account             Account           @relation(fields: [accountId], references: [id])
 
-  sourceItemId        String
-  sourceItem          SourceItem        @relation(fields: [sourceItemId], references: [id])
+  sourceItemId        String?
+  sourceItem          SourceItem?       @relation(fields: [sourceItemId], references: [id])
 
   commerceProductId   String?
   commerceProduct     CommerceProduct?  @relation(fields: [commerceProductId], references: [id])
