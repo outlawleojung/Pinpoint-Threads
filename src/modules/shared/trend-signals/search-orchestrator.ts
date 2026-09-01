@@ -9,6 +9,7 @@ import {
 } from '../../../infra/apify-client.js';
 import { ingestUrl } from '../url-ingester/index.js';
 import { getTopActiveSignals } from './index.js';
+import { filterAndGeneralize } from './filter.js';
 
 /**
  * Lane 2 트렌드 → 플랫폼 능동 검색 오케스트레이터 (Task #7d).
@@ -60,8 +61,34 @@ export async function runTrendSearchIngest(
 
   if (!isApifyConfigured()) throw new ApifyNotConfiguredError();
 
-  const signals = await getTopActiveSignals({ limit: topN });
-  logger.info({ topN, found: signals.length }, 'trend search orchestrator start');
+  // 넉넉히 뽑아서 필터 통과율(~60%) 감안하고 topN 확보
+  const rawSignals = await getTopActiveSignals({ limit: topN * 2 });
+  logger.info({ topN, rawFound: rawSignals.length }, 'trend search orchestrator start');
+
+  // 필터·키워드 압축 (정치·인물·시사 drop + 긴 상품명 → 검색어 압축)
+  const filtered = await filterAndGeneralize(
+    rawSignals.map((s) => ({
+      source: s.source,
+      keyword: s.keyword,
+      currentValue: s.currentValue,
+    })),
+  );
+
+  // KEEP된 것만, searchKeyword 있으면 그것 사용
+  const usableSignals = filtered
+    .map((f, i) => ({ signal: rawSignals[i]!, filter: f }))
+    .filter((x) => x.filter.keep && x.filter.searchKeyword)
+    .slice(0, topN);
+
+  logger.info(
+    { rawFound: rawSignals.length, afterFilter: usableSignals.length },
+    'signals filtered for search',
+  );
+
+  const signals = usableSignals.map((x) => ({
+    ...x.signal,
+    keyword: x.filter.searchKeyword!, // 압축된 검색어로 교체
+  }));
 
   const perPlatformMap: SearchIngestSummary['perPlatform'] = PLATFORM_CONFIG.filter((c) =>
     Boolean((env as any)[c.actorEnv]),
@@ -194,36 +221,50 @@ async function searchKeywordViaApify(opts: {
   const items = await runActorSync<Record<string, unknown>>({
     actorId: opts.actorId,
     input: {
-      // 흔한 필드명 나열
+      // themineworks/threads-scraper 특화 (mode=search 필요)
+      mode: 'search',
+      searchQuery: opts.keyword,
+      // 다른 액터도 호환되도록 흔한 필드 추가
       keyword: opts.keyword,
       keywords: [opts.keyword],
-      searchQuery: opts.keyword,
       searchQueries: [opts.keyword],
       query: opts.keyword,
       queries: [opts.keyword],
+      // 결과 개수 (액터별 상이)
+      maxPosts: opts.maxResults,
       maxItems: opts.maxResults,
       maxResults: opts.maxResults,
       resultsLimit: opts.maxResults,
-      scrapeMode: 'Keyword Search',
-      searchType: 'Posts',
+      // 부가 옵션
+      includeReplies: false,
+      includeReposts: false,
+      proxyConfiguration: { useApifyProxy: true },
     },
     timeoutSecs: 240,
   });
 
-  return items.map((item) => {
+  // _type: 'info' 정보 아이템 필터
+  const posts = items.filter(
+    (it) => (it as Record<string, unknown>)._type !== 'info',
+  );
+
+  return posts.map((item) => {
     const url =
       (item.url as string | undefined) ??
       (item.postUrl as string | undefined) ??
       (item.permalink as string | undefined) ??
+      (item.webVideoUrl as string | undefined) ??
       (item.noteUrl as string | undefined) ??
       (item.link as string | undefined) ??
       null;
 
     const likes =
+      toNum(item.like_count) ??    // themineworks · atomus
       toNum(item.likes) ??
       toNum(item.likeCount) ??
       toNum(item.likedCount) ??
-      toNum(item.diggCount);
+      toNum(item.diggCount) ??      // TikTok
+      toNum((item.engagement as Record<string, unknown> | undefined)?.liked_count); // XHS nested
 
     return { url, likes };
   });
