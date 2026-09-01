@@ -12,8 +12,12 @@ const FASHION_CATEGORIES = new Set([
   'beauty',
 ]);
 
+// TODO: 무신사 배선 완료 후 라우팅 재활성화 (사용자 딥링크 수동 등록 방식)
+// 현재는 무신사 미구현 → 전 카테고리 쿠팡 강제
+const MUSINSA_ENABLED = false;
+
 export function routeChannel(category: string | undefined): CommerceChannelKind {
-  if (category && FASHION_CATEGORIES.has(category.toLowerCase())) return 'MUSINSA';
+  if (MUSINSA_ENABLED && category && FASHION_CATEGORIES.has(category.toLowerCase())) return 'MUSINSA';
   return 'COUPANG';
 }
 

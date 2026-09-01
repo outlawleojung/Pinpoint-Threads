@@ -11,7 +11,7 @@ import { logger } from '../../../config/logger.js';
  * 검색 키워드 + 카테고리 → 채널 라우팅 → 상품 검색 → Vision Self-Correction Loop.
  *
  * 매칭 실패 처리 (docs/01-pipelines/A-shopping.md § 7):
- * - 동일 우선, 유사 허용 (Vision score >= 0.65)
+ * - 동일 우선, 유사 허용 (Vision score >= 0.85)
  * - 3회 재시도 후 실패면 폐기
  *
  * TODO(Phase 3a): CoupangAdapter·MusinsaAdapter 실 구현 필요 (현재 stub)
@@ -75,7 +75,7 @@ export async function matchProduct(input: MatchInput): Promise<MatchOutcome> {
         logger.error({ err }, 'vision verify failed');
         continue;
       }
-      if (vision.matched && vision.score >= 0.65) {
+      if (vision.matched && vision.score >= 0.85) {
         const deeplinkUrl = await primary.generateDeeplink(candidate.productUrl);
         logger.info({ candidate: candidate.productName, score: vision.score }, 'match found');
         return {

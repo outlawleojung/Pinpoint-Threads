@@ -52,6 +52,19 @@ const SYSTEM_PROMPT = `너는 한국 Threads 고정 댓글의 첫 리드 문장�
 - 브랜드명·모델명·가격·구매처·"쿠팡"·"파트너스"·"링크" 노골적 언급 금지
 - 강추·추천·가성비·필수템·후기·리뷰 같은 홍보 냄새 어휘 금지
 - 명령형·요청형 ("사세요", "확인해봐요") 금지
+- **상품명 뒤에 붙는 부가·판촉 정보 절대 언급 금지**:
+  · 사은품·증정 (양말 증정, 사은품, 무료 사은품)
+  · 프로모션 (1+1, 2+1, 세트, 다양한 색상, 남녀공용, 정품, 특가)
+  · 배송·수령 (무료배송, 로켓배송, 당일배송)
+  · 모델 번호·품번 (1201A019 같은 코드)
+  → 오직 상품의 **본질적 기능·경험·감각·문제해결** 만 다룸
+  → "양말까지 껴주는데" 같이 사은품을 억지로 넣는 카피는 절대 X
+
+자연 어투 강제:
+- **실제 한국인이 SNS에 쓰는 표현만.** 요즘 Threads 유행어 OK (실화냐·미쳤음·진심).
+- LLM 창작 은유·억지 비유 절대 금지 (예: "발바닥이 안 울어", "잠이 마중 옴").
+- 축약 어미 (~됨/~옴/~함) 사용 시 목적어·주어 명확: 나쁨 "좀 됨" / 좋음 "발이 좀 편해짐".
+- **처음 본 사람도 즉시 이해 가능해야.** 해석·추론 필요한 문장 X.
 
 권장 스타일 예:
 - "책상 위에 하나 놓았을 뿐인데 은근 별세계임"
@@ -95,7 +108,12 @@ export async function composeReply(input: ReplyComposeInput): Promise<ReplyCompo
   const parsed = extractJson(response.text);
   const { lead } = LeadResultSchema.parse(parsed);
 
-  const text = [lead, input.deeplinkUrl, '', LEGAL_DISCLAIMER].join('\n');
+  // [광고] prefix 는 공정위·플랫폼 안전 표기용 — 링크 바로 옆에 반드시 존재해야 함
+  const labeledLead = lead.startsWith('[광고]') ? lead : `[광고] ${lead}`;
+  // Threads 자동 링크 미리보기 카드 방지: URL 앞에 zero-width space 삽입.
+  // 브라우저는 여전히 클릭 가능한 URL로 인식하지만 Threads의 URL 감지·OG fetch는 회피.
+  const maskedUrl = `​${input.deeplinkUrl}`;
+  const text = [labeledLead, maskedUrl, '', LEGAL_DISCLAIMER].join('\n');
   logger.debug({ lead, textLength: text.length }, 'composeReply');
   return { text, lead };
 }
