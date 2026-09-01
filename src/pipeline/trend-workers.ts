@@ -36,8 +36,8 @@ import { runSharingForAllAccounts } from '../modules/pipeline-b/sharing-publishe
 const POLL_EVERY_MS = 6 * 60 * 60 * 1000; // 6h
 const DIGEST_CRON = '0 8 * * *'; // 매일 08:00 KST
 const SEARCH_CRON = '30 8 * * *'; // 매일 08:30 KST (다이제스트 이후)
-const SHARING_CRON = '0 9 * * *';  // 매일 09:00 KST (Pipeline B 스하리 벤치마크 수집)
-const SHARING_PUBLISH_CRON = '0 11 * * *'; // 매일 11:00 KST (Pipeline B 계정별 스하리 카피 생성 → 승인 카드)
+const SHARING_CRON = '0 8 * * *';  // 매일 08:00 KST (Pipeline B 스하리 벤치마크 수집 · publish 1h 전)
+const SHARING_PUBLISH_CRON = '0 9 * * *'; // 매일 09:00 KST (Pipeline B 계정별 스하리 카피 생성 → 승인 카드)
 
 function buildAdapters(): TrendSourceAdapter[] {
   return [
