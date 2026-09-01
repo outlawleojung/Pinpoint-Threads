@@ -36,7 +36,7 @@ Last synced: 2026-08-31 (데이터 수집 재검증 후)
 
 - [x] **4a. Threads OAuth 흐름** — 5계정 실 연결, `/oauth/threads/accounts` UI
 - [x] **4b. Publisher** — 2-step + carousel + 고정 댓글 + refresh 자동화
-- [ ] **4c. 실 계정 1개 발행 e2e** — 사용자 요청으로 보류
+- [x] **4c. 실 계정 1개 발행 e2e** — @kle0_lee 발행 완료 (threadsPostId 18104792209954978, 2026-09-01)
   - **선행: Publisher dryRun 모드 구현** (container-only, 실 게시 안 함 · 5계정 리스크 0 검증)
   - 상세: [docs/03-infrastructure/publisher-dryrun-testing.md](03-infrastructure/publisher-dryrun-testing.md)
   - dry-run 5계정 검증 통과 후 → 최소 팔로워 계정 1개로 실 게시 1회 · 방치
@@ -78,6 +78,17 @@ Last synced: 2026-08-31 (데이터 수집 재검증 후)
 
 ### Stage 3 — 시그널 정교화
 - [x] **7h. 크로스플랫폼 상관관계 · 시그널 감쇠** — 자동 · poll 시마다
+
+## Pipeline B — 팔로워 부스팅 (스하리)
+
+- [x] **B1. 스하리 해시태그 벤치마크 수집기** (2026-09-01) — `pipeline-b/sharing-collector`
+  - "스하리1000명프로젝트" Apify Threads 검색 · reply_count≥20 필터
+  - contentType=SHARING 로 BenchmarkPost 저장 (쇼핑·일상 풀과 완전 분리)
+  - 매일 09:00 KST 크론 (`sharing-collect-daily`)
+  - 실측: 22 fetch → 10 통과 → 10 저장 완료
+- [ ] **B2. 스하리 글 각색 카피라이터** — SHARING 벤치마크 풀에서 few-shot RAG
+- [ ] **B3. 스하리 발행 스케줄** — 계정별 1일 1건 스하리
+- [ ] **B4. 팔로우백 액션** — 하드 캡 하루 3~5회, 4개 자체 계정 상호 금지
 
 ## 데이터 수집 재설계 (2026-08-31 실 검증 후 추가)
 

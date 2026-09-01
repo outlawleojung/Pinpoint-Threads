@@ -1,6 +1,6 @@
 ---
 title: "Current State"
-last_updated: "2026-08-31"
+last_updated: "2026-09-01"
 status: "active"
 ---
 
@@ -8,8 +8,8 @@ status: "active"
 
 **새 세션 시작 시 이 파일을 먼저 읽으세요.**
 
-Last updated: 2026-08-31 (데이터 수집 재검증 후)
-Last commit: `8735a2e` (docs: 실서버 배포 전략)
+Last updated: 2026-09-01 (Pipeline B 스하리 수집기 착수)
+Last commit: `7ac17d7` (실 발행 반영)
 
 ## Phase & 진행률
 
@@ -21,11 +21,8 @@ Last commit: `8735a2e` (docs: 실서버 배포 전략)
 - Priority 5 (Source Collector · 벤치마크): 5/5 ✅
 - Priority 6 (URL 인제스터): 7/7 ✅
 - Priority 7 (자율 트렌드): 8/8 ✅
-- 남은 유일 태스크: **#4c 실 계정 발행 e2e** (사용자 요청으로 보류)
-  - 접근 전략: [publisher-dryrun-testing.md](03-infrastructure/publisher-dryrun-testing.md)
-    1. Container-only dry-run 모드로 5계정 검증 (리스크 0)
-    2. 최소 팔로워 계정 1개로 실 게시 1회 · 방치
-    3. 스케줄러 정상 가동
+- **#4c 실 계정 발행 e2e**: ✅ 완료 (2026-09-01) — @kle0_lee threadsPostId 18104792209954978
+- **Pipeline B B1**: ✅ 스하리 해시태그 수집기 (2026-09-01) — "스하리1000명프로젝트" 매일 09:00 KST 크론
 
 ## 지금까지 검증된 것
 

@@ -170,6 +170,32 @@ export class ThreadsClient {
     };
   }
 
+  /**
+   * 계정 팔로워 수 조회 (User Insights API).
+   * Docs: https://developers.facebook.com/docs/threads/insights
+   * 필요 scope: threads_manage_insights (이미 요청됨).
+   * 응답: { data: [{ name: 'followers_count', total_value: { value: N } }] }
+   */
+  async fetchFollowersCount(accessToken: string): Promise<number> {
+    const params = new URLSearchParams({
+      metric: 'followers_count',
+      access_token: accessToken,
+    });
+    const res = await request(`${GRAPH_BASE}/v1.0/me/threads_insights?${params.toString()}`, {
+      method: 'GET',
+    });
+    const json = (await res.body.json()) as any;
+    if (res.statusCode !== 200 || !Array.isArray(json.data)) {
+      throw new Error(`Threads followers_count fetch failed: ${res.statusCode} ${JSON.stringify(json)}`);
+    }
+    const entry = json.data.find((d: any) => d.name === 'followers_count');
+    const value = entry?.total_value?.value;
+    if (typeof value !== 'number') {
+      throw new Error(`Threads followers_count: value missing: ${JSON.stringify(json)}`);
+    }
+    return value;
+  }
+
   async fetchUserProfile(accessToken: string): Promise<ThreadsUserProfile> {
     const fields = 'id,username,name,threads_profile_picture_url,threads_biography';
     const params = new URLSearchParams({ fields, access_token: accessToken });

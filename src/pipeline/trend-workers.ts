@@ -1,6 +1,12 @@
 import { Worker } from 'bullmq';
 import { redisConnection } from '../queues/connection.js';
-import { QUEUE_NAMES, trendPollQueue, trendDigestQueue, trendSearchQueue } from '../queues/queues.js';
+import {
+  QUEUE_NAMES,
+  trendPollQueue,
+  trendDigestQueue,
+  trendSearchQueue,
+  sharingCollectQueue,
+} from '../queues/queues.js';
 import { logger } from '../config/logger.js';
 import {
   pollAllAdapters,
@@ -14,6 +20,7 @@ import { CoupangRankingAdapter } from '../modules/shared/trend-signals/adapters/
 import { TikTokCreativeCenterAdapter } from '../modules/shared/trend-signals/adapters/tiktok-creative-center.js';
 import { sendDigestMessage } from '../modules/shared/approval-gate/notifier.js';
 import { safeRunTrendSearchIngest } from '../modules/shared/trend-signals/search-orchestrator.js';
+import { safeCollectSharingBenchmarks } from '../modules/pipeline-b/sharing-collector/index.js';
 
 /**
  * Lane 2 자율 트렌드 워커 · 스케줄러.
@@ -27,6 +34,7 @@ import { safeRunTrendSearchIngest } from '../modules/shared/trend-signals/search
 const POLL_EVERY_MS = 6 * 60 * 60 * 1000; // 6h
 const DIGEST_CRON = '0 8 * * *'; // 매일 08:00 KST
 const SEARCH_CRON = '30 8 * * *'; // 매일 08:30 KST (다이제스트 이후)
+const SHARING_CRON = '0 9 * * *';  // 매일 09:00 KST (Pipeline B 스하리 벤치마크 수집)
 
 function buildAdapters(): TrendSourceAdapter[] {
   return [
@@ -109,7 +117,20 @@ export function startTrendWorkers(): Worker[] {
     ),
   );
 
-  logger.info('Started 3 trend workers (trend-poll · trend-digest · trend-search)');
+  workers.push(
+    new Worker(
+      QUEUE_NAMES.SHARING_COLLECT,
+      async (job) => {
+        logger.info({ jobId: job.id, data: job.data }, 'sharing-collect start');
+        const summary = await safeCollectSharingBenchmarks();
+        logger.info({ jobId: job.id, summary }, 'sharing-collect done');
+        return summary ?? { skipped: true };
+      },
+      { connection: redisConnection, concurrency: 1 },
+    ),
+  );
+
+  logger.info('Started 4 trend workers (trend-poll · trend-digest · trend-search · sharing-collect)');
   return workers;
 }
 
@@ -144,8 +165,23 @@ export async function scheduleTrendJobs(): Promise<void> {
     },
   );
 
+  // daily Pipeline B 스하리 해시태그 벤치마크 수집
+  await sharingCollectQueue.add(
+    'sharing-collect-daily',
+    { triggeredBy: 'scheduler' },
+    {
+      repeat: { pattern: SHARING_CRON, tz: 'Asia/Seoul' },
+      jobId: 'sharing-collect-daily',
+    },
+  );
+
   logger.info(
-    { pollEveryMs: POLL_EVERY_MS, digestCron: DIGEST_CRON, searchCron: SEARCH_CRON },
+    {
+      pollEveryMs: POLL_EVERY_MS,
+      digestCron: DIGEST_CRON,
+      searchCron: SEARCH_CRON,
+      sharingCron: SHARING_CRON,
+    },
     'trend jobs scheduled (repeat)',
   );
 }

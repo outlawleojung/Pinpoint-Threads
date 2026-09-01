@@ -110,6 +110,7 @@ export interface SearchSimilarInput {
   topK?: number;
   categoryFilter?: string; // viralFactors.topic_category 값
   minLikes?: number;
+  contentType?: 'SHOPPING' | 'DAILY' | 'SHARING'; // Pipeline별 풀 분리
 }
 
 export async function searchSimilar(input: SearchSimilarInput): Promise<SimilarBenchmark[]> {
@@ -123,6 +124,21 @@ export async function searchSimilar(input: SearchSimilarInput): Promise<SimilarB
 
   // pgvector 코사인 거리: `embedding <=> $1::vector` (0=같음, 2=반대)
   // 필터: embedding NOT NULL + minLikes + optional category
+  const params: unknown[] = [literal, minLikes];
+  let paramIdx = 3;
+  let categoryClause = '';
+  if (input.categoryFilter) {
+    categoryClause = `AND "viralFactors"->>'topic_category' = $${paramIdx}`;
+    params.push(input.categoryFilter);
+    paramIdx += 1;
+  }
+  let contentTypeClause = '';
+  if (input.contentType) {
+    contentTypeClause = `AND "contentType" = $${paramIdx}::"ContentType"`;
+    params.push(input.contentType);
+    paramIdx += 1;
+  }
+
   const rows = await prisma.$queryRawUnsafe<
     Array<{
       id: string;
@@ -143,12 +159,11 @@ export async function searchSimilar(input: SearchSimilarInput): Promise<SimilarB
      FROM "BenchmarkPost"
      WHERE embedding IS NOT NULL
        AND "likesCount" >= $2
-       ${input.categoryFilter ? `AND "viralFactors"->>'topic_category' = $3` : ''}
+       ${categoryClause}
+       ${contentTypeClause}
      ORDER BY embedding <=> $1::vector
      LIMIT ${topK}`,
-    literal,
-    minLikes,
-    ...(input.categoryFilter ? [input.categoryFilter] : []),
+    ...params,
   );
 
   return rows.map((r) => ({

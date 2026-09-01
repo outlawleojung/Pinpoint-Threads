@@ -12,6 +12,7 @@ export const QUEUE_NAMES = {
   TREND_POLL: 'trend-poll',
   TREND_DIGEST: 'trend-digest',
   TREND_SEARCH: 'trend-search',
+  SHARING_COLLECT: 'sharing-collect',
   PERFORMANCE_COLLECT: 'performance-collect',
 } as const;
 
@@ -35,6 +36,7 @@ export type TrendSearchJob = {
   perPlatformResults?: number;
   minLikes?: number;
 };
+export type SharingCollectJob = { triggeredBy?: string };
 export type PerformanceCollectJob = { postId: string; hoursAfterPublish: number };
 
 const defaultJobOptions = {
@@ -107,6 +109,15 @@ export const trendSearchQueue = new Queue<TrendSearchJob>(QUEUE_NAMES.TREND_SEAR
   },
 });
 
+export const sharingCollectQueue = new Queue<SharingCollectJob>(QUEUE_NAMES.SHARING_COLLECT, {
+  connection: redisConnection,
+  defaultJobOptions: {
+    attempts: 1, // Apify 비용 있으니 자동 재시도 금지
+    removeOnComplete: { age: 7 * 24 * 3600, count: 30 },
+    removeOnFail: { age: 14 * 24 * 3600 },
+  },
+});
+
 export const performanceQueue = new Queue<PerformanceCollectJob>(QUEUE_NAMES.PERFORMANCE_COLLECT, {
   connection: redisConnection,
   defaultJobOptions: {
@@ -136,6 +147,9 @@ export const queueEvents: Record<QueueName, QueueEvents> = {
     connection: redisConnection,
   }),
   [QUEUE_NAMES.TREND_SEARCH]: new QueueEvents(QUEUE_NAMES.TREND_SEARCH, {
+    connection: redisConnection,
+  }),
+  [QUEUE_NAMES.SHARING_COLLECT]: new QueueEvents(QUEUE_NAMES.SHARING_COLLECT, {
     connection: redisConnection,
   }),
   [QUEUE_NAMES.PERFORMANCE_COLLECT]: new QueueEvents(QUEUE_NAMES.PERFORMANCE_COLLECT, {
