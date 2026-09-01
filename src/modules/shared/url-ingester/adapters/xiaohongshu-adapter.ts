@@ -58,19 +58,21 @@ export async function fetchXhsPost(input: XhsAdapterInput): Promise<XhsAdapterRe
   const items = await runActorSync<Record<string, unknown>>({
     actorId: env.APIFY_ACTOR_XHS_URL,
     input: {
-      startUrls: [{ url: input.url }],
-      postUrls: [input.url],
-      urls: [input.url],
-      maxItems: 1,
+      noteUrls: [input.url],
+      downloadCovers: false,
+      downloadImages: false,
+      downloadVideos: false,
+      downloadSubtitles: false,
     },
     timeoutSecs: 180,
   });
 
-  if (!items.length) {
+  const postItems = items.filter((it) => (it as Record<string, unknown>)._type !== 'info');
+  if (!postItems.length) {
     throw new XhsFetchError(`Apify 액터가 결과 반환 안 함 (URL: ${input.url})`);
   }
 
-  const item = items[0] as Record<string, unknown>;
+  const item = postItems[0] as Record<string, unknown>;
   const result = normalizeXhsItem(item, input.url);
   logger.info(
     {
@@ -97,17 +99,28 @@ function normalizeXhsItem(item: Record<string, unknown>, url: string): XhsAdapte
     return undefined;
   };
 
-  const text =
-    (pick<string>('desc', 'description', 'content', 'text', 'title', 'caption') as string) ?? '';
+  // XHS는 title(짧은 제목) + desc(본문) 조합이 흔함. desc 있으면 우선, 없으면 title.
+  const title = (pick<string>('title') as string) ?? '';
+  const desc = (pick<string>('desc', 'description', 'content', 'caption') as string) ?? '';
+  const text = desc || title || (pick<string>('text') as string) || '';
 
-  const authorHandle =
-    (pick<string>('authorHandle', 'author', 'authorNickname', 'userNickname', 'username', 'nickName') as string) ??
-    null;
+  // XHS 액터 (zen-studio 등) 는 author를 중첩 객체로 반환: { userid, nickname, avatar }
+  const authorRaw = pick<unknown>('authorHandle', 'author', 'user');
+  let authorHandle: string | null = null;
+  if (typeof authorRaw === 'string') {
+    authorHandle = authorRaw;
+  } else if (authorRaw && typeof authorRaw === 'object') {
+    const a = authorRaw as Record<string, unknown>;
+    authorHandle = (a.nickname ?? a.nickName ?? a.userNickname ?? a.username ?? a.userid) as string | null;
+  }
+  if (!authorHandle) {
+    authorHandle = (pick<string>('authorNickname', 'userNickname', 'username', 'nickName', 'nickname') as string) ?? null;
+  }
 
   const noteId =
-    (pick<string>('noteId', 'id', 'postId', 'itemId', 'noteID') as string) ?? null;
+    (pick<string>('id', 'noteId', 'postId', 'itemId', 'noteID') as string) ?? null;
 
-  const publishedRaw = pick<unknown>('publishedAt', 'publishTime', 'time', 'createdAt', 'timestamp');
+  const publishedRaw = pick<unknown>('timestamp', 'publishedAt', 'publishTime', 'time', 'createdAt');
   const publishedAt = parseDate(publishedRaw);
 
   // 미디어: 여러 형태 지원
@@ -126,11 +139,26 @@ function normalizeXhsItem(item: Record<string, unknown>, url: string): XhsAdapte
   const cover = pick<string>('coverUrl', 'thumbnailUrl', 'cover', 'image');
   if (cover && !mediaUrls.includes(cover)) mediaUrls.unshift(cover);
 
+  // XHS 액터는 engagement를 nested object로 반환
+  const engagementRaw = pick<unknown>('engagement');
+  const engObj: Record<string, unknown> =
+    engagementRaw && typeof engagementRaw === 'object'
+      ? (engagementRaw as Record<string, unknown>)
+      : (item as Record<string, unknown>);
+
   const engagement = {
-    likes: toNum(pick<unknown>('likes', 'likeCount', 'likedCount', 'diggCount')),
-    comments: toNum(pick<unknown>('comments', 'commentCount', 'commentsCount')),
-    collects: toNum(pick<unknown>('collects', 'collectCount', 'collectedCount', 'favoriteCount')),
-    shares: toNum(pick<unknown>('shares', 'shareCount', 'sharedCount')),
+    likes: toNum(
+      engObj.liked_count ?? engObj.likes ?? engObj.likeCount ?? engObj.likedCount ?? engObj.diggCount,
+    ),
+    comments: toNum(
+      engObj.comments_count ?? engObj.comments ?? engObj.commentCount ?? engObj.commentsCount,
+    ),
+    collects: toNum(
+      engObj.collected_count ?? engObj.collects ?? engObj.collectCount ?? engObj.collectedCount ?? engObj.favoriteCount,
+    ),
+    shares: toNum(
+      engObj.shared_count ?? engObj.shares ?? engObj.shareCount ?? engObj.sharedCount,
+    ),
   };
 
   return {
