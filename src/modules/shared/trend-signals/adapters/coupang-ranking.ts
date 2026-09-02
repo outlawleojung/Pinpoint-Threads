@@ -17,19 +17,16 @@ import type { TrendSourceAdapter, RawTrendSignal } from '../index.js';
  * 30-40대 여성 니치 카테고리에 집중.
  */
 
+// 사용자 방침 (2026-09-02): 트렌드 수집은 **패션·뷰티 유행템 중심**.
+// 평범한 일상용품·주방·헬스식품은 배제. 트렌드성 강한 카테고리만.
 const WATCHED_CATEGORIES: Array<{
   code: number;
   label: string;
   ourCategory: TrendCategory;
 }> = [
   { code: 1001, label: '여성패션', ourCategory: TrendCategory.FASHION },
+  { code: 1002, label: '남성패션', ourCategory: TrendCategory.FASHION },
   { code: 1010, label: '뷰티', ourCategory: TrendCategory.BEAUTY_SKINCARE },
-  { code: 1011, label: '출산/유아동', ourCategory: TrendCategory.BABY_KIDS },
-  { code: 1012, label: '식품', ourCategory: TrendCategory.FOOD },
-  { code: 1013, label: '주방용품', ourCategory: TrendCategory.KITCHEN },
-  { code: 1014, label: '생활용품', ourCategory: TrendCategory.HOME },
-  { code: 1015, label: '홈인테리어', ourCategory: TrendCategory.HOME },
-  { code: 1024, label: '헬스/건강식품', ourCategory: TrendCategory.HEALTH },
 ];
 
 const LIMIT_PER_CATEGORY = 20;

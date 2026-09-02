@@ -6,7 +6,7 @@ import { tagBenchmarkPost } from './viralfactors-tagger.js';
 import { embedBenchmark } from './embedder.js';
 import { isVoyageConfigured } from '../../../infra/voyage-client.js';
 import { classifyContentType } from '../content-classifier/index.js';
-import { ContentType, type InboundLink } from '@prisma/client';
+import { ContentType, InboundSource, type InboundLink } from '@prisma/client';
 
 /**
  * InboundLink → BenchmarkPost 승격 파이프라인.
@@ -29,9 +29,11 @@ export interface PromoteResult {
 }
 
 export async function maybeAutoPromote(inboundLink: InboundLink): Promise<PromoteResult> {
-  // 원칙: 사용자 큐레이션 여부와 무관하게 실측 반응(likes)이 임계 이상일 때만 자동 승격.
-  // 사용자 판단은 참고, 최종 판정은 지표. 임계 미만은 InboundLink만 남기고 /admin/inbound
-  // 대시보드에서 수동 승격 가능.
+  // MANUAL_TELEGRAM = 사용자님이 직접 선별해서 보낸 것 → 큐레이션 판단 존재 → 무조건 자동 승격.
+  // AUTONOMOUS_TREND = 시스템 자동 수집 → 실측 반응(likes ≥ 임계) 있어야 자동 승격, 아니면 대시보드에서 수동.
+  if (inboundLink.source === InboundSource.MANUAL_TELEGRAM) {
+    return promoteInboundLink(inboundLink.id, 'auto');
+  }
   const likes = extractLikes(inboundLink.engagement);
   if (likes === null || likes < AUTO_MIN_LIKES) {
     return { status: 'skipped_low_likes', reason: `likes=${likes ?? '?'} < ${AUTO_MIN_LIKES}` };
