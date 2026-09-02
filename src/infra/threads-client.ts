@@ -325,21 +325,27 @@ export class ThreadsClient {
     const { accessToken, text, mediaUrls = [] } = input;
     let containerId: string;
 
+    // URL 패턴으로 image/video 자동 판정 (.mp4 · Cloudinary /video/upload/)
+    const kindOf = (u: string): 'IMAGE' | 'VIDEO' =>
+      /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/') ? 'VIDEO' : 'IMAGE';
+
     if (mediaUrls.length === 0) {
       containerId = await this.createContainer(accessToken, { mediaType: 'TEXT', text });
     } else if (mediaUrls.length === 1) {
+      const kind = kindOf(mediaUrls[0]!);
       containerId = await this.createContainer(accessToken, {
-        mediaType: 'IMAGE',
+        mediaType: kind,
         text,
-        imageUrl: mediaUrls[0],
+        ...(kind === 'VIDEO' ? { videoUrl: mediaUrls[0] } : { imageUrl: mediaUrls[0] }),
       });
       await this.waitForContainerReady(accessToken, containerId);
     } else {
       const childIds: string[] = [];
       for (const url of mediaUrls) {
+        const kind = kindOf(url);
         const childId = await this.createContainer(accessToken, {
-          mediaType: 'IMAGE',
-          imageUrl: url,
+          mediaType: kind,
+          ...(kind === 'VIDEO' ? { videoUrl: url } : { imageUrl: url }),
           isCarouselItem: true,
         });
         childIds.push(childId);

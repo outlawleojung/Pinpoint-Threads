@@ -12,6 +12,7 @@ import { composeReply } from '../../pipeline-a/reply-composer/index.js';
 import { matchProduct } from '../../pipeline-a/product-matcher/index.js';
 import { runPipelineA } from '../../pipeline-a/orchestrator.js';
 import { ingestUrlsFromText, ingestUrl } from '../url-ingester/index.js';
+import { isCommerceUrl, splitBenchmarkAndCommerce } from '../url-ingester/platform-detector.js';
 import { InboundSource } from '@prisma/client';
 import { detectPlatform, extractUrls } from '../url-ingester/platform-detector.js';
 
@@ -380,16 +381,21 @@ bot.on('message:text', async (ctx, next) => {
     return;
   }
   const urls = extractUrls(text);
-  if (urls.length === 0) {
-    // URL 없는 일반 메시지는 무시 (필요 시 다른 핸들러 추가)
-    return;
-  }
-  const supported = urls.filter((u) => detectPlatform(u) !== 'UNKNOWN');
+  if (urls.length === 0) return;
+
+  const { benchmarkUrls, commerceUrls } = splitBenchmarkAndCommerce(text);
+  const supported = benchmarkUrls.filter((u) => detectPlatform(u) !== 'UNKNOWN');
   if (supported.length === 0) {
-    await ctx.reply(`⚠️ 지원 플랫폼 URL을 찾지 못했습니다.\n감지된 URL: ${urls.length}개`);
+    const hint = commerceUrls.length > 0
+      ? `\n\n⚠️ 커머스 URL(${commerceUrls.length}개)은 감지됐지만 붙일 벤치마크 URL(Threads/IG/TikTok/XHS) 이 없어요.`
+      : '';
+    await ctx.reply(`⚠️ 지원 벤치마크 URL을 찾지 못했습니다.\n감지된 URL: ${urls.length}개${hint}`);
     return;
   }
-  await ctx.reply(`🔍 URL ${supported.length}개 자동 인제스트 시작...`);
+  const commerceNote = commerceUrls.length > 0
+    ? ` (+ 커머스 URL ${commerceUrls.length}개 자동 페어링 · Product Matcher 스킵)`
+    : '';
+  await ctx.reply(`🔍 URL ${supported.length}개 자동 인제스트 시작...${commerceNote}`);
   const { results } = await ingestUrlsFromText(text, InboundSource.MANUAL_TELEGRAM);
   const summary = results
     .map(
@@ -397,7 +403,7 @@ bot.on('message:text', async (ctx, next) => {
         `${i + 1}. ${r.isNew ? '✅' : 'ℹ️'} [${r.platform}] ${r.status}\n   ${r.message}`,
     )
     .join('\n\n');
-  await ctx.reply(`📥 인제스트 결과 (${results.length}건)\n\n${summary}`);
+  await ctx.reply(`📥 인제스트 결과 (${results.length}건)${commerceNote}\n\n${summary}`);
 });
 
 // 승인/거부 콜백

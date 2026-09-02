@@ -341,6 +341,11 @@ model InboundLink {
   source          InboundSource
   status          InboundStatus    @default(RECEIVED)
 
+  // 사용자가 텔레그램에서 벤치마크 URL과 함께 붙여준 Coupang/Musinsa 상품 URL.
+  // 존재하면 Pipeline A 는 Product Matcher/Vision 을 스킵하고 이 URL 로 딥링크만 생성.
+  // Coupang search API 의 브랜드 매칭 실패를 우회하는 하이브리드 경로.
+  manualCommerceUrl String?
+
   // Adapter fetch 결과
   rawText         String?          @db.Text
   rawLanguage     String?

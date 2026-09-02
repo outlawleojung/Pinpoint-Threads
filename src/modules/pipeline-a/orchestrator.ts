@@ -3,7 +3,9 @@ import { createHash } from 'node:crypto';
 import { prisma } from '../../db/prisma.js';
 import { logger } from '../../config/logger.js';
 import { classifySourceItem } from '../shared/content-classifier/index.js';
-import { matchProduct } from './product-matcher/index.js';
+import { matchProduct, type MatchResult } from './product-matcher/index.js';
+import { CoupangAdapter } from '../../infra/commerce/coupang-client.js';
+import { env } from '../../config/env.js';
 import { handleMedia } from '../shared/media-handler/index.js';
 import { generateCopy } from '../shared/copywriter/index.js';
 import { composeReply } from './reply-composer/index.js';
@@ -25,6 +27,12 @@ export interface RunPipelineAInput {
   sourceText: string;
   sourceUrl?: string;
   language?: string;
+  /**
+   * 사용자가 텔레그램에 벤치마크 URL 과 함께 붙여준 실제 상품 URL (Coupang 등).
+   * 존재하면 Product Matcher/Vision 스킵 · 이 URL 을 Deeplink API 로 파트너스 링크로 변환해 사용.
+   * Coupang search 브랜드 매칭 실패 우회.
+   */
+  explicitCommerceUrl?: string;
 }
 
 export type PipelineAOutcome =
@@ -73,11 +81,15 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
     },
   });
 
-  // 4. Content Classifier
+  // 4. Content Classifier · Vision 모듈들은 이미지만 처리 가능 (mp4 X)
+  const isVideoUrl = (u: string) => /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/');
+  const imageOnlyUrls = input.sourceMediaUrls.filter((u) => !isVideoUrl(u));
+  const firstImageForVision = imageOnlyUrls[0] ?? input.sourceMediaUrls[0]!; // fallback
+
   logger.info({ postId: post.id }, 'pipeline-a: classifying');
   const classified = await classifySourceItem({
     text: input.sourceText,
-    mediaUrls: input.sourceMediaUrls,
+    mediaUrls: imageOnlyUrls.length > 0 ? imageOnlyUrls : input.sourceMediaUrls,
   });
   if (!classified.suitable || !classified.searchKeyword) {
     return finishRejected(post.id, 'classifier', classified.reason ?? 'not suitable');
@@ -86,17 +98,28 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
   // 5. State transition → MATCHING
   await transitionPost(post.id, PostState.CLASSIFYING, PostState.MATCHING);
 
-  // 6. Product Matcher
-  logger.info({ postId: post.id, keyword: classified.searchKeyword }, 'pipeline-a: matching');
-  const matched = await matchProduct({
-    category: classified.category ?? '생활용품',
-    searchKeyword: classified.searchKeyword,
-    sourceImageUrl: input.sourceMediaUrls[0]!,
-    maxAttempts: 3,
-  });
-  if (!matched.success) {
-    return finishRejected(post.id, 'matcher', matched.reason);
+  // 6. Product Matcher — explicit URL 있으면 스킵, 없으면 자동 매칭
+  let matchedResult: MatchResult;
+  if (input.explicitCommerceUrl) {
+    logger.info(
+      { postId: post.id, explicitCommerceUrl: input.explicitCommerceUrl },
+      'pipeline-a: skipping matcher, using explicit commerce URL',
+    );
+    matchedResult = await buildExplicitMatch(input.explicitCommerceUrl, classified);
+  } else {
+    logger.info({ postId: post.id, keyword: classified.searchKeyword }, 'pipeline-a: matching');
+    const matched = await matchProduct({
+      category: classified.category ?? '생활용품',
+      searchKeyword: classified.searchKeyword,
+      sourceImageUrl: firstImageForVision,
+      maxAttempts: 3,
+    });
+    if (!matched.success) {
+      return finishRejected(post.id, 'matcher', matched.reason);
+    }
+    matchedResult = matched.result;
   }
+  const matched = { success: true as const, result: matchedResult };
 
   // 7. CommerceProduct upsert
   const product = await prisma.commerceProduct.upsert({
@@ -140,7 +163,7 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
   logger.info({ postId: post.id }, 'pipeline-a: copywriting');
   const copy = await generateCopy({
     sourceText: input.sourceText,
-    sourceImageUrl: input.sourceMediaUrls[0]!,
+    sourceImageUrl: firstImageForVision,
     productName: matched.result.product.productName,
     productCategory: matched.result.product.category ?? classified.category,
     accountSeed: account.id,
@@ -184,6 +207,41 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
     body: copy.body,
     replyText: reply.text,
     replyLead: reply.lead,
+  };
+}
+
+/**
+ * explicit commerce URL 이 주어졌을 때 MatchResult 를 조립.
+ *   - Coupang Deeplink API 로 사용자 원본 URL → 파트너스 딥링크 변환 (핵심 · 커미션 위해 필수)
+ *   - Product 메타 (name, category, thumbnail) 는 Content Classifier 결과·source text 로 채움
+ *   - Vision 스킵 (사용자가 이미 확정한 URL)
+ */
+async function buildExplicitMatch(
+  commerceUrl: string,
+  classified: { category?: string | null; searchKeyword?: string | null },
+): Promise<MatchResult> {
+  const coupang = new CoupangAdapter(env.COUPANG_ACCESS_KEY ?? '', env.COUPANG_SECRET_KEY ?? '');
+  const deeplinkUrl = await coupang.generateDeeplink(commerceUrl);
+
+  // Coupang URL 에서 productId 추출 (vp/products/{id} 패턴)
+  const productIdMatch = commerceUrl.match(/\/products\/(\d+)/);
+  const externalId = productIdMatch?.[1] ?? `manual-${createHash('sha256').update(commerceUrl).digest('hex').slice(0, 16)}`;
+
+  const productName = classified.searchKeyword ?? '사용자 지정 상품';
+
+  return {
+    channel: 'COUPANG',
+    product: {
+      channel: 'COUPANG',
+      externalId,
+      productName,
+      productUrl: commerceUrl,
+      thumbnailUrl: '',
+      category: classified.category ?? undefined,
+    },
+    visionScore: 1.0, // 사용자 확정 · vision 스킵
+    attempts: 0,
+    deeplinkUrl,
   };
 }
 

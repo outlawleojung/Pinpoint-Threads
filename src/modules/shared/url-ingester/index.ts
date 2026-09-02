@@ -1,7 +1,7 @@
 import { InboundPlatform, InboundSource, InboundStatus } from '@prisma/client';
 import { prisma } from '../../../db/prisma.js';
 import { logger } from '../../../config/logger.js';
-import { detectPlatform, extractUrls, normalizeUrl } from './platform-detector.js';
+import { detectPlatform, extractUrls, normalizeUrl, splitBenchmarkAndCommerce } from './platform-detector.js';
 import { getAdapter } from './adapters/registry.js';
 import { maybeAutoPromote } from '../source-collector/promoter.js';
 
@@ -21,6 +21,8 @@ export interface IngestInput {
   url: string;
   source: InboundSource;
   trendSignalId?: string;
+  /** 사용자가 같은 텔레그램 메시지에 붙인 Coupang 등 커머스 URL (Pipeline A 매칭 스킵용). */
+  manualCommerceUrl?: string;
 }
 
 export interface IngestResult {
@@ -72,6 +74,7 @@ export async function ingestUrl(input: IngestInput): Promise<IngestResult> {
       source: input.source,
       status: platform === InboundPlatform.UNKNOWN ? InboundStatus.FAILED : InboundStatus.RECEIVED,
       trendSignalId: input.trendSignalId,
+      manualCommerceUrl: input.manualCommerceUrl ?? null,
       errorMessage: platform === InboundPlatform.UNKNOWN ? 'Unsupported platform' : null,
     },
   });
@@ -185,11 +188,22 @@ export async function ingestUrlsFromText(
   text: string,
   source: InboundSource,
 ): Promise<BatchIngestResult> {
-  const urls = extractUrls(text);
+  const { benchmarkUrls, commerceUrls } = splitBenchmarkAndCommerce(text);
   const results: IngestResult[] = [];
-  for (const url of urls) {
+
+  // 벤치마크 URL 이 없고 커머스 URL 만 있으면 스킵 (attach 대상 없음)
+  if (benchmarkUrls.length === 0 && commerceUrls.length > 0) {
+    logger.warn({ commerceUrls }, 'commerce URL only, no benchmark URL to attach → skip');
+    return { total: 0, results: [] };
+  }
+
+  // 같은 메시지의 첫 번째 커머스 URL 을 모든 벤치마크 URL 에 attach.
+  // (여러 커머스 URL 전송 케이스는 나중 별도 처리)
+  const attachedCommerceUrl = commerceUrls[0];
+
+  for (const url of benchmarkUrls) {
     try {
-      results.push(await ingestUrl({ url, source }));
+      results.push(await ingestUrl({ url, source, manualCommerceUrl: attachedCommerceUrl }));
     } catch (err) {
       logger.error({ err, url }, 'ingest failed');
       results.push({

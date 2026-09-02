@@ -99,16 +99,37 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
     logger.info({ postId: post.id, threadsPostId, handle: post.account.handle }, 'main post published');
 
     if (post.generatedReply) {
-      try {
-        const reply = await client.reply({
-          accessToken,
-          parentId: threadsPostId,
-          text: post.generatedReply,
-        });
-        threadsReplyId = reply.threadsReplyId;
-        logger.info({ postId: post.id, threadsReplyId }, 'pinned reply published');
-      } catch (err) {
-        logger.error({ err, postId: post.id, threadsPostId }, 'pinned reply failed — main post is live but reply missing');
+      // 비디오 포함 게시글은 Meta 후단 처리가 이어지므로 reply 전 대기 필요.
+      // 이미지만이면 즉시 reply 가능.
+      const hasVideo = (post.mediaUrls ?? []).some(
+        (u: string) => /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/'),
+      );
+      const replyDelayMs = hasVideo ? 15_000 : 1_000;
+
+      // 재시도 로직: reply 실패 시 지수 백오프 최대 3회 (비디오 후단 처리 대기)
+      const maxAttempts = hasVideo ? 4 : 2;
+      let lastErr: unknown = null;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const wait = attempt === 1 ? replyDelayMs : replyDelayMs * attempt;
+        logger.info({ postId: post.id, attempt, waitMs: wait, hasVideo }, 'waiting before pinned reply');
+        await new Promise((r) => setTimeout(r, wait));
+        try {
+          const reply = await client.reply({
+            accessToken,
+            parentId: threadsPostId,
+            text: post.generatedReply,
+          });
+          threadsReplyId = reply.threadsReplyId;
+          logger.info({ postId: post.id, threadsReplyId, attempt }, 'pinned reply published');
+          lastErr = null;
+          break;
+        } catch (err) {
+          lastErr = err;
+          logger.warn({ err, postId: post.id, attempt, maxAttempts }, 'pinned reply attempt failed, retrying');
+        }
+      }
+      if (lastErr) {
+        logger.error({ err: lastErr, postId: post.id, threadsPostId }, 'pinned reply failed after retries — main post is live but reply missing');
       }
     }
   } catch (err) {

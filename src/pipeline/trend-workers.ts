@@ -8,6 +8,7 @@ import {
   sharingCollectQueue,
   sharingPublishQueue,
   accountMetricsSyncQueue,
+  shoppingPublishQueue,
 } from '../queues/queues.js';
 import { logger } from '../config/logger.js';
 import {
@@ -25,6 +26,7 @@ import { safeRunTrendSearchIngest } from '../modules/shared/trend-signals/search
 import { safeCollectSharingBenchmarks } from '../modules/pipeline-b/sharing-collector/index.js';
 import { runSharingForAllAccounts } from '../modules/pipeline-b/sharing-publisher/orchestrator.js';
 import { syncAllAccountMetrics } from '../modules/pipeline-b/sharing-copywriter/follower-sync.js';
+import { runShoppingForAllAccounts } from '../modules/pipeline-a/shopping-publisher/orchestrator.js';
 
 /**
  * Lane 2 자율 트렌드 워커 · 스케줄러.
@@ -41,6 +43,7 @@ const SEARCH_CRON = '30 8 * * *'; // 매일 08:30 KST (다이제스트 이후)
 const SHARING_CRON = '0 8 * * *';  // 매일 08:00 KST (Pipeline B 스하리 벤치마크 수집 · publish 1h 전)
 const SHARING_PUBLISH_CRON = '0 9 * * *'; // 매일 09:00 KST (Pipeline B 계정별 스하리 카피 생성 → 승인 카드)
 const ACCOUNT_METRICS_CRON = '30 7 * * *'; // 매일 07:30 KST (계정 팔로워·나이 갱신 · publish 1.5h 전)
+const SHOPPING_PUBLISH_CRON = '0 9 * * *'; // 매일 09:00 KST (쇼핑 카피 생성 · 발행 slot 은 계정별 시차)
 
 function buildAdapters(): TrendSourceAdapter[] {
   return [
@@ -162,7 +165,22 @@ export function startTrendWorkers(): Worker[] {
     ),
   );
 
-  logger.info('Started 6 trend workers (trend-poll · trend-digest · trend-search · sharing-collect · sharing-publish · account-metrics-sync)');
+  workers.push(
+    new Worker(
+      QUEUE_NAMES.SHOPPING_PUBLISH,
+      async (job) => {
+        logger.info({ jobId: job.id, data: job.data }, 'shopping-publish start');
+        const summary = await runShoppingForAllAccounts();
+        logger.info({ jobId: job.id, summary }, 'shopping-publish done');
+        return summary;
+      },
+      { connection: redisConnection, concurrency: 1 },
+    ),
+  );
+
+  logger.info(
+    'Started 7 trend workers (trend-poll · trend-digest · trend-search · sharing-collect · sharing-publish · account-metrics-sync · shopping-publish)',
+  );
   return workers;
 }
 
@@ -224,6 +242,16 @@ export async function scheduleTrendJobs(): Promise<void> {
     {
       repeat: { pattern: SHARING_PUBLISH_CRON, tz: 'Asia/Seoul' },
       jobId: 'sharing-publish-daily',
+    },
+  );
+
+  // daily Pipeline A 쇼핑 카피 생성 → 승인 카드 (계정별 1~2건)
+  await shoppingPublishQueue.add(
+    'shopping-publish-daily',
+    { triggeredBy: 'scheduler' },
+    {
+      repeat: { pattern: SHOPPING_PUBLISH_CRON, tz: 'Asia/Seoul' },
+      jobId: 'shopping-publish-daily',
     },
   );
 

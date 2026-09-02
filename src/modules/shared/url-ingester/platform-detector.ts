@@ -49,6 +49,39 @@ export function extractUrls(text: string): string[] {
 }
 
 /**
+ * Coupang 상품 URL 판별 (파트너 리다이렉트 · 인플루언서 링크 · 순정 vp/products).
+ * Musinsa 등 다른 커머스로 확장 시 여기 규칙 추가.
+ */
+const COMMERCE_PATTERNS: RegExp[] = [
+  /(?:^|\.)coupang\.com$/i,
+  /(?:^|\.)link\.coupang\.com$/i,
+  /(?:^|\.)influencers\.coupang\.com$/i,
+];
+
+export function isCommerceUrl(url: string): boolean {
+  const host = extractHost(url);
+  if (!host) return false;
+  return COMMERCE_PATTERNS.some((p) => p.test(host));
+}
+
+/**
+ * 텍스트에서 URL 후보를 벤치마크(Threads/IG/TikTok/XHS) vs 커머스(Coupang 등) 로 분리.
+ */
+export function splitBenchmarkAndCommerce(text: string): {
+  benchmarkUrls: string[];
+  commerceUrls: string[];
+} {
+  const all = extractUrls(text);
+  const benchmarkUrls: string[] = [];
+  const commerceUrls: string[] = [];
+  for (const u of all) {
+    if (isCommerceUrl(u)) commerceUrls.push(u);
+    else benchmarkUrls.push(u);
+  }
+  return { benchmarkUrls, commerceUrls };
+}
+
+/**
  * URL 정규화 (쿼리 파라미터 트래킹 제거 · 프래그먼트 제거 · 소문자 도메인).
  * 실제 short URL 확장은 adapter가 fetch 시 처리.
  */

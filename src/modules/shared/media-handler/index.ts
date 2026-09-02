@@ -1,4 +1,4 @@
-import { uploadFromUrl, uploadManyFromUrls, type UploadResult } from '../../../infra/cloudinary-client.js';
+import { uploadFromUrl, type UploadResult } from '../../../infra/cloudinary-client.js';
 import { logger } from '../../../config/logger.js';
 
 /**
@@ -10,15 +10,25 @@ import { logger } from '../../../config/logger.js';
 
 export const MEDIA_MIN_COUNT = 2;
 
+export type MediaKind = 'image' | 'video';
+
 export interface HandleMediaInput {
   postId: string;
   sourceMediaUrls: string[];
-  requirePipelineC?: boolean;   // C 파이프라인도 2개 이상 필수
+  /** sourceMediaUrls 각 항목 타입. 길이 다르거나 미제공 시 URL 확장자로 자동 판정. */
+  sourceMediaTypes?: MediaKind[];
+  requirePipelineC?: boolean;
 }
 
 export interface HandledMedia {
   publicUrls: string[];
+  publicTypes: MediaKind[];
   raw: UploadResult[];
+}
+
+function inferKind(url: string): MediaKind {
+  if (/\.mp4(?:\?|$)/i.test(url)) return 'video';
+  return 'image';
 }
 
 export async function handleMedia(input: HandleMediaInput): Promise<HandledMedia> {
@@ -28,11 +38,26 @@ export async function handleMedia(input: HandleMediaInput): Promise<HandledMedia
     );
   }
 
-  const uploads = await uploadManyFromUrls(input.sourceMediaUrls, { postId: input.postId });
-  logger.info({ postId: input.postId, count: uploads.length }, 'media uploaded to cloudinary');
+  const types: MediaKind[] = input.sourceMediaUrls.map((u, i) =>
+    input.sourceMediaTypes?.[i] ?? inferKind(u),
+  );
+
+  // 각 URL 별로 image/video resource_type 지정해서 업로드
+  const uploads = await Promise.all(
+    input.sourceMediaUrls.map((sourceUrl, i) => {
+      const resourceType: 'image' | 'video' = types[i] === 'video' ? 'video' : 'image';
+      return uploadFromUrl({ sourceUrl, postId: input.postId, resourceType });
+    }),
+  );
+
+  logger.info(
+    { postId: input.postId, count: uploads.length, types },
+    'media uploaded to cloudinary',
+  );
 
   return {
     publicUrls: uploads.map((u) => u.publicUrl),
+    publicTypes: uploads.map((u) => (u.resourceType === 'video' ? 'video' : 'image') as MediaKind),
     raw: uploads,
   };
 }

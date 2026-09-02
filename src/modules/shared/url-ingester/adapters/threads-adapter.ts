@@ -2,10 +2,13 @@ import { request } from 'undici';
 import { logger } from '../../../../config/logger.js';
 import { env } from '../../../../config/env.js';
 import { runActorSync, isApifyConfigured } from '../../../../infra/apify-client.js';
+import { extractThreadsVideoUrls, pickBestMp4s } from '../../../../infra/playwright-threads-video.js';
 
 export interface ThreadsAdapterInput {
   url: string;
 }
+
+export type MediaKind = 'image' | 'video';
 
 export interface ThreadsAdapterResult {
   authorHandle: string | null;
@@ -13,6 +16,8 @@ export interface ThreadsAdapterResult {
   permalink: string;
   text: string;
   mediaUrls: string[];
+  /** mediaUrls 각 항목의 타입. 길이는 mediaUrls 와 동일. */
+  mediaTypes: MediaKind[];
   publishedAt: Date | null;
   language: string | null;
   engagement: {
@@ -85,14 +90,14 @@ async function fetchViaApify(url: string, parsed: ParsedUrl): Promise<ThreadsAda
   }
 
   const item = postItems[0] as Record<string, unknown>;
-  return normalizeApifyItem(item, url, parsed);
+  return await normalizeApifyItem(item, url, parsed);
 }
 
-function normalizeApifyItem(
+async function normalizeApifyItem(
   item: Record<string, unknown>,
   url: string,
   parsed: ParsedUrl,
-): ThreadsAdapterResult {
+): Promise<ThreadsAdapterResult> {
   const pick = <T = string>(...names: string[]): T | undefined => {
     for (const n of names) {
       const v = item[n];
@@ -131,6 +136,11 @@ function normalizeApifyItem(
   const videoUrl = pick<string>('video_url', 'videoUrl', 'video');
   if (videoUrl && !mediaUrls.includes(videoUrl)) mediaUrls.push(videoUrl);
 
+  // mediaTypes 판정: URL 에 video_default_cover_frame 포함 시 원래 비디오였음
+  const mediaTypes: MediaKind[] = mediaUrls.map((u) =>
+    u.includes('video_default_cover_frame') || u.includes('.mp4') ? 'video' : 'image',
+  );
+
   const publishedRaw = pick<unknown>(
     'posted_at',
     'publishedAt',
@@ -160,12 +170,69 @@ function normalizeApifyItem(
     permalink: (pick<string>('url', 'permalink') as string) ?? url,
     text,
     mediaUrls,
+    mediaTypes,
     publishedAt,
     language: detectLanguage(text),
     engagement,
     raw: item,
     fetchMethod: 'apify',
   };
+
+  // Playwright 로 비디오 여부 확인 & mp4 URL 획득
+  // 실행 트리거:
+  //   1) themineworks media_type = "video" or "carousel" (carousel 은 이미지·비디오 혼합 가능)
+  //   2) mediaUrls 중 video_default_cover_frame 마커 포함 (구식 감지 · 백업)
+  const rawMediaType = String(item.media_type ?? '').toLowerCase();
+  const shouldTryVideo =
+    rawMediaType === 'video' ||
+    rawMediaType === 'carousel' ||
+    result.mediaUrls.some((u) => u.includes('video_default_cover_frame'));
+
+  if (shouldTryVideo) {
+    try {
+      const { mp4Urls } = await extractThreadsVideoUrls(url);
+      const bestMp4s = pickBestMp4s(mp4Urls);
+      if (bestMp4s.length > 0) {
+        // media_type === 'video' 단건: 첫 mediaUrl(커버 프레임) 을 mp4 로 교체
+        // media_type === 'carousel': 이미지 URL 은 그대로, mp4 URL 을 앞쪽에 삽입
+        if (rawMediaType === 'video') {
+          if (result.mediaUrls.length > 0) {
+            result.mediaUrls[0] = bestMp4s[0]!;
+            result.mediaTypes[0] = 'video';
+          } else {
+            result.mediaUrls.push(bestMp4s[0]!);
+            result.mediaTypes.push('video');
+          }
+        } else {
+          // carousel: 커버 프레임 마커 있는 슬롯을 mp4 로 교체
+          // 마커 없으면 첫 슬롯이 비디오 커버 프레임일 가능성이 높음 (Threads 는 대체로 비디오를 앞에 배치)
+          // 따라서 슬롯 0을 mp4로 교체 (unshift 아님 · 총 개수 유지)
+          let replaced = 0;
+          for (let i = 0; i < result.mediaUrls.length && replaced < bestMp4s.length; i++) {
+            if (result.mediaUrls[i]?.includes('video_default_cover_frame')) {
+              result.mediaUrls[i] = bestMp4s[replaced]!;
+              result.mediaTypes[i] = 'video';
+              replaced += 1;
+            }
+          }
+          if (replaced === 0 && result.mediaUrls.length > 0) {
+            // 마커 매칭 실패 → 슬롯 0을 mp4로 교체 (heuristic)
+            result.mediaUrls[0] = bestMp4s[0]!;
+            result.mediaTypes[0] = 'video';
+            replaced = 1;
+          }
+          logger.info(
+            { url, rawMediaType, replaced, totalMp4: bestMp4s.length },
+            'threads carousel · mp4 URL merged into mediaUrls',
+          );
+        }
+      } else {
+        logger.warn({ url, rawMediaType }, 'Playwright found no mp4 URL (게시글 실제 image-only)');
+      }
+    } catch (err) {
+      logger.warn({ err, url }, 'Playwright video extract failed');
+    }
+  }
 
   logger.info(
     {
@@ -213,6 +280,7 @@ async function fetchViaOg(url: string, parsed: ParsedUrl): Promise<ThreadsAdapte
     permalink: url,
     text,
     mediaUrls,
+    mediaTypes: mediaUrls.map(() => 'image' as MediaKind), // OG 는 image 만 반환
     publishedAt: null,
     language: detectLanguage(text),
     engagement: {},

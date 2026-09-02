@@ -48,10 +48,14 @@ export async function sendApprovalRequest(postId: string): Promise<void> {
 
   let anchorMessageId: number;
 
+  // URL 패턴으로 image/video 판정 (.mp4 or Cloudinary /video/upload/)
+  const isVideoUrl = (u: string) =>
+    /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/');
+
   if (mediaUrls.length >= 2) {
-    // Media group으로 여러 사진 프리뷰 + 별도 메시지에 버튼
+    // Media group: 각 항목별 video/photo 타입 지정
     const group = mediaUrls.slice(0, 10).map((url, i) => ({
-      type: 'photo' as const,
+      type: (isVideoUrl(url) ? 'video' : 'photo') as 'photo' | 'video',
       media: url,
       caption: i === 0 ? caption : undefined,
     }));
@@ -64,10 +68,10 @@ export async function sendApprovalRequest(postId: string): Promise<void> {
       { reply_markup: keyboard },
     );
   } else if (mediaUrls.length === 1) {
-    const msg = await bot.api.sendPhoto(env.TELEGRAM_ADMIN_CHAT_ID, mediaUrls[0]!, {
-      caption,
-      reply_markup: keyboard,
-    });
+    const only = mediaUrls[0]!;
+    const msg = isVideoUrl(only)
+      ? await bot.api.sendVideo(env.TELEGRAM_ADMIN_CHAT_ID, only, { caption, reply_markup: keyboard })
+      : await bot.api.sendPhoto(env.TELEGRAM_ADMIN_CHAT_ID, only, { caption, reply_markup: keyboard });
     anchorMessageId = msg.message_id;
   } else {
     const msg = await bot.api.sendMessage(env.TELEGRAM_ADMIN_CHAT_ID, caption, {
