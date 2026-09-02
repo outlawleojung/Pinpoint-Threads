@@ -19,13 +19,54 @@ import { getAccountContext, type AccountContext } from './follower-sync.js';
 
 const HASHTAG = '#스하리1000명프로젝트';
 
-/** 훅 유형별 검색 쿼리 · 각 variant 에 rotation 적용. 벤치마크의 다양성을 살리기 위함. */
-const HOOK_QUERIES: Array<{ label: string; query: string }> = [
-  { label: 'N일차 진행형', query: '스하리 프로젝트 N일차 계속 진행 중' },
-  { label: '모집형',       query: '혼자 하기 힘들어서 같이 할 사람 찾아요 리포 맞팔' },
-  { label: '질문형·자기폭로', query: '아직 스친 없어? 그게 나야 못 채운' },
-  { label: '겸손 목표형',  query: '100명이라도 좋겠다 욕심 안 부림 천천히' },
-  { label: '발견·감탄형',  query: '방금 시작했는데 신기하다 이 문화 처음 알았음' },
+/**
+ * 훅 유형 · 각 훅은 어떤 계정 나이 구간에서 자연스러운지 지정.
+ * 계정 나이 구간에 안 맞는 훅은 배정에서 제외 (예: "발견·감탄형"은 fresh 계정에만).
+ */
+import type { AgeBucket } from './follower-sync.js';
+
+interface HookDef {
+  label: string;
+  query: string;
+  ageOK: AgeBucket[];
+}
+
+const HOOK_QUERIES: HookDef[] = [
+  {
+    label: '진행형',
+    query: '스하리 계속 진행 중 몇 달째 소통 요청',
+    ageOK: ['fresh_under_7d', 'young_under_30d', 'settled_1to3m', 'mature_3m_plus', 'unknown'],
+  },
+  {
+    label: '모집형',
+    query: '혼자 하기 힘들어서 같이 할 사람 찾아요 리포 맞팔',
+    ageOK: ['fresh_under_7d', 'young_under_30d', 'settled_1to3m', 'mature_3m_plus', 'unknown'],
+  },
+  {
+    label: '질문형·자기폭로',
+    query: '아직 스친 없어? 그게 나야 못 채운',
+    ageOK: ['fresh_under_7d', 'young_under_30d', 'settled_1to3m', 'mature_3m_plus', 'unknown'],
+  },
+  {
+    label: '겸손 목표형',
+    query: '100명이라도 좋겠다 욕심 안 부림 천천히',
+    ageOK: ['fresh_under_7d', 'young_under_30d', 'settled_1to3m', 'mature_3m_plus', 'unknown'],
+  },
+  {
+    label: 'N일차 (초기)',
+    query: '스하리 프로젝트 2일차 3일차 시작한 지 얼마 안 됨',
+    ageOK: ['fresh_under_7d', 'young_under_30d'], // 실제 최근 시작한 계정만
+  },
+  {
+    label: '발견·감탄형',
+    query: '방금 시작했는데 이 태그 신기하다 처음 알았음',
+    ageOK: ['fresh_under_7d', 'young_under_30d'], // 이제 막 알았다는 뉘앙스 · fresh only
+  },
+  {
+    label: '오래 하는 중',
+    query: '몇 달째 꾸준히 하는데 아직 여기 정체 중',
+    ageOK: ['settled_1to3m', 'mature_3m_plus'], // 오래 됐다는 뉘앙스 · mature only
+  },
 ];
 
 /** 본문 blacklist. 노출 시 재생성. */
@@ -41,6 +82,8 @@ const BodyResultSchema = z.object({
 export interface SharingCopyInput {
   accountId: string;
   variantCount?: number;
+  /** 계정 간 훅 다양화 offset. 여러 계정 순회 시 각 계정마다 다른 훅 배정. */
+  hookOffset?: number;
 }
 
 export interface SharingCopyResult {
@@ -75,10 +118,23 @@ const SYSTEM_PROMPT = `너는 한국 Threads "스하리1000명프로젝트" 해�
 - 팔로워 관련: 구간 표현만 사용 (예: "아직 100도 안 됨", "이제 300 가는 중")
   · 언급 목표 수치는 실 팔로워보다 크되 다음 마일스톤 이내
   · 숫자 언급이 어색하면 그냥 "천천히 늘려보자" 로 대체
-- **계정 나이 관련: 실제 나이 구간에 맞는 표현만 절대 사용.**
+- **계정 나이 관련: 실제 나이 구간에 맞는 표현만.**
   · "스린이 · 이제 막 시작 · N일차" 은 계정 나이 7일 미만에만 허용
   · "몇 달째 · 오래 · 꾸준히 해왔는데" 는 3개월 이상 계정에만 허용
-  · 나이·팔로워 관련 표현이 실 상황과 맞지 않으면 아예 언급하지 마 (일반 소통 요청으로만)
+  · 나이·팔로워 관련 표현이 실 상황과 맞지 않으면 아예 언급하지 마
+
+⚠️ 절대 금지 오프너 (템플릿화 방지):
+- "몇 달째 (꾸준히) 하는 중인데 아직 N도 (못 채움/안 됨) ㅋㅋ" 계열 오프너 금지
+- "팔로워 늘리는 거 [쉽지 않네/어렵네]" 계열 오프너 금지
+- 위 패턴은 이미 5계정 다 같은 카피 만들어냄. 절대 안 됨.
+- 대신 훅 유형(N일차/모집/질문/겸손/발견)에서 지시한 대로 개성 있는 오프너로 시작.
+
+훅 유형별 오프너 예시 (참고):
+- N일차 진행형: "스하리 프로젝트 N일차야" 처럼 진행 상태 선언
+- 모집형: "혼자 힘드니까 같이 할 사람 구해!" 처럼 명확한 콜
+- 질문형: "○○인 스친 있어? 그게 나야" 처럼 질문 던지고 자기폭로
+- 겸손형: "1000명 그런거 안 바래, 100만 채워도 좋겠다" 처럼 낮은 목표
+- 발견·감탄형: "이 해시태그 신기하네 다들 이렇게 하는구나?" 처럼 발견 뉘앙스
 
 ⚠️ 훅 유형 강제:
 사용자 프롬프트에 "이번 variant 훅 유형" 지시가 들어감. **그 훅 유형 그대로 살려서 각색해라.**
@@ -202,9 +258,16 @@ export async function generateSharingCopy(
 
   const context = await getAccountContext(input.accountId);
 
+  // 계정 나이 구간에 맞는 훅만 필터
+  const eligibleHooks = HOOK_QUERIES.filter((h) => h.ageOK.includes(context.accountAgeBucket));
+  if (eligibleHooks.length === 0) {
+    throw new Error(`No eligible hooks for age bucket ${context.accountAgeBucket}`);
+  }
+
   const variants: SharingCopyResult['variants'] = [];
+  const offset = input.hookOffset ?? 0;
   for (let i = 0; i < variantCount; i++) {
-    const hook = HOOK_QUERIES[i % HOOK_QUERIES.length]!;
+    const hook = eligibleHooks[(i + offset) % eligibleHooks.length]!;
 
     let benchmarks: SimilarBenchmark[] = [];
     if (isVoyageConfigured()) {

@@ -18,6 +18,7 @@ import { PostKind, PostState } from '@prisma/client';
 export interface SharingRunInput {
   accountId: string;
   variantCount?: number; // 여러 후보 중 첫 번째 사용, 나머지는 로그
+  hookOffset?: number;   // 계정 간 훅 다양화 (배치 실행 시 순서대로 rotation)
 }
 
 export interface SharingRunResult {
@@ -63,6 +64,7 @@ export async function runSharingPipeline(input: SharingRunInput): Promise<Sharin
   const copy = await generateSharingCopy({
     accountId: acc.id,
     variantCount: input.variantCount ?? 1,
+    hookOffset: input.hookOffset ?? 0,
   });
   const body = copy.variants[0]?.body;
   if (!body) {
@@ -127,9 +129,15 @@ export async function runSharingForAllAccounts(): Promise<SharingBatchSummary> {
     perAccount: [],
   };
 
-  for (const acc of accounts) {
+  // 매일 다른 hook 배정을 위해 (오늘의 일수 + 계정 인덱스) 로 offset 계산
+  const dayOfYearBase = Math.floor(Date.now() / 86_400_000);
+  for (let i = 0; i < accounts.length; i++) {
+    const acc = accounts[i]!;
     try {
-      const result = await runSharingPipeline({ accountId: acc.id });
+      const result = await runSharingPipeline({
+        accountId: acc.id,
+        hookOffset: dayOfYearBase + i,
+      });
       summary.perAccount.push({ handle: acc.handle, status: result.status, reason: result.reason });
       if (result.status === 'sent_for_approval') summary.sent += 1;
       else if (result.status === 'skipped_recent') summary.skipped += 1;
