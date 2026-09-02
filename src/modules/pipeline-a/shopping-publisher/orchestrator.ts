@@ -72,7 +72,7 @@ export async function runShoppingForAccount(
 ): Promise<ShoppingPublishResult[]> {
   const account = await prisma.account.findUniqueOrThrow({
     where: { id: input.accountId },
-    select: { id: true, handle: true, isActive: true },
+    select: { id: true, handle: true, isActive: true, audienceGender: true },
   });
   if (!account.isActive) {
     return [{ status: 'failed', reason: 'account inactive' }];
@@ -108,7 +108,7 @@ export async function runShoppingForAccount(
       id: { notIn: Array.from(recentBenchmarkIdsUsed) },
     },
     orderBy: [{ likesCount: 'desc' }, { collectedAt: 'desc' }],
-    take: slotsLeft * 3, // 여유 3배 잡고 실패해도 대체
+    take: slotsLeft * 6, // 성별 필터 감안하여 6배 여유
     select: {
       id: true,
       permalink: true,
@@ -116,6 +116,7 @@ export async function runShoppingForAccount(
       mediaUrls: true,
       inboundLinkId: true,
       likesCount: true,
+      viralFactors: true,
     },
   });
 
@@ -131,6 +132,24 @@ export async function runShoppingForAccount(
   for (const b of candidates) {
     if (picked >= slotsLeft) break;
     if (b.mediaUrls.length < 2) continue;
+
+    // 성별 매칭 필터: 계정 audienceGender 와 벤치마크 audience(viralFactors.audience) 충돌 시 skip
+    // - male 계정 ↔ female 상품 X
+    // - female 계정 ↔ male 상품 X
+    // - unisex 는 모두 허용
+    const benchAudience = (b as any).viralFactors?.audience as 'male' | 'female' | 'unisex' | undefined;
+    if (
+      benchAudience &&
+      benchAudience !== 'unisex' &&
+      account.audienceGender !== 'unisex' &&
+      benchAudience !== account.audienceGender
+    ) {
+      logger.info(
+        { accountId: account.id, accGender: account.audienceGender, benchAudience, benchmarkPostId: b.id },
+        'shopping candidate skipped: gender mismatch',
+      );
+      continue;
+    }
 
     try {
       const inboundLink = b.inboundLinkId

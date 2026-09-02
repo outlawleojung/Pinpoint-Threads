@@ -34,6 +34,9 @@ model Account {
   // "스린이·이제 막 시작" 같은 표현 허용 여부 판정에 사용
   threadsCreatedAt   DateTime?
 
+  // 계정 타겟 성별 · 상품 매칭 시 필터. male=남성계정 (여성용품 금지) · female=반대 · unisex=모두
+  audienceGender     AudienceGender @default(unisex)
+
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
@@ -331,6 +334,12 @@ enum ContentType {
   DAILY
   SHARING
   UNSUITABLE
+}
+
+enum AudienceGender {
+  male
+  female
+  unisex
 }
 
 model InboundLink {

@@ -17,11 +17,15 @@ export const CATEGORIES = [
 ] as const;
 export type Category = (typeof CATEGORIES)[number];
 
+export const AUDIENCE_GENDERS = ['male', 'female', 'unisex'] as const;
+export type AudienceGender = (typeof AUDIENCE_GENDERS)[number];
+
 const ClassifyResultSchema = z.object({
   suitable: z.boolean(),
   category: z.enum(CATEGORIES).optional(),
   searchKeyword: z.string().min(1).max(30).optional(),
   reason: z.string().optional(),
+  audience: z.enum(AUDIENCE_GENDERS).optional(),
 });
 
 export type ClassifyResult = z.infer<typeof ClassifyResultSchema>;
@@ -45,13 +49,19 @@ const SYSTEM_PROMPT = `당신은 쇼핑 큐레이션 파이프라인의 필터/�
   · 브랜드만 있고 모델 없으면 "브랜드 + 카테고리" (예: "아식스 러닝화")
   · 브랜드도 불명확하면 일반 명사 (예: "발편한 러닝화")
   · 목적: 쿠팡 검색 시 원본 이미지와 동일·유사 상품이 상위에 나올 정도의 구체성 확보
+- **audience: 상품의 타겟 성별** — 반드시 하나 선택:
+  · "female": 여성 전용 (여성복·여성화·립·쿠션 파운데이션·마스카라·브라·생리대 등)
+  · "male": 남성 전용 (남성복·남성화·면도기·남성 향수·남성 그루밍 등)
+  · "unisex": 성별 무관 (생활용품·주방·가전·간식·자취템·중성 신발/의류·데일리 화장품 · 스킨/토너 등)
+  · 판정 애매하면 "unisex"
 
 JSON 스키마로만 응답 (다른 텍스트 금지):
 {
   "suitable": boolean,
   "category": string | undefined,
   "searchKeyword": string | undefined,
-  "reason": string | undefined
+  "reason": string | undefined,
+  "audience": "male" | "female" | "unisex" | undefined
 }`;
 
 export interface ClassifyInput {

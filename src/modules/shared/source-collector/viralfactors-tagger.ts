@@ -88,6 +88,8 @@ const TOPIC_CATEGORIES = [
   'other',
 ] as const;
 
+export const AUDIENCES = ['male', 'female', 'unisex'] as const;
+
 const ViralFactorsSchema = z.object({
   hook_type: z.enum(HOOK_TYPES),
   structure: z.enum(STRUCTURES),
@@ -95,6 +97,7 @@ const ViralFactorsSchema = z.object({
   length_bucket: z.enum(LENGTH_BUCKETS),
   cta_type: z.enum(CTA_TYPES),
   topic_category: z.enum(TOPIC_CATEGORIES),
+  audience: z.enum(AUDIENCES),
   key_phrase: z.string().max(80),
   reasoning: z.string().max(200),
 });
@@ -131,6 +134,12 @@ ${TOPIC_CATEGORIES.map((v) => `  - ${v}`).join('\n')}
   * 여행 후기·정보는 travel
   * 신발·의류·가방은 fashion (health 아님, 발 건강 언급 있어도 신발은 fashion)
 
+audience (게시글이 다루는 상품·주제의 타겟 성별):
+  - male    : 남성 전용 (남성복·남성화·면도기·남성 향수·남성 그루밍 등)
+  - female  : 여성 전용 (여성복·여성화·립·쿠션 파운데이션·마스카라·브라·생리대 등)
+  - unisex  : 성별 무관 (생활용품·주방·가전·간식·자취템·중성 신발/의류·스킨/토너 등)
+  * 애매하면 unisex.
+
 key_phrase: 이 게시글의 시그니처 표현 (최대 80자, 원문 언어)
 reasoning: 왜 이 분류인지 (최대 200자)
 
@@ -165,6 +174,7 @@ export async function tagBenchmarkPost(benchmarkPostId: string): Promise<ViralFa
         length_bucket: { type: 'string', enum: [...LENGTH_BUCKETS] },
         cta_type: { type: 'string', enum: [...CTA_TYPES] },
         topic_category: { type: 'string', enum: [...TOPIC_CATEGORIES] },
+        audience: { type: 'string', enum: [...AUDIENCES] },
         key_phrase: { type: 'string', maxLength: 80 },
         reasoning: { type: 'string', maxLength: 200 },
       },
@@ -175,6 +185,7 @@ export async function tagBenchmarkPost(benchmarkPostId: string): Promise<ViralFa
         'length_bucket',
         'cta_type',
         'topic_category',
+        'audience',
         'key_phrase',
         'reasoning',
       ],
@@ -237,6 +248,7 @@ function coerceWithFallback(raw: Record<string, unknown>): ViralFactors {
     length_bucket: safe(raw.length_bucket, LENGTH_BUCKETS, 'medium_3_5_sentences'),
     cta_type: safe(raw.cta_type, CTA_TYPES, 'other'),
     topic_category: safe(raw.topic_category, TOPIC_CATEGORIES, 'other'),
+    audience: safe(raw.audience, AUDIENCES, 'unisex'),
     key_phrase: String(raw.key_phrase ?? '').slice(0, 80),
     reasoning: String(raw.reasoning ?? '').slice(0, 200),
   };
