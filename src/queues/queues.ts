@@ -14,6 +14,7 @@ export const QUEUE_NAMES = {
   TREND_SEARCH: 'trend-search',
   SHARING_COLLECT: 'sharing-collect',
   SHARING_PUBLISH: 'sharing-publish',
+  ACCOUNT_METRICS_SYNC: 'account-metrics-sync',
   PERFORMANCE_COLLECT: 'performance-collect',
 } as const;
 
@@ -39,6 +40,7 @@ export type TrendSearchJob = {
 };
 export type SharingCollectJob = { triggeredBy?: string };
 export type SharingPublishJob = { triggeredBy?: string };
+export type AccountMetricsSyncJob = { triggeredBy?: string };
 export type PerformanceCollectJob = { postId: string; hoursAfterPublish: number };
 
 const defaultJobOptions = {
@@ -130,6 +132,16 @@ export const sharingPublishQueue = new Queue<SharingPublishJob>(QUEUE_NAMES.SHAR
   },
 });
 
+export const accountMetricsSyncQueue = new Queue<AccountMetricsSyncJob>(QUEUE_NAMES.ACCOUNT_METRICS_SYNC, {
+  connection: redisConnection,
+  defaultJobOptions: {
+    attempts: 2,
+    backoff: { type: 'exponential' as const, delay: 60_000 },
+    removeOnComplete: { age: 7 * 24 * 3600, count: 30 },
+    removeOnFail: { age: 14 * 24 * 3600 },
+  },
+});
+
 export const performanceQueue = new Queue<PerformanceCollectJob>(QUEUE_NAMES.PERFORMANCE_COLLECT, {
   connection: redisConnection,
   defaultJobOptions: {
@@ -165,6 +177,9 @@ export const queueEvents: Record<QueueName, QueueEvents> = {
     connection: redisConnection,
   }),
   [QUEUE_NAMES.SHARING_PUBLISH]: new QueueEvents(QUEUE_NAMES.SHARING_PUBLISH, {
+    connection: redisConnection,
+  }),
+  [QUEUE_NAMES.ACCOUNT_METRICS_SYNC]: new QueueEvents(QUEUE_NAMES.ACCOUNT_METRICS_SYNC, {
     connection: redisConnection,
   }),
   [QUEUE_NAMES.PERFORMANCE_COLLECT]: new QueueEvents(QUEUE_NAMES.PERFORMANCE_COLLECT, {

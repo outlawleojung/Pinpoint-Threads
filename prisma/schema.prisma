@@ -26,9 +26,13 @@ model Account {
   userAgent          String?
   isActive           Boolean   @default(true)
 
-  // Pipeline B 스하리 각색용 · Threads API me?fields=followers_count 로 주기적 동기화
+  // Pipeline B 스하리 각색용 · Threads API 로 주기적 동기화 (매일 07:30 KST 크론)
   followersCount     Int?
   followersSyncedAt  DateTime?
+
+  // Threads 계정 실 생성일 (가장 오래된 게시글 timestamp 로 근사)
+  // "스린이·이제 막 시작" 같은 표현 허용 여부 판정에 사용
+  threadsCreatedAt   DateTime?
 
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt

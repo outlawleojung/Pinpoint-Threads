@@ -196,6 +196,38 @@ export class ThreadsClient {
     return value;
   }
 
+  /**
+   * 가장 오래된 게시글 timestamp 조회 (계정 나이 근사).
+   * `GET /me/threads?fields=id,timestamp&limit=100` 로 페이지 순회 · 마지막 페이지 마지막 아이템 = 가장 오래된.
+   * 게시글이 하나도 없으면 null.
+   */
+  async fetchOldestThreadTimestamp(accessToken: string): Promise<Date | null> {
+    let oldest: Date | null = null;
+    let url = `${GRAPH_BASE}/v1.0/me/threads?${new URLSearchParams({
+      fields: 'id,timestamp',
+      limit: '100',
+      access_token: accessToken,
+    }).toString()}`;
+
+    for (let page = 0; page < 20; page++) { // 최대 2000건 (100 x 20)
+      const res = await request(url, { method: 'GET' });
+      const json = (await res.body.json()) as any;
+      if (res.statusCode !== 200 || !Array.isArray(json.data)) {
+        throw new Error(`Threads oldest post fetch failed: ${res.statusCode} ${JSON.stringify(json).slice(0, 200)}`);
+      }
+      for (const item of json.data) {
+        const ts = item.timestamp ? new Date(item.timestamp) : null;
+        if (ts && !Number.isNaN(ts.getTime())) {
+          if (!oldest || ts.getTime() < oldest.getTime()) oldest = ts;
+        }
+      }
+      const next: string | undefined = json.paging?.next;
+      if (!next) break;
+      url = next;
+    }
+    return oldest;
+  }
+
   async fetchUserProfile(accessToken: string): Promise<ThreadsUserProfile> {
     const fields = 'id,username,name,threads_profile_picture_url,threads_biography';
     const params = new URLSearchParams({ fields, access_token: accessToken });

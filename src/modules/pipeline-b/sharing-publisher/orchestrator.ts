@@ -60,8 +60,11 @@ export async function runSharingPipeline(input: SharingRunInput): Promise<Sharin
   }
 
   // 카피 생성
-  const copy = await generateSharingCopy({ variantCount: input.variantCount ?? 1 });
-  const body = copy.bodies[0];
+  const copy = await generateSharingCopy({
+    accountId: acc.id,
+    variantCount: input.variantCount ?? 1,
+  });
+  const body = copy.variants[0]?.body;
   if (!body) {
     return { status: 'failed', reason: 'sharing copywriter returned no body' };
   }
