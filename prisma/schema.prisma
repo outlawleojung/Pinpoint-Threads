@@ -356,6 +356,8 @@ model InboundLink {
   // 존재하면 Pipeline A 는 Product Matcher/Vision 을 스킵하고 이 URL 로 딥링크만 생성.
   // Coupang search API 의 브랜드 매칭 실패를 우회하는 하이브리드 경로.
   manualCommerceUrl String?
+  // 사용자가 벤치마크 URL 과 함께 보낸 상품명(텍스트). 이걸로 쿠팡 검색 → Vision best 매칭.
+  manualProductName String?
 
   // Adapter fetch 결과
   rawText         String?          @db.Text

@@ -33,6 +33,12 @@ export interface RunPipelineAInput {
    * Coupang search 브랜드 매칭 실패 우회.
    */
   explicitCommerceUrl?: string;
+  /**
+   * 사용자가 텔레그램에 벤치마크 URL 과 함께 붙여준 **상품명(텍스트)**.
+   * 존재하면 Classifier 의 searchKeyword 대신 이 상품명으로 쿠팡 검색 → Vision 으로 best 후보 선택.
+   * 텔레그램이 쿠팡 링크를 차단하므로, 링크 아닌 상품명으로 매칭 (docs/08-decisions/manual-shopping-flow.md).
+   */
+  productNameHint?: string;
 }
 
 export type PipelineAOutcome =
@@ -112,14 +118,18 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
     text: input.sourceText,
     mediaUrls: imageOnlyUrls, // 비어있으면 텍스트만
   });
-  if (!classified.suitable || !classified.searchKeyword) {
+  // 상품명 힌트가 있으면 classifier searchKeyword 없어도 진행 (사용자가 상품 확정)
+  if (!input.productNameHint && (!classified.suitable || !classified.searchKeyword)) {
     return finishRejected(post.id, 'classifier', classified.reason ?? 'not suitable');
   }
 
   // 5. State transition → MATCHING
   await transitionPost(post.id, PostState.CLASSIFYING, PostState.MATCHING);
 
-  // 6. Product Matcher — explicit URL 있으면 스킵, 없으면 자동 매칭
+  // 6. Product Matcher
+  //   - explicitCommerceUrl 있으면: 그 URL 로 딥링크 (Matcher/Vision 스킵)
+  //   - productNameHint 있으면: 사용자 상품명으로 검색 → Vision 으로 best 후보 선택
+  //   - 둘 다 없으면: classifier searchKeyword 자동 매칭
   let matchedResult: MatchResult;
   if (input.explicitCommerceUrl) {
     logger.info(
@@ -128,12 +138,17 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
     );
     matchedResult = await buildExplicitMatch(input.explicitCommerceUrl, classified);
   } else {
-    logger.info({ postId: post.id, keyword: classified.searchKeyword }, 'pipeline-a: matching');
+    const searchKeyword = input.productNameHint ?? classified.searchKeyword!;
+    logger.info(
+      { postId: post.id, keyword: searchKeyword, fromHint: !!input.productNameHint },
+      'pipeline-a: matching',
+    );
     const matched = await matchProduct({
       category: classified.category ?? '생활용품',
-      searchKeyword: classified.searchKeyword,
+      searchKeyword,
       sourceImageUrl: firstImageForVision,
       maxAttempts: 3,
+      trustKeyword: !!input.productNameHint, // 사용자 상품명이면 best 후보 신뢰
     });
     if (!matched.success) {
       return finishRejected(post.id, 'matcher', matched.reason);

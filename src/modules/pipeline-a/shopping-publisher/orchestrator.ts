@@ -124,7 +124,7 @@ export async function runShoppingForAccount(
       const inboundLink = b.inboundLinkId
         ? await prisma.inboundLink.findUnique({
             where: { id: b.inboundLinkId },
-            select: { manualCommerceUrl: true },
+            select: { manualCommerceUrl: true, manualProductName: true },
           })
         : null;
 
@@ -157,6 +157,7 @@ export async function runShoppingForAccount(
         sourceText: b.text,
         sourceUrl: b.permalink,
         explicitCommerceUrl: inboundLink?.manualCommerceUrl ?? undefined,
+        productNameHint: inboundLink?.manualProductName ?? undefined,
       });
 
       if (outcome.status === 'PENDING_APPROVAL') {

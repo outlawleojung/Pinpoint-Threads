@@ -488,6 +488,58 @@ bot.on('message:text', async (ctx, next) => {
     await ctx.reply(`⚠️ 지원 벤치마크 URL을 찾지 못했습니다.\n감지된 URL: ${urls.length}개${hint}`);
     return;
   }
+
+  // 방식 3 (권장): 벤치마크 URL + **상품명(텍스트)** → 상품명으로 쿠팡 검색 → Vision best 매칭 → 발행
+  //   텔레그램이 쿠팡 링크를 차단하므로 링크 대신 상품명으로 (docs/08-decisions/manual-shopping-flow.md)
+  //   URL·커머스URL 을 텍스트에서 제거한 나머지를 상품명으로 간주.
+  const productName = text
+    .split('\n').map((l) => l.trim())
+    .filter((l) => l && !/^https?:\/\//i.test(l) && extractUrls(l).length === 0)
+    .join(' ').trim();
+  if (commerceUrls.length === 0 && productName.length >= 2) {
+    await ctx.reply(`🔍 "${productName}" 로 상품 검색 + 발행 시작 (${supported.length}개 벤치마크)...`);
+    try {
+      const { ingestUrl } = await import('../url-ingester/index.js');
+      let handled = 0;
+      for (const burl of supported) {
+        const ing = await ingestUrl({ url: burl, source: InboundSource.MANUAL_TELEGRAM });
+        // 상품명을 InboundLink 에 저장 (자동 크론도 재사용)
+        if (ing.inboundLinkId) {
+          await prisma.inboundLink.update({ where: { id: ing.inboundLinkId }, data: { manualProductName: productName } }).catch(() => {});
+        }
+        // 벤치마크 확보 (승격됐으면 BenchmarkPost)
+        const bench = ing.inboundLinkId
+          ? await prisma.benchmarkPost.findFirst({ where: { inboundLinkId: ing.inboundLinkId }, select: { text: true, mediaUrls: true, permalink: true } })
+          : null;
+        const src = bench ?? (ing.inboundLinkId ? await prisma.inboundLink.findUnique({ where: { id: ing.inboundLinkId }, select: { rawText: true, mediaUrls: true, url: true } }) : null);
+        if (!src) { await ctx.reply(`⚠️ ${burl.slice(0,50)} 소스 확보 실패`); continue; }
+        const mediaUrls = 'mediaUrls' in src ? src.mediaUrls : [];
+        const sourceText = 'text' in src ? src.text : (src as any).rawText;
+        const permalink = 'permalink' in src ? src.permalink : (src as any).url;
+        // 발행 계정: 첫 활성 계정 (다계정 확산은 추후) — 성별 필터는 승인 카드 육안으로 대체
+        const acc = await prisma.account.findFirst({ where: { isActive: true }, orderBy: { handle: 'asc' }, select: { id: true, handle: true } });
+        if (!acc) { await ctx.reply('⚠️ 활성 계정 없음'); continue; }
+        const outcome = await runPipelineA({
+          accountId: acc.id,
+          sourceMediaUrls: mediaUrls,
+          sourceText: sourceText ?? '',
+          sourceUrl: permalink,
+          productNameHint: productName,
+        });
+        if (outcome.status === 'PENDING_APPROVAL') {
+          await ctx.reply(`✅ [${acc.handle}] 매칭 상품: ${outcome.matchedProductName?.slice(0,40)} (유사도 ${outcome.visionScore?.toFixed(2)}) · 승인 카드 확인`);
+          handled += 1;
+        } else {
+          await ctx.reply(`❌ [${acc.handle}] 실패: stage=${outcome.stage} · ${outcome.reason}`);
+        }
+      }
+      if (handled > 0) return;
+    } catch (err) {
+      logger.error({ err }, 'URL+상품명 처리 실패');
+      await ctx.reply(`❌ 처리 실패: ${(err as Error).message}`);
+      return;
+    }
+  }
   const commerceNote = commerceUrls.length > 0
     ? ` (+ 커머스 URL ${commerceUrls.length}개 자동 페어링 · Product Matcher 스킵)`
     : '';

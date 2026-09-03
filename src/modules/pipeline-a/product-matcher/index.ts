@@ -22,6 +22,12 @@ export interface MatchInput {
   searchKeyword: string;
   sourceImageUrl: string;
   maxAttempts?: number;
+  /**
+   * true 면 검색어(상품명)를 사용자가 직접 지정한 것으로 신뢰.
+   * Vision 0.85 미달이라도 **가장 유사한 후보를 선택** (검색 결과 있으면 폐기 안 함).
+   * false(기본): Vision >= 0.85 만 채택 (자동 매칭 · 오매칭 방지).
+   */
+  trustKeyword?: boolean;
 }
 
 export interface MatchResult {
@@ -64,6 +70,8 @@ export async function matchProduct(input: MatchInput): Promise<MatchOutcome> {
       continue;
     }
 
+    let bestCandidate: CommerceSearchResult | null = null;
+    let bestScore = -1;
     for (const candidate of candidates) {
       let vision: VisionMatchResult;
       try {
@@ -75,22 +83,30 @@ export async function matchProduct(input: MatchInput): Promise<MatchOutcome> {
         logger.error({ err }, 'vision verify failed');
         continue;
       }
+      if (vision.score > bestScore) {
+        bestScore = vision.score;
+        bestCandidate = candidate;
+      }
       if (vision.matched && vision.score >= 0.85) {
         const deeplinkUrl = await primary.generateDeeplink(candidate.productUrl);
         logger.info({ candidate: candidate.productName, score: vision.score }, 'match found');
         return {
           success: true,
-          result: {
-            channel: primary.channel,
-            product: candidate,
-            visionScore: vision.score,
-            attempts,
-            deeplinkUrl,
-          },
+          result: { channel: primary.channel, product: candidate, visionScore: vision.score, attempts, deeplinkUrl },
         };
       }
     }
-    // 이번 회차 candidate 모두 vision 실패 → 키워드 조정
+    // 상품명을 사용자가 지정한 경우(trustKeyword): Vision 0.85 미달이라도 최고 점수 후보 채택.
+    // 사용자가 상품을 이미 확정했고, 최종 승인 카드에서 육안 확인하므로.
+    if (input.trustKeyword && bestCandidate) {
+      const deeplinkUrl = await primary.generateDeeplink(bestCandidate.productUrl);
+      logger.info({ candidate: bestCandidate.productName, score: bestScore, trusted: true }, 'match by trusted keyword (best of candidates)');
+      return {
+        success: true,
+        result: { channel: primary.channel, product: bestCandidate, visionScore: bestScore, attempts, deeplinkUrl },
+      };
+    }
+    // 자동 매칭: 이번 회차 candidate 모두 vision 미달 → 키워드 조정
     keyword = broadenKeyword(keyword);
   }
 
