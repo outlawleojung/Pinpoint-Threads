@@ -194,7 +194,15 @@ async function generateBody(input: CopywriteInput, seedIndex: number, extraAvoid
   }
 
   const contextLines: string[] = [];
-  if (input.productName) contextLines.push(`상품명(참고, 카피에 노출 금지): ${input.productName}`);
+  if (input.productName) {
+    contextLines.push(`상품명(참고, 상품명 자체는 카피에 그대로 노출 금지): ${input.productName}`);
+    contextLines.push(
+      `★ 위 상품명에서 이 상품의 **핵심 장점·특징**을 스스로 추출해서 카피에 반드시 녹여라. ` +
+      `(예: "물없이 사용", "5-in-1 · 칫솔+치실+혀클리너", "애플민트향", "개별포장" 같은 실제 특징). ` +
+      `원본 게시글의 훅과 이 상품 특징을 결합해서, 독자가 "왜 이게 좋은지" 구체적으로 느끼게 하라. ` +
+      `막연한 감상("편하다", "좋다") 만으론 부족 · 상품의 구체적 강점이 드러나야 함.`,
+    );
+  }
   if (input.productCategory) contextLines.push(`상품 카테고리: ${input.productCategory}`);
   if (extraAvoid) contextLines.push(`⛔ 방금 실패 사유 · 이번엔 반드시 회피: ${extraAvoid}`);
   contextLines.push('본문 문장 1개를 JSON으로만 반환.');

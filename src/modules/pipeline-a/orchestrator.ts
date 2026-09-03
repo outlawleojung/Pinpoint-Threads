@@ -268,7 +268,18 @@ async function buildExplicitMatch(
 
   const productIdMatch = commerceUrl.match(/\/products\/(\d+)/);
   const externalId = productIdMatch?.[1] ?? `manual-${createHash('sha256').update(commerceUrl).digest('hex').slice(0, 16)}`;
-  const productName = classified.searchKeyword ?? '사용자 지정 상품';
+
+  // 쿠팡 상품 제목 추출 (전체 특징 담김) → 카피 정합성. 쿠팡만 · 실패 시 검색어 fallback.
+  let productName = classified.searchKeyword ?? '사용자 지정 상품';
+  if (channel === 'COUPANG') {
+    try {
+      const { fetchCoupangProductTitle } = await import('../../infra/coupang-product-title.js');
+      const title = await fetchCoupangProductTitle(commerceUrl);
+      if (title) productName = title;
+    } catch (err) {
+      logger.warn({ err }, 'coupang title 추출 스킵 · 검색어 사용');
+    }
+  }
 
   return {
     channel,
