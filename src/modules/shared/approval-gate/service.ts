@@ -42,24 +42,33 @@ export async function sendApprovalRequest(postId: string): Promise<void> {
 
   const keyboard = approvalKeyboard(post.id);
 
-  const baseMediaUrls = post.mediaUrls.length > 0
+  const allMediaUrls = post.mediaUrls.length > 0
     ? post.mediaUrls
     : post.mediaUrl
       ? [post.mediaUrl]
       : [];
 
-  // 승인 카드 검증용: 매칭된 상품 썸네일을 미디어 그룹 끝에 붙임 (원본 이미지와 시각 비교용).
-  // 사용자님이 매칭 오류를 즉시 잡을 수 있게. Telegram media group 최대 10개 하드 리밋.
+  // URL 패턴으로 image/video 판정
+  const isVideoUrl = (u: string) =>
+    /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/');
+
+  // Telegram 승인 카드 전략: 비디오는 큰 파일이라 URL fetch 실패 잦음.
+  // → 이미지만 미리보기로 사용 · 비디오는 개수만 캡션에 명시.
+  // 실 발행 시 Threads API 에는 all media 그대로 전달됨.
+  const imageOnly = allMediaUrls.filter((u) => !isVideoUrl(u));
+  const videoCount = allMediaUrls.length - imageOnly.length;
+  const baseMediaUrls = imageOnly;
+
+  // 승인 카드 검증용: 매칭된 상품 썸네일 첨부 (원본과 시각 비교)
   const productThumb = post.commerceProduct?.thumbnailUrl;
   const showProductThumb = Boolean(productThumb) && baseMediaUrls.length > 0 && baseMediaUrls.length < 10;
   const mediaUrls = showProductThumb ? [...baseMediaUrls, productThumb!] : baseMediaUrls;
-  const caption = buildPreviewCaption(post, showProductThumb);
+  const captionCore = buildPreviewCaption(post, showProductThumb);
+  const caption = videoCount > 0
+    ? `🎬 실 발행 시 비디오 ${videoCount}개 첨부됨 (여기 미리보기에는 이미지만 표시)\n\n${captionCore}`
+    : captionCore;
 
   let anchorMessageId: number;
-
-  // URL 패턴으로 image/video 판정 (.mp4 or Cloudinary /video/upload/)
-  const isVideoUrl = (u: string) =>
-    /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/');
 
   // Telegram: (a) URL 확장자로 포맷 판별 → Cloudinary 비디오 URL 에 .mp4 없으면 실패
   //           (b) 20MB 초과 비디오는 fetch 못함 → Cloudinary transform 으로 폭·품질 축소
