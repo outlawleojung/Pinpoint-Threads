@@ -98,12 +98,19 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
   // 4. Content Classifier · Vision 모듈들은 이미지만 처리 가능 (mp4 X)
   const isVideoUrl = (u: string) => /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/');
   const imageOnlyUrls = input.sourceMediaUrls.filter((u) => !isVideoUrl(u));
-  const firstImageForVision = imageOnlyUrls[0] ?? input.sourceMediaUrls[0]!; // fallback
+  // 비디오 전용 벤치마크: Cloudinary /video/upload/ 를 JPG 썸네일로 변환
+  const videoToJpgThumb = (u: string): string =>
+    u.includes('res.cloudinary.com') && u.includes('/video/upload/')
+      ? u.replace('/video/upload/', '/video/upload/w_720,q_auto,so_0/').replace(/\.mp4(\?|$)/i, '.jpg$1')
+      : u;
+  const firstImageForVision = imageOnlyUrls[0]
+    ?? (input.sourceMediaUrls[0] ? videoToJpgThumb(input.sourceMediaUrls[0]) : undefined) as string;
 
   logger.info({ postId: post.id }, 'pipeline-a: classifying');
+  // Anthropic Vision 은 이미지만 처리 · 비디오 URL 은 실패 → 이미지 없으면 텍스트만으로 분류
   const classified = await classifySourceItem({
     text: input.sourceText,
-    mediaUrls: imageOnlyUrls.length > 0 ? imageOnlyUrls : input.sourceMediaUrls,
+    mediaUrls: imageOnlyUrls, // 비어있으면 텍스트만
   });
   if (!classified.suitable || !classified.searchKeyword) {
     return finishRejected(post.id, 'classifier', classified.reason ?? 'not suitable');
@@ -177,7 +184,8 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
   logger.info({ postId: post.id }, 'pipeline-a: copywriting');
   const copy = await generateCopy({
     sourceText: input.sourceText,
-    sourceImageUrl: firstImageForVision,
+    // 이미지 없으면 텍스트만으로 카피 생성 (Vision 은 비디오 URL 처리 못함)
+    sourceImageUrl: imageOnlyUrls[0],
     productName: matched.result.product.productName,
     productCategory: matched.result.product.category ?? classified.category,
     accountSeed: account.id,
