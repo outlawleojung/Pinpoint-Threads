@@ -63,10 +63,8 @@ export async function extractThreadsVideoUrls(url: string): Promise<ThreadsVideo
       const article = document.querySelector('article');
       // @ts-expect-error - browser context
       const root = article ?? document;
-      // @ts-expect-error - browser context
       return Array.from(root.querySelectorAll('video'))
-        // @ts-expect-error - browser context
-        .map((v) => v.src || v.currentSrc)
+        .map((v: any) => v.src || v.currentSrc)
         .filter((s: string) => s && s.includes('.mp4'));
     });
 
