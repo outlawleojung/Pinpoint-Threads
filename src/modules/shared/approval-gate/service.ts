@@ -6,7 +6,7 @@ import { env } from '../../../config/env.js';
 import { logger } from '../../../config/logger.js';
 import { prisma } from '../../../db/prisma.js';
 import { assertTransition } from '../../../state/post-state-machine.js';
-import { scheduleApprovedPost, SchedulerError } from '../publisher/scheduler.js';
+import { publishQueue } from '../../../queues/queues.js';
 
 type PostWithRelations = Post & {
   account: Account;
@@ -155,20 +155,17 @@ export async function handleApprovalCallback(action: Action, postId: string): Pr
 
   logger.info({ postId, action, from: post.state, to: nextState }, 'post state transitioned');
 
-  // 승인 시 스케줄러가 계정 시차·활성 시간대 반영해서 delayed 발행 큐 등록
+  // 텔레그램 수동 승인 = 즉시 발행 (사용자님이 지금 발행하려고 승인한 것).
+  // 자동 크론(shopping-publisher)만 계정 시차 스케줄 적용.
   let scheduleNote = '';
   if (action === 'approve') {
     try {
-      const s = await scheduleApprovedPost(postId);
-      const inMin = Math.round(s.delayMs / 60_000);
-      scheduleNote = ` @ ${s.scheduledAt.toISOString().slice(5, 16).replace('T', ' ')} (${inMin}분 후)`;
+      await prisma.post.update({ where: { id: postId }, data: { scheduledAt: new Date() } });
+      await publishQueue.add('publish', { postId }, { jobId: `publish-${postId}` });
+      scheduleNote = ' · 즉시 발행';
     } catch (err) {
-      if (err instanceof SchedulerError) {
-        logger.error({ postId, code: err.code, msg: err.message }, 'schedule failed after approve');
-      } else {
-        logger.error({ postId, err }, 'schedule failed after approve (unexpected)');
-      }
-      scheduleNote = ` ⚠ 스케줄 실패: ${(err as Error).message}`;
+      logger.error({ postId, err }, 'immediate publish enqueue failed');
+      scheduleNote = ` ⚠ 발행 큐 실패: ${(err as Error).message}`;
     }
   }
 
