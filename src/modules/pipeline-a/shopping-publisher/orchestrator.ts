@@ -212,47 +212,21 @@ export async function runShoppingForAccount(
  */
 async function getRecentlyUsedBenchmarkIds(accountId: string, days: number): Promise<Set<string>> {
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-  // 두 종류의 벤치마크 제외:
-  //   1) 이 계정에서 최근 N일 이내 발행·승인된 벤치마크 (계정별 중복 방지)
-  //   2) **한 번도 PUBLISHED 된 적 없이 REJECTED 만 있는 벤치마크** — 벤치마크 자체 결함
-  //      (다중 비디오 누락 · 상품 오매칭 · 카피 부적합 등) → 전역 블랙리스트
-  //      PUBLISHED 이력이 있으면 좋은 벤치마크로 간주 · 계속 사용
-  const [postsForAccount, allShoppingPosts] = await Promise.all([
-    prisma.post.findMany({
-      where: {
-        accountId,
-        kind: PostKind.SHOPPING,
-        createdAt: { gte: since },
-        state: { notIn: [PostState.REJECTED, PostState.FAILED] },
-      },
-      select: { sourceItem: { select: { sourceUrl: true } } },
-    }),
-    prisma.post.findMany({
-      where: { kind: PostKind.SHOPPING },
-      select: { state: true, sourceItem: { select: { sourceUrl: true } } },
-    }),
-  ]);
-  // 소스 URL 별 published/rejected 카운트
-  const stats = new Map<string, { pub: number; rej: number }>();
-  for (const p of allShoppingPosts) {
-    const url = p.sourceItem?.sourceUrl;
-    if (!url) continue;
-    const s = stats.get(url) ?? { pub: 0, rej: 0 };
-    if (p.state === PostState.PUBLISHED) s.pub += 1;
-    if (p.state === PostState.REJECTED) s.rej += 1;
-    stats.set(url, s);
-  }
-  const excludeUrls = new Set<string>();
-  for (const p of postsForAccount) {
-    if (p.sourceItem?.sourceUrl) excludeUrls.add(p.sourceItem.sourceUrl);
-  }
-  for (const [url, s] of stats) {
-    // 한번도 발행 못하고 리젝만 쌓인 벤치마크 = 결함 → 제외
-    if (s.pub === 0 && s.rej >= 1) excludeUrls.add(url);
-  }
-  if (excludeUrls.size === 0) return new Set();
+  // 계정별 14일 이내 발행/승인된 벤치마크만 제외 (재발 방지 블랙리스트는 폐기 —
+  // 매칭 실패는 새 대기 카드 흐름으로 사용자님이 URL 답장으로 구제하므로 제외 불필요).
+  const posts = await prisma.post.findMany({
+    where: {
+      accountId,
+      kind: PostKind.SHOPPING,
+      createdAt: { gte: since },
+      state: { notIn: [PostState.REJECTED, PostState.FAILED] },
+    },
+    select: { sourceItem: { select: { sourceUrl: true } } },
+  });
+  const sourceUrls = posts.map((p) => p.sourceItem?.sourceUrl).filter((u): u is string => !!u);
+  if (sourceUrls.length === 0) return new Set();
   const benches = await prisma.benchmarkPost.findMany({
-    where: { permalink: { in: Array.from(excludeUrls) } },
+    where: { permalink: { in: sourceUrls } },
     select: { id: true },
   });
   return new Set(benches.map((b) => b.id));
