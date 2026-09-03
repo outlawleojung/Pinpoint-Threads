@@ -14,12 +14,15 @@ type PostWithRelations = Post & {
   commerceProduct: CommerceProduct | null;
 };
 
-function buildPreviewCaption(post: PostWithRelations): string {
+function buildPreviewCaption(post: PostWithRelations, hasProductThumb: boolean): string {
   const lines: string[] = [];
   lines.push('🧵 승인 요청');
   lines.push(`계정: ${post.account.handle}`);
   if (post.commerceProduct) {
     lines.push(`상품: ${post.commerceProduct.productName} (${post.commerceProduct.channel})`);
+  }
+  if (hasProductThumb) {
+    lines.push('⚠️  마지막 이미지 = 매칭된 쿠팡 상품 (원본과 비교 · 다르면 리젝)');
   }
   lines.push('');
   lines.push('━━━ 본문 ━━━');
@@ -37,14 +40,20 @@ export async function sendApprovalRequest(postId: string): Promise<void> {
   });
   if (!post) throw new Error(`Post ${postId} not found`);
 
-  const caption = buildPreviewCaption(post);
   const keyboard = approvalKeyboard(post.id);
 
-  const mediaUrls = post.mediaUrls.length > 0
+  const baseMediaUrls = post.mediaUrls.length > 0
     ? post.mediaUrls
     : post.mediaUrl
       ? [post.mediaUrl]
       : [];
+
+  // 승인 카드 검증용: 매칭된 상품 썸네일을 미디어 그룹 끝에 붙임 (원본 이미지와 시각 비교용).
+  // 사용자님이 매칭 오류를 즉시 잡을 수 있게. Telegram media group 최대 10개 하드 리밋.
+  const productThumb = post.commerceProduct?.thumbnailUrl;
+  const showProductThumb = Boolean(productThumb) && baseMediaUrls.length > 0 && baseMediaUrls.length < 10;
+  const mediaUrls = showProductThumb ? [...baseMediaUrls, productThumb!] : baseMediaUrls;
+  const caption = buildPreviewCaption(post, showProductThumb);
 
   let anchorMessageId: number;
 

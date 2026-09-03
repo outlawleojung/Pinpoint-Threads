@@ -4,6 +4,7 @@ import type { LlmContentPart } from '../../../infra/llm/index.js';
 import { logger } from '../../../config/logger.js';
 import { searchSimilar, type SimilarBenchmark } from '../source-collector/embedder.js';
 import { isVoyageConfigured } from '../../../infra/voyage-client.js';
+import { prisma } from '../../../db/prisma.js';
 
 /**
  * Copywriter — 원본을 참고해 계정별 페르소나로 완전 재창조하는 카피 노드.
@@ -41,6 +42,9 @@ export interface CopywriteInput {
   variantCount?: number;
   ragEnabled?: boolean; // Voyage RAG로 유사 벤치마크 top-K few-shot
   ragTopK?: number;
+  accountId?: string; // 리젝 사유 few-shot 조회용
+  factCheckEnabled?: boolean; // Haiku 사실검증 스텝 (기본 true · shopping 필수)
+  factCheckMaxRetries?: number; // 기본 2회
 }
 
 /**
@@ -81,6 +85,11 @@ const UNIVERSAL_PRINCIPLES = `너는 한국 Threads 피드에 자연스럽게 �
   "요즘 OO 신어봤는데 발이 편함" 처럼 개인 경험 안에 자연스럽게 녹이기.
 - **정확한 가격 숫자·"○○% 할인"·"오늘까지"·"타임세일" 금지** (광고 티).
   → "15,900원" · "30% 세일" · "오늘 자정까지" 같은 표현 X.
+- **상품 사용처·조리법·활용 방식 지어내지 X.**
+  · 상품 종류에 맞는 표준 사용처만 언급. 확신 없으면 언급 자체를 피해라.
+  · 예: 열무김치 → 김치찌개 X (열무는 물김치/열무국수/비빔국수용). 배추김치일 때만 김치찌개.
+  · 예: 스킨/토너 → 마시기 X. 마스크팩 → 굽기 X.
+  · 상품과 조합할 요리·음식·상황이 애매하면 **일반적 반응만** 남기고 구체 조리법은 빼라.
 - **가성비·저렴함을 반응형 문구로 암시하는 건 OK.** 오히려 반응이 잘 나옴.
   → "이게 만원도 안 된다고?" · "이 가격에 이 퀄?" · "생각보다 안 비쌈" · "찾아보고 놀람" OK.
   → 원칙: 구체적 숫자 X, 놀람/발견의 감정 O.
@@ -122,7 +131,7 @@ ${persona}
 페르소나가 지시하는 대상 독자·어투·이모지 사용 규칙·문화 코드를 정확히 따를 것.${langHint}`;
 }
 
-async function generateBody(input: CopywriteInput, seedIndex: number): Promise<string> {
+async function generateBody(input: CopywriteInput, seedIndex: number, extraAvoid?: string): Promise<string> {
   const system = buildSystemPrompt({
     personaPrompt: input.personaPrompt,
     accountSeed: input.accountSeed,
@@ -163,9 +172,23 @@ async function generateBody(input: CopywriteInput, seedIndex: number): Promise<s
     }
   }
 
+  // 과거 리젝 사유 few-shot (같은 계정 · 최근 20건) — 반복 실수 방지
+  if (input.accountId) {
+    const priorRejects = await loadRecentRejections(input.accountId, input.productCategory);
+    if (priorRejects.length) {
+      userParts.push({
+        type: 'text',
+        text:
+          `⛔ 아래는 이 계정의 최근 리젝 사례다. 같은 실수·유사 실수 절대 반복 X:\n` +
+          priorRejects.map((r, i) => `${i + 1}. 카피: "${r.body}"\n   사유: ${r.reason}`).join('\n'),
+      });
+    }
+  }
+
   const contextLines: string[] = [];
   if (input.productName) contextLines.push(`상품명(참고, 카피에 노출 금지): ${input.productName}`);
   if (input.productCategory) contextLines.push(`상품 카테고리: ${input.productCategory}`);
+  if (extraAvoid) contextLines.push(`⛔ 방금 실패 사유 · 이번엔 반드시 회피: ${extraAvoid}`);
   contextLines.push('본문 문장 1개를 JSON으로만 반환.');
   userParts.push({ type: 'text', text: contextLines.join('\n') });
 
@@ -241,11 +264,132 @@ export function buildReply(deeplinkUrl: string | undefined): string {
 }
 
 export async function generateCopy(input: CopywriteInput): Promise<CopywriteResult> {
-  const body = await generateBody(input, 0);
+  const factCheck = input.factCheckEnabled ?? Boolean(input.productName); // 상품 있으면 기본 ON
+  const maxRetries = input.factCheckMaxRetries ?? 2;
+
+  let body = await generateBody(input, 0);
+  let lastReason: string | undefined;
+
+  if (factCheck) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      const check = await factCheckCopy({
+        body,
+        productName: input.productName,
+        productCategory: input.productCategory,
+      });
+      if (check.ok) break;
+      lastReason = check.reason;
+      logger.warn(
+        { attempt, body, reason: check.reason, productName: input.productName },
+        'copy fact-check failed → regenerate',
+      );
+      if (attempt === maxRetries) {
+        throw new Error(`Copywriter fact-check failed ${maxRetries + 1} times: ${check.reason}`);
+      }
+      body = await generateBody(input, attempt + 1, check.reason);
+    }
+  }
+
   const reply = buildReply(input.deeplinkUrl);
   const result: CopywriteResult = { body, reply };
-  logger.debug({ result }, 'generateCopy');
+  logger.debug({ result, factCheck, lastReason }, 'generateCopy');
   return result;
+}
+
+/**
+ * Haiku 사실검증: 카피에 상품 종류·사용처·성분 관련 명백한 오류가 있는지 판정.
+ * 예: 열무김치 → 김치찌개 (X), 스킨케어 → 먹는다 (X), 여성 상품 → 남성 언급 (X).
+ */
+async function factCheckCopy(args: {
+  body: string;
+  productName?: string;
+  productCategory?: string;
+}): Promise<{ ok: boolean; reason?: string }> {
+  if (!args.productName) return { ok: true };
+
+  const system = `너는 한국 SNS 쇼핑 카피의 **사실 오류 검사기**다.
+
+카피가 상품에 대해 사실적으로 **명백히 틀린 표현**을 하는지만 본다:
+- 상품 종류와 안 맞는 사용처 (예: 열무김치 → 김치찌개 · 열무는 물김치/열무국수/비빔국수용, 김치찌개는 배추김치용)
+- 상품 종류와 안 맞는 조리·활용 방식 (예: 스킨을 마시기, 마스크팩을 굽기)
+- 상품 카테고리 오인 (예: 향수를 얼굴에 바르기, 세제로 요리하기)
+- 성분·기능 근거 없이 지어낸 효능 (예: 립스틱 발라서 다이어트)
+- 상품이 아닌 것을 상품처럼 언급
+
+**판정 원칙**: 명백히 틀린 게 있을 때만 ok=false. 애매한 취향·과장·감정 표현은 ok=true.
+문학적 은유·감탄·구어체 흔한 표현은 오류 아님.
+
+JSON으로만: { "ok": boolean, "reason": "짧게 어떤 오류인지 (ok=true면 빈 문자열)" }`;
+
+  const user = `상품: ${args.productName}${args.productCategory ? ` (카테고리: ${args.productCategory})` : ''}
+카피: "${args.body}"
+
+판정 JSON:`;
+
+  try {
+    const res = await llm().complete({
+      tier: 'fast',
+      system,
+      userParts: [{ type: 'text', text: user }],
+      maxOutputTokens: 200,
+      temperature: 0.1,
+      jsonMode: true,
+      jsonSchema: {
+        type: 'object',
+        properties: { ok: { type: 'boolean' }, reason: { type: 'string' } },
+        required: ['ok'],
+      },
+    });
+    const parsed = extractJson(res.text) as { ok?: boolean; reason?: string };
+    const ok = parsed.ok === true;
+    return { ok, reason: ok ? undefined : (parsed.reason ?? '사실 오류') };
+  } catch (err) {
+    logger.warn({ err }, 'factCheckCopy failed — passing through');
+    return { ok: true };
+  }
+}
+
+/**
+ * 이 계정의 최근 리젝 사례 (rejectionReason 있는 것) 최대 5건.
+ * 카테고리가 지정되면 같은 카테고리 우선.
+ */
+async function loadRecentRejections(
+  accountId: string,
+  productCategory?: string,
+): Promise<Array<{ body: string; reason: string }>> {
+  try {
+    const posts = await prisma.post.findMany({
+      where: {
+        accountId,
+        state: 'REJECTED',
+        rejectionReason: { not: null },
+        generatedBody: { not: null },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+      select: {
+        generatedBody: true,
+        rejectionReason: true,
+        commerceProduct: { select: { category: true } },
+      },
+    });
+    const mapped = posts
+      .filter((p) => p.generatedBody && p.rejectionReason)
+      .map((p) => ({
+        body: p.generatedBody as string,
+        reason: p.rejectionReason as string,
+        category: p.commerceProduct?.category,
+      }));
+    // 같은 카테고리 우선, 그다음 최신
+    const sameCat = productCategory
+      ? mapped.filter((m) => m.category && m.category === productCategory)
+      : [];
+    const others = mapped.filter((m) => !sameCat.includes(m));
+    return [...sameCat, ...others].slice(0, 5).map(({ body, reason }) => ({ body, reason }));
+  } catch (err) {
+    logger.warn({ err }, 'loadRecentRejections failed');
+    return [];
+  }
 }
 
 export async function generateBodyVariants(

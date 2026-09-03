@@ -37,7 +37,7 @@ import { runShoppingForAllAccounts } from '../modules/pipeline-a/shopping-publis
  * BullMQ repeatable job 사용. 앱 재시작해도 스케줄 유지.
  */
 
-const POLL_EVERY_MS = 6 * 60 * 60 * 1000; // 6h
+const POLL_CRON = '0 7 * * *'; // 매일 07:00 KST (하루 1회. 이전 6h → 하루 1회로 축소)
 const DIGEST_CRON = '0 8 * * *'; // 매일 08:00 KST
 const SEARCH_CRON = '30 8 * * *'; // 매일 08:30 KST (다이제스트 이후)
 const SHARING_CRON = '0 8 * * *';  // 매일 08:00 KST (Pipeline B 스하리 벤치마크 수집 · publish 1h 전)
@@ -185,13 +185,13 @@ export function startTrendWorkers(): Worker[] {
 }
 
 export async function scheduleTrendJobs(): Promise<void> {
-  // repeatable poll every 6h
+  // daily poll at 07:00 KST (하루 1회. 다이제스트 1h 전)
   await trendPollQueue.add(
-    'trend-poll-repeat',
+    'trend-poll-daily',
     { triggeredBy: 'scheduler' },
     {
-      repeat: { every: POLL_EVERY_MS },
-      jobId: 'trend-poll-repeat',
+      repeat: { pattern: POLL_CRON, tz: 'Asia/Seoul' },
+      jobId: 'trend-poll-daily',
     },
   );
 
@@ -257,7 +257,7 @@ export async function scheduleTrendJobs(): Promise<void> {
 
   logger.info(
     {
-      pollEveryMs: POLL_EVERY_MS,
+      pollCron: POLL_CRON,
       digestCron: DIGEST_CRON,
       searchCron: SEARCH_CRON,
       sharingCron: SHARING_CRON,
