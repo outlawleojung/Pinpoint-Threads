@@ -104,10 +104,10 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
       const hasVideo = (post.mediaUrls ?? []).some(
         (u: string) => /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/'),
       );
-      const replyDelayMs = hasVideo ? 15_000 : 1_000;
+      const replyDelayMs = hasVideo ? 30_000 : 1_000;
 
-      // 재시도 로직: reply 실패 시 지수 백오프 최대 3회 (비디오 후단 처리 대기)
-      const maxAttempts = hasVideo ? 4 : 2;
+      // 재시도 로직: reply 실패 시 지수 백오프 (비디오 후단 처리 대기 · 최대 총 ~3분)
+      const maxAttempts = hasVideo ? 6 : 2;
       let lastErr: unknown = null;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         const wait = attempt === 1 ? replyDelayMs : replyDelayMs * attempt;

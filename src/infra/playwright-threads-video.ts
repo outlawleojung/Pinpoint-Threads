@@ -50,32 +50,30 @@ export async function extractThreadsVideoUrls(url: string): Promise<ThreadsVideo
   });
   const page = await context.newPage();
 
-  const capturedMp4 = new Set<string>();
-  page.on('response', (resp) => {
-    const u = resp.url();
-    if (u.includes('.mp4') && u.match(/scontent[^/]*\.cdninstagram\.com/)) {
-      capturedMp4.add(u);
-    }
-  });
-
+  // 우리는 페이지 최상단 (target 게시글) 의 비디오만 원함.
+  // 네트워크 캡처는 추천글까지 포함 → DOM 에서 첫 <article>·비디오 슬롯만 추출.
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     // JS 렌더 + 미디어 로드 대기
     await page.waitForTimeout(6000);
 
-    // <video src=> 도 병렬로 확인 · evaluate 는 브라우저 컨텍스트라 any 타입
+    // 첫 번째 <article> 요소 내부의 <video> src 만 추출 (target 게시글)
     const videoSrcs: string[] = await page.evaluate(() => {
       // @ts-expect-error - browser context
-      return Array.from(document.querySelectorAll('video'))
+      const article = document.querySelector('article');
+      // @ts-expect-error - browser context
+      const root = article ?? document;
+      // @ts-expect-error - browser context
+      return Array.from(root.querySelectorAll('video'))
         // @ts-expect-error - browser context
         .map((v) => v.src || v.currentSrc)
         .filter((s: string) => s && s.includes('.mp4'));
     });
-    for (const s of videoSrcs) capturedMp4.add(s);
 
+    const capturedMp4 = new Set<string>(videoSrcs);
     logger.info(
       { url, mp4Count: capturedMp4.size },
-      'threads video extract done',
+      'threads video extract done (article-scoped)',
     );
     return { mp4Urls: Array.from(capturedMp4), fetchedAt: new Date() };
   } catch (err) {
