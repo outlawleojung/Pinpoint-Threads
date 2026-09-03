@@ -52,19 +52,12 @@ export async function sendApprovalRequest(postId: string): Promise<void> {
   const isVideoUrl = (u: string) =>
     /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/');
 
-  // Telegram 승인 카드 전략: 비디오는 큰 파일이라 URL fetch 실패 잦음.
-  // → 이미지 + 비디오 썸네일(첫 프레임) 로 대체 · 비디오 개수 캡션에 명시.
+  // Telegram 승인 카드 전략: 비디오는 URL fetch 실패 잦음 (크기·Cloudinary transform 지연).
+  // → 이미지만 미리보기로 사용 · 비디오는 개수만 캡션에 명시.
   // 실 발행 시 Threads API 에는 all media (mp4 포함) 그대로 전달됨.
   const imageOnly = allMediaUrls.filter((u) => !isVideoUrl(u));
   const videoCount = allMediaUrls.length - imageOnly.length;
-  // Cloudinary 비디오 URL → JPG 썸네일 트랜스폼 (첫 프레임)
-  const videoThumbs = allMediaUrls
-    .filter((u) => isVideoUrl(u) && u.includes('res.cloudinary.com') && u.includes('/video/upload/'))
-    .slice(0, 2)
-    .map((u) => u
-      .replace('/video/upload/', '/video/upload/w_720,q_auto,so_0/')
-      .replace(/\.mp4(\?|$)/i, '.jpg$1'));
-  const baseMediaUrls = [...imageOnly, ...videoThumbs];
+  const baseMediaUrls = imageOnly;
 
   // 승인 카드 검증용: 매칭된 상품 썸네일 첨부 (원본과 시각 비교)
   const productThumb = post.commerceProduct?.thumbnailUrl;
