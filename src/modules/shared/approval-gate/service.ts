@@ -61,20 +61,26 @@ export async function sendApprovalRequest(postId: string): Promise<void> {
   const isVideoUrl = (u: string) =>
     /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/');
 
-  // Telegram Bot API 는 URL 뒤 확장자로 포맷 판별 → Cloudinary 비디오 URL 에 .mp4 확장자 없으면 실패.
-  // 확장자 없는 비디오 URL 에 자동으로 .mp4 부착.
-  const withExt = (u: string): string => {
-    if (isVideoUrl(u) && !/\.mp4(?:\?|$)/i.test(u)) {
-      return u.split('?')[0] + '.mp4' + (u.includes('?') ? '?' + u.split('?').slice(1).join('?') : '');
+  // Telegram: (a) URL 확장자로 포맷 판별 → Cloudinary 비디오 URL 에 .mp4 없으면 실패
+  //           (b) 20MB 초과 비디오는 fetch 못함 → Cloudinary transform 으로 폭·품질 축소
+  const withTelegramSafe = (u: string): string => {
+    let out = u;
+    // (a) 확장자 보정
+    if (isVideoUrl(out) && !/\.mp4(?:\?|$)/i.test(out)) {
+      out = out.split('?')[0] + '.mp4' + (out.includes('?') ? '?' + out.split('?').slice(1).join('?') : '');
     }
-    return u;
+    // (b) Cloudinary /video/upload/ 뒤에 w_720,q_auto 삽입 (트랜스코드 안 되어 있으면 자동 생성)
+    if (out.includes('res.cloudinary.com') && out.includes('/video/upload/')) {
+      out = out.replace('/video/upload/', '/video/upload/w_720,q_auto,vc_h264/');
+    }
+    return out;
   };
 
   if (mediaUrls.length >= 2) {
     // Media group: 각 항목별 video/photo 타입 지정 · 확장자 보정
     const group = mediaUrls.slice(0, 10).map((url, i) => ({
       type: (isVideoUrl(url) ? 'video' : 'photo') as 'photo' | 'video',
-      media: withExt(url),
+      media: withTelegramSafe(url),
       caption: i === 0 ? caption : undefined,
     }));
     const groupMessages = await bot.api.sendMediaGroup(env.TELEGRAM_ADMIN_CHAT_ID, group);
@@ -86,7 +92,7 @@ export async function sendApprovalRequest(postId: string): Promise<void> {
       { reply_markup: keyboard },
     );
   } else if (mediaUrls.length === 1) {
-    const only = withExt(mediaUrls[0]!);
+    const only = withTelegramSafe(mediaUrls[0]!);
     const msg = isVideoUrl(only)
       ? await bot.api.sendVideo(env.TELEGRAM_ADMIN_CHAT_ID, only, { caption, reply_markup: keyboard })
       : await bot.api.sendPhoto(env.TELEGRAM_ADMIN_CHAT_ID, only, { caption, reply_markup: keyboard });
