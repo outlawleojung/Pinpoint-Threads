@@ -54,6 +54,8 @@ export interface ThreadsReplyInput {
   accessToken: string;
   parentId: string;
   text: string;
+  /** 첨부 이미지 URL. reply 에 이미지를 붙이면 링크 프리뷰(OG 카드)가 억제됨. */
+  imageUrl?: string;
 }
 
 export interface ThreadsReplyResult {
@@ -400,11 +402,20 @@ export class ThreadsClient {
   }
 
   async reply(input: ThreadsReplyInput): Promise<ThreadsReplyResult> {
-    const containerId = await this.createContainer(input.accessToken, {
-      mediaType: 'TEXT',
-      text: input.text,
-      replyToId: input.parentId,
-    });
+    // 이미지 첨부 시 IMAGE 컨테이너 · 없으면 TEXT
+    // (Threads 는 reply 에 이미지가 붙으면 링크 프리뷰 OG 카드를 자동 억제.)
+    const containerId = input.imageUrl
+      ? await this.createContainer(input.accessToken, {
+          mediaType: 'IMAGE',
+          text: input.text,
+          imageUrl: input.imageUrl,
+          replyToId: input.parentId,
+        })
+      : await this.createContainer(input.accessToken, {
+          mediaType: 'TEXT',
+          text: input.text,
+          replyToId: input.parentId,
+        });
     const publishedId = await this.publishContainer(input.accessToken, containerId);
     return { threadsReplyId: publishedId };
   }

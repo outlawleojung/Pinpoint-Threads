@@ -43,7 +43,7 @@ export class PublisherError extends Error {
 export async function publish(input: PublishInput): Promise<PublishResult> {
   const post = await prisma.post.findUnique({
     where: { id: input.postId },
-    include: { account: true },
+    include: { account: true, commerceProduct: true },
   });
 
   if (!post) throw new PublisherError(`Post ${input.postId} not found`, 'INVALID_STATE');
@@ -118,6 +118,8 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
             accessToken,
             parentId: threadsPostId,
             text: post.generatedReply,
+            // 상품 썸네일을 reply 에 첨부 → 쿠팡 링크 자동 OG 프리뷰 카드 억제
+            imageUrl: post.commerceProduct?.thumbnailUrl ?? undefined,
           });
           threadsReplyId = reply.threadsReplyId;
           logger.info({ postId: post.id, threadsReplyId, attempt }, 'pinned reply published');
@@ -129,7 +131,12 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
         }
       }
       if (lastErr) {
+        const reason = String((lastErr as Error)?.message ?? lastErr).slice(0, 500);
         logger.error({ err: lastErr, postId: post.id, threadsPostId }, 'pinned reply failed after retries — main post is live but reply missing');
+        await prisma.post.update({
+          where: { id: post.id },
+          data: { replyFailureReason: reason },
+        }).catch(() => {});
       }
     }
   } catch (err) {
