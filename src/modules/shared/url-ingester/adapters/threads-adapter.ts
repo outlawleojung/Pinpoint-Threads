@@ -179,14 +179,18 @@ async function normalizeApifyItem(
   };
 
   // Playwright 로 비디오 여부 확인 & mp4 URL 획득
-  // 실행 트리거:
-  //   1) themineworks media_type = "video" or "carousel" (carousel 은 이미지·비디오 혼합 가능)
-  //   2) mediaUrls 중 video_default_cover_frame 마커 포함 (구식 감지 · 백업)
+  // 실행 트리거 (Apify 가 이미 mp4 잘 리턴하면 스킵 — 이 경우 Playwright 는 오히려 오염원):
+  //   1) media_type='video'/'carousel' 인데 mediaUrls 에 mp4 없음 (Apify 가 커버 프레임만 리턴한 경우)
+  //   2) mediaUrls 중 video_default_cover_frame 마커 포함 (교체 필요)
   const rawMediaType = String(item.media_type ?? '').toLowerCase();
+  const alreadyHasMp4 = result.mediaUrls.some((u) => /\.mp4(?:\?|$)/i.test(u));
+  const hasCoverFrameMarker = result.mediaUrls.some((u) => u.includes('video_default_cover_frame'));
   const shouldTryVideo =
-    rawMediaType === 'video' ||
-    rawMediaType === 'carousel' ||
-    result.mediaUrls.some((u) => u.includes('video_default_cover_frame'));
+    !alreadyHasMp4 && (
+      rawMediaType === 'video' ||
+      (rawMediaType === 'carousel' && hasCoverFrameMarker) ||
+      hasCoverFrameMarker
+    );
 
   if (shouldTryVideo) {
     try {
