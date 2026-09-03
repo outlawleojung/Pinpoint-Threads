@@ -250,9 +250,19 @@ async function buildExplicitMatch(
   const channel = detectCommerceChannel(commerceUrl) ?? 'COUPANG';
 
   let deeplinkUrl = commerceUrl;
-  if (channel === 'COUPANG') {
+  // 이미 완성된 파트너스 딥링크 (link.coupang.com/a/...) 이면 재생성 X · 그대로 사용
+  const isAlreadyDeeplink = /link\.coupang\.com\/a\//i.test(commerceUrl);
+  if (channel === 'COUPANG' && !isAlreadyDeeplink) {
     const coupang = new CoupangAdapter(env.COUPANG_ACCESS_KEY ?? '', env.COUPANG_SECRET_KEY ?? '');
-    deeplinkUrl = await coupang.generateDeeplink(commerceUrl);
+    try {
+      deeplinkUrl = await coupang.generateDeeplink(commerceUrl);
+    } catch (err) {
+      // 축약 URL (itemId 없는 /products/id) 은 쿠팡이 변환 거부 → 사용자님이 직접 만든 딥링크 필요
+      throw new Error(
+        `쿠팡 딥링크 변환 실패 (${(err as Error).message}). ` +
+        `상품 페이지에서 "공유 → 파트너스 링크" 로 만든 link.coupang.com/a/... 링크를 보내주세요.`,
+      );
+    }
   }
   // MUSINSA · NAVER: 딥링크 API 없음 → 원본 URL 그대로 사용
 
