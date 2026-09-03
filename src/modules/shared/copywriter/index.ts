@@ -38,7 +38,7 @@ export interface CopywriteInput {
   personaPrompt?: string;
   accountSeed: string;
   deeplinkUrl?: string;
-  channel?: 'COUPANG' | 'MUSINSA';
+  channel?: 'COUPANG' | 'MUSINSA' | 'NAVER';
   variantCount?: number;
   ragEnabled?: boolean; // Voyage RAG로 유사 벤치마크 top-K few-shot
   ragTopK?: number;

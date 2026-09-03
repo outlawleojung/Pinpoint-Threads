@@ -114,6 +114,10 @@ export async function handleApprovalCallback(action: Action, postId: string): Pr
   if (!post) return `Post ${postId} not found`;
 
   const nextState = ACTION_TO_STATE[action];
+  // 이미 같은 상태이면 idempotent skip (프로그램·크론이 이미 마킹한 뒤 사용자 클릭 케이스)
+  if (post.state === nextState) {
+    return `이미 ${nextState} 상태`;
+  }
   assertTransition(post.state, nextState);
 
   await prisma.post.update({

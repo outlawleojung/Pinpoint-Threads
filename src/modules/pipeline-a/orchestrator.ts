@@ -237,26 +237,31 @@ async function buildExplicitMatch(
   commerceUrl: string,
   classified: { category?: string | null; searchKeyword?: string | null },
 ): Promise<MatchResult> {
-  const coupang = new CoupangAdapter(env.COUPANG_ACCESS_KEY ?? '', env.COUPANG_SECRET_KEY ?? '');
-  const deeplinkUrl = await coupang.generateDeeplink(commerceUrl);
+  const { detectCommerceChannel } = await import('../shared/url-ingester/platform-detector.js');
+  const channel = detectCommerceChannel(commerceUrl) ?? 'COUPANG';
 
-  // Coupang URL 에서 productId 추출 (vp/products/{id} 패턴)
+  let deeplinkUrl = commerceUrl;
+  if (channel === 'COUPANG') {
+    const coupang = new CoupangAdapter(env.COUPANG_ACCESS_KEY ?? '', env.COUPANG_SECRET_KEY ?? '');
+    deeplinkUrl = await coupang.generateDeeplink(commerceUrl);
+  }
+  // MUSINSA · NAVER: 딥링크 API 없음 → 원본 URL 그대로 사용
+
   const productIdMatch = commerceUrl.match(/\/products\/(\d+)/);
   const externalId = productIdMatch?.[1] ?? `manual-${createHash('sha256').update(commerceUrl).digest('hex').slice(0, 16)}`;
-
   const productName = classified.searchKeyword ?? '사용자 지정 상품';
 
   return {
-    channel: 'COUPANG',
+    channel,
     product: {
-      channel: 'COUPANG',
+      channel,
       externalId,
       productName,
       productUrl: commerceUrl,
       thumbnailUrl: '',
       category: classified.category ?? undefined,
     },
-    visionScore: 1.0, // 사용자 확정 · vision 스킵
+    visionScore: 1.0,
     attempts: 0,
     deeplinkUrl,
   };

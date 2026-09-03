@@ -25,7 +25,7 @@ export interface MatchInput {
 }
 
 export interface MatchResult {
-  channel: 'COUPANG' | 'MUSINSA';
+  channel: 'COUPANG' | 'MUSINSA' | 'NAVER';
   product: CommerceSearchResult;
   visionScore: number;
   attempts: number;

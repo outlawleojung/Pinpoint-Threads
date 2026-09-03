@@ -56,7 +56,26 @@ const COMMERCE_PATTERNS: RegExp[] = [
   /(?:^|\.)coupang\.com$/i,
   /(?:^|\.)link\.coupang\.com$/i,
   /(?:^|\.)influencers\.coupang\.com$/i,
+  /(?:^|\.)musinsa\.com$/i,
+  /(?:^|\.)smartstore\.naver\.com$/i,
+  /(?:^|\.)shopping\.naver\.com$/i,
+  /(?:^|\.)search\.shopping\.naver\.com$/i,
+  /(?:^|\.)brand\.naver\.com$/i,
 ];
+
+/**
+ * 커머스 URL 의 채널 판정.
+ */
+export type CommerceChannel = 'COUPANG' | 'MUSINSA' | 'NAVER';
+
+export function detectCommerceChannel(url: string): CommerceChannel | null {
+  const host = extractHost(url);
+  if (!host) return null;
+  if (/coupang\.com$/i.test(host)) return 'COUPANG';
+  if (/musinsa\.com$/i.test(host)) return 'MUSINSA';
+  if (/naver\.com$/i.test(host)) return 'NAVER';
+  return null;
+}
 
 export function isCommerceUrl(url: string): boolean {
   const host = extractHost(url);

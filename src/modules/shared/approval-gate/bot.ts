@@ -383,6 +383,54 @@ bot.on('message:text', async (ctx, next) => {
   const urls = extractUrls(text);
   if (urls.length === 0) return;
 
+  // 대기 카드에 답장으로 커머스 URL 던진 경우 → 하이브리드 Pipeline A 재실행
+  const replyToId = ctx.message.reply_to_message?.message_id;
+  if (replyToId) {
+    const { getPendingMatch, clearPendingMatch } = await import('./pending-match.js');
+    const pending = await getPendingMatch(replyToId);
+    if (pending) {
+      const commerceUrl = urls.find((u) => isCommerceUrl(u));
+      if (!commerceUrl) {
+        await ctx.reply('⚠️ 답장에 커머스 URL (쿠팡·무신사·네이버) 이 없어요.');
+        return;
+      }
+      await ctx.reply(`🔁 하이브리드 재실행: benchmarkId=${pending.benchmarkPostId.slice(0,8)} · ${commerceUrl.slice(0,60)}...`);
+      try {
+        const b = await prisma.benchmarkPost.findUnique({
+          where: { id: pending.benchmarkPostId },
+          select: { text: true, mediaUrls: true, permalink: true, inboundLinkId: true },
+        });
+        if (!b) { await ctx.reply('❌ 벤치마크 조회 실패'); return; }
+
+        // InboundLink 에 manualCommerceUrl 저장 (다음 자동 실행에도 하이브리드로 잡히게)
+        if (b.inboundLinkId) {
+          await prisma.inboundLink.update({
+            where: { id: b.inboundLinkId },
+            data: { manualCommerceUrl: commerceUrl },
+          }).catch((e) => logger.warn({ e }, 'manualCommerceUrl 저장 실패'));
+        }
+
+        const outcome = await runPipelineA({
+          accountId: pending.accountId,
+          sourceMediaUrls: b.mediaUrls,
+          sourceText: b.text,
+          sourceUrl: b.permalink,
+          explicitCommerceUrl: commerceUrl,
+        });
+        if (outcome.status === 'PENDING_APPROVAL') {
+          await ctx.reply(`✅ 새 승인 카드 발송 (post=${outcome.postId.slice(0,8)}). 확인 후 승인/리젝 하세요.`);
+          await clearPendingMatch(replyToId);
+        } else {
+          await ctx.reply(`❌ 재실행 실패: stage=${outcome.stage} · ${outcome.reason}`);
+        }
+      } catch (err) {
+        logger.error({ err }, 'pending-match reply 처리 실패');
+        await ctx.reply(`❌ 처리 실패: ${(err as Error).message}`);
+      }
+      return;
+    }
+  }
+
   const { benchmarkUrls, commerceUrls } = splitBenchmarkAndCommerce(text);
   const supported = benchmarkUrls.filter((u) => detectPlatform(u) !== 'UNKNOWN');
   if (supported.length === 0) {

@@ -1,4 +1,4 @@
-export type CommerceChannelKind = 'COUPANG' | 'MUSINSA';
+export type CommerceChannelKind = 'COUPANG' | 'MUSINSA' | 'NAVER';
 
 export interface CommerceSearchResult {
   channel: CommerceChannelKind;

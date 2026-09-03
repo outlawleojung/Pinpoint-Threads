@@ -70,36 +70,26 @@ export async function runShoppingForAccount(
   const recentBenchmarkIdsUsed = await getRecentlyUsedBenchmarkIds(account.id, DUPLICATE_LOOKBACK_DAYS);
 
   const lookbackDate = new Date(Date.now() - BENCHMARK_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
-  // 자동 발행 정확도를 위해 **하이브리드-only**: manualCommerceUrl 이 붙은 InboundLink 에서 승격된 벤치마크만.
-  // Product Matcher 자동 검색의 오매칭 이슈 회피 (사용자님 지정 URL 그대로 씀).
-  // Prisma 두 모델 간 relation 미정의 → 2-step 쿼리.
-  const hybridInboundIds = (await prisma.inboundLink.findMany({
-    where: { manualCommerceUrl: { not: null } },
-    select: { id: true },
-  })).map((x) => x.id);
-
-  const candidates = hybridInboundIds.length === 0
-    ? []
-    : await prisma.benchmarkPost.findMany({
-        where: {
-          contentType: ContentType.SHOPPING,
-          collectedAt: { gte: lookbackDate },
-          mediaUrls: { isEmpty: false },
-          id: { notIn: Array.from(recentBenchmarkIdsUsed) },
-          inboundLinkId: { in: hybridInboundIds },
-        },
-        orderBy: [{ likesCount: 'desc' }, { collectedAt: 'desc' }],
-        take: slotsLeft * 6,
-        select: {
-          id: true,
-          permalink: true,
-          text: true,
-          mediaUrls: true,
-          inboundLinkId: true,
-          likesCount: true,
-          viralFactors: true,
-        },
-      });
+  // 하이브리드 + 자동 매칭 모두 후보. 승인 카드에서 사용자님이 매칭 확인 후 승인/리젝.
+  const candidates = await prisma.benchmarkPost.findMany({
+    where: {
+      contentType: ContentType.SHOPPING,
+      collectedAt: { gte: lookbackDate },
+      mediaUrls: { isEmpty: false },
+      id: { notIn: Array.from(recentBenchmarkIdsUsed) },
+    },
+    orderBy: [{ likesCount: 'desc' }, { collectedAt: 'desc' }],
+    take: slotsLeft * 6,
+    select: {
+      id: true,
+      permalink: true,
+      text: true,
+      mediaUrls: true,
+      inboundLinkId: true,
+      likesCount: true,
+      viralFactors: true,
+    },
+  });
 
   if (candidates.length === 0) {
     return [{ status: 'skipped_no_candidate', reason: `SHOPPING 벤치마크 후보 없음 (14일 재사용 제외 · 30일 수집만)` }];
@@ -162,6 +152,18 @@ export async function runShoppingForAccount(
           'shopping post sent for approval (waiting user)',
         );
       } else {
+        // 매칭 실패 (vision-failed / no-candidate 등) → 사용자님에게 URL 답장 대기 카드 발송
+        if (outcome.stage === 'matcher') {
+          const { sendMatchWaitingCard } = await import('../../shared/approval-gate/pending-match.js');
+          await sendMatchWaitingCard({
+            benchmarkPostId: b.id,
+            accountId: account.id,
+            accountHandle: account.handle,
+            benchmarkText: b.text,
+            benchmarkPermalink: b.permalink,
+            benchmarkMediaUrls: b.mediaUrls,
+          });
+        }
         results.push({
           status: 'failed',
           benchmarkPostId: b.id,
@@ -187,21 +189,47 @@ export async function runShoppingForAccount(
  */
 async function getRecentlyUsedBenchmarkIds(accountId: string, days: number): Promise<Set<string>> {
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-  const posts = await prisma.post.findMany({
-    where: {
-      accountId,
-      kind: PostKind.SHOPPING,
-      createdAt: { gte: since },
-      state: { notIn: [PostState.REJECTED, PostState.FAILED] },
-    },
-    select: {
-      sourceItem: { select: { sourceUrl: true } },
-    },
-  });
-  const sourceUrls = posts.map((p) => p.sourceItem?.sourceUrl).filter((u): u is string => !!u);
-  if (sourceUrls.length === 0) return new Set();
+  // 두 종류의 벤치마크 제외:
+  //   1) 이 계정에서 최근 N일 이내 발행·승인된 벤치마크 (계정별 중복 방지)
+  //   2) **한 번도 PUBLISHED 된 적 없이 REJECTED 만 있는 벤치마크** — 벤치마크 자체 결함
+  //      (다중 비디오 누락 · 상품 오매칭 · 카피 부적합 등) → 전역 블랙리스트
+  //      PUBLISHED 이력이 있으면 좋은 벤치마크로 간주 · 계속 사용
+  const [postsForAccount, allShoppingPosts] = await Promise.all([
+    prisma.post.findMany({
+      where: {
+        accountId,
+        kind: PostKind.SHOPPING,
+        createdAt: { gte: since },
+        state: { notIn: [PostState.REJECTED, PostState.FAILED] },
+      },
+      select: { sourceItem: { select: { sourceUrl: true } } },
+    }),
+    prisma.post.findMany({
+      where: { kind: PostKind.SHOPPING },
+      select: { state: true, sourceItem: { select: { sourceUrl: true } } },
+    }),
+  ]);
+  // 소스 URL 별 published/rejected 카운트
+  const stats = new Map<string, { pub: number; rej: number }>();
+  for (const p of allShoppingPosts) {
+    const url = p.sourceItem?.sourceUrl;
+    if (!url) continue;
+    const s = stats.get(url) ?? { pub: 0, rej: 0 };
+    if (p.state === PostState.PUBLISHED) s.pub += 1;
+    if (p.state === PostState.REJECTED) s.rej += 1;
+    stats.set(url, s);
+  }
+  const excludeUrls = new Set<string>();
+  for (const p of postsForAccount) {
+    if (p.sourceItem?.sourceUrl) excludeUrls.add(p.sourceItem.sourceUrl);
+  }
+  for (const [url, s] of stats) {
+    // 한번도 발행 못하고 리젝만 쌓인 벤치마크 = 결함 → 제외
+    if (s.pub === 0 && s.rej >= 1) excludeUrls.add(url);
+  }
+  if (excludeUrls.size === 0) return new Set();
   const benches = await prisma.benchmarkPost.findMany({
-    where: { permalink: { in: sourceUrls } },
+    where: { permalink: { in: Array.from(excludeUrls) } },
     select: { id: true },
   });
   return new Set(benches.map((b) => b.id));
