@@ -205,6 +205,7 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
     deeplinkUrl: matched.result.deeplinkUrl,
     accountId: account.id,
     personaPrompt: account.personaPrompt,
+    channel: matched.result.channel,
   });
 
   // 12. Post 업데이트 (모든 필드 채워짐)

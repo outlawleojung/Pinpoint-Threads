@@ -16,6 +16,14 @@ import { logger } from '../../../config/logger.js';
 export const LEGAL_DISCLAIMER =
   '이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.';
 
+// 채널별 공정위 문구. 쿠팡만 파트너스 수수료 · 무신사·네이버는 제휴 수수료 없음 (단순 링크).
+function disclaimerFor(channel?: 'COUPANG' | 'MUSINSA' | 'NAVER'): string {
+  if (channel === 'MUSINSA' || channel === 'NAVER') {
+    return '※ 상품 정보를 공유하는 게시물입니다.';
+  }
+  return LEGAL_DISCLAIMER; // COUPANG 기본
+}
+
 const LeadResultSchema = z.object({
   lead: z.string().min(4).max(80),
 });
@@ -27,6 +35,7 @@ export interface ReplyComposeInput {
   deeplinkUrl: string;
   accountId: string;         // 페르소나 다변화 seed
   personaPrompt?: string;
+  channel?: 'COUPANG' | 'MUSINSA' | 'NAVER';
 }
 
 export interface ReplyComposeResult {
@@ -120,7 +129,7 @@ export async function composeReply(input: ReplyComposeInput): Promise<ReplyCompo
   // Threads 자동 링크 미리보기 카드 방지: URL 앞에 zero-width space 삽입.
   // 브라우저는 여전히 클릭 가능한 URL로 인식하지만 Threads의 URL 감지·OG fetch는 회피.
   const maskedUrl = `​${input.deeplinkUrl}`;
-  const text = [labeledLead, maskedUrl, '', LEGAL_DISCLAIMER].join('\n');
+  const text = [labeledLead, maskedUrl, '', disclaimerFor(input.channel)].join('\n');
   logger.debug({ lead, textLength: text.length }, 'composeReply');
   return { text, lead };
 }
