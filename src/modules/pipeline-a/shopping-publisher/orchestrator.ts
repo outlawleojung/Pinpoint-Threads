@@ -128,9 +128,32 @@ export async function runShoppingForAccount(
           })
         : null;
 
+      // Threads 벤치마크에 mp4 없으면 Playwright 재확인 (어댑터가 media_type 힌트 못 잡은 케이스 구제)
+      let effectiveMedia = b.mediaUrls;
+      const isThreads = b.permalink?.includes('threads.') ?? false;
+      const hasMp4 = b.mediaUrls.some((u) => /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/'));
+      if (isThreads && !hasMp4 && b.permalink) {
+        try {
+          const { extractThreadsVideoUrls, pickBestMp4s } = await import('../../../infra/playwright-threads-video.js');
+          const { mp4Urls } = await extractThreadsVideoUrls(b.permalink);
+          const bestMp4s = pickBestMp4s(mp4Urls);
+          if (bestMp4s.length > 0) {
+            // 이미지 슬롯 앞에 비디오를 배치 (총 슬롯 수는 max 10 유지 · Threads 캐러셀 하드리밋)
+            effectiveMedia = [...bestMp4s, ...b.mediaUrls].slice(0, 10);
+            await prisma.benchmarkPost.update({
+              where: { id: b.id },
+              data: { mediaUrls: effectiveMedia },
+            }).catch(() => {});
+            logger.info({ benchmarkId: b.id, mp4Count: bestMp4s.length }, 'playwright rescue: video URLs recovered');
+          }
+        } catch (err) {
+          logger.warn({ err, benchmarkId: b.id }, 'playwright rescue failed · proceeding with image-only');
+        }
+      }
+
       const outcome = await runPipelineA({
         accountId: account.id,
-        sourceMediaUrls: b.mediaUrls,
+        sourceMediaUrls: effectiveMedia,
         sourceText: b.text,
         sourceUrl: b.permalink,
         explicitCommerceUrl: inboundLink?.manualCommerceUrl ?? undefined,
