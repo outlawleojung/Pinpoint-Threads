@@ -138,13 +138,17 @@ export async function runShoppingForAccount(
           const { mp4Urls } = await extractThreadsVideoUrls(b.permalink);
           const bestMp4s = pickBestMp4s(mp4Urls);
           if (bestMp4s.length > 0) {
-            // 이미지 슬롯 앞에 비디오를 배치 (총 슬롯 수는 max 10 유지 · Threads 캐러셀 하드리밋)
-            effectiveMedia = [...bestMp4s, ...b.mediaUrls].slice(0, 10);
+            // Playwright 가 HLS/DASH 청크·프리로드 등 여러 mp4 요청을 잡을 수 있음.
+            // 원본 벤치마크 슬롯 수 (Apify 가 인식한 실 미디어 수) 만큼만 유지 → 청크 노이즈 제거.
+            const cap = Math.max(1, b.mediaUrls.length);
+            const capped = bestMp4s.slice(0, cap);
+            // 이미지 슬롯을 비디오로 교체 (같은 개수 유지)
+            effectiveMedia = capped;
             await prisma.benchmarkPost.update({
               where: { id: b.id },
               data: { mediaUrls: effectiveMedia },
             }).catch(() => {});
-            logger.info({ benchmarkId: b.id, mp4Count: bestMp4s.length }, 'playwright rescue: video URLs recovered');
+            logger.info({ benchmarkId: b.id, mp4Total: bestMp4s.length, kept: capped.length, cap }, 'playwright rescue: video URLs recovered');
           }
         } catch (err) {
           logger.warn({ err, benchmarkId: b.id }, 'playwright rescue failed · proceeding with image-only');
