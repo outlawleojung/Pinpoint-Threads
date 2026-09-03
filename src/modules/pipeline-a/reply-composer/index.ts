@@ -16,10 +16,13 @@ import { logger } from '../../../config/logger.js';
 export const LEGAL_DISCLAIMER =
   '이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.';
 
-// 채널별 공정위 문구. 쿠팡만 파트너스 수수료 · 무신사·네이버는 제휴 수수료 없음 (단순 링크).
+// 채널별 공정위 대가성 문구. 세 채널 모두 수수료 받는 제휴 링크 → 대가성 명시 필수.
 function disclaimerFor(channel?: 'COUPANG' | 'MUSINSA' | 'NAVER'): string {
-  if (channel === 'MUSINSA' || channel === 'NAVER') {
-    return '※ 상품 정보를 공유하는 게시물입니다.';
+  if (channel === 'MUSINSA') {
+    return '이 포스팅은 무신사 큐레이터 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.';
+  }
+  if (channel === 'NAVER') {
+    return '이 포스팅은 네이버 쇼핑 제휴 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.';
   }
   return LEGAL_DISCLAIMER; // COUPANG 기본
 }
