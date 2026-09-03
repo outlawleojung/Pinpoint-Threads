@@ -55,6 +55,7 @@ export async function sendMatchWaitingCard(input: {
         ? u.split('?')[0] + '.mp4' + (u.includes('?') ? '?' + u.split('?').slice(1).join('?') : '')
         : u;
 
+    let groupMsgIds: number[] = [];
     if (media.length >= 2) {
       const group = media.map((url, i) => ({
         type: (isVideoUrl(url) ? 'video' : 'photo') as 'photo' | 'video',
@@ -63,6 +64,8 @@ export async function sendMatchWaitingCard(input: {
       }));
       const msgs = await bot.api.sendMediaGroup(env.TELEGRAM_ADMIN_CHAT_ID, group);
       msgId = msgs[0]?.message_id ?? 0;
+      // 앨범(미디어 그룹)은 여러 메시지 → 사용자가 어느 이미지에 답장해도 매칭되게 전부 저장
+      groupMsgIds = msgs.map((m) => m.message_id);
     } else if (media.length === 1) {
       const only = withExt(media[0]!);
       const msg = isVideoUrl(only)
@@ -80,8 +83,11 @@ export async function sendMatchWaitingCard(input: {
       accountHandle: input.accountHandle,
       createdAt: new Date().toISOString(),
     };
-    await redisConnection.set(KEY_PREFIX + msgId, JSON.stringify(entry), 'EX', TTL_SEC);
-    logger.info({ msgId, benchmarkPostId: input.benchmarkPostId, handle: input.accountHandle }, 'match-waiting card sent');
+    // 앨범이면 모든 메시지 ID 에 엔트리 저장 (사용자가 어느 이미지에 답장해도 매칭)
+    const idsToStore = groupMsgIds.length > 0 ? groupMsgIds : [msgId];
+    const payload = JSON.stringify(entry);
+    await Promise.all(idsToStore.map((id) => redisConnection.set(KEY_PREFIX + id, payload, 'EX', TTL_SEC)));
+    logger.info({ msgId, groupMsgIds: idsToStore, benchmarkPostId: input.benchmarkPostId, handle: input.accountHandle }, 'match-waiting card sent');
     return { msgId };
   } catch (err) {
     logger.error({ err, benchmarkPostId: input.benchmarkPostId }, 'sendMatchWaitingCard failed');
