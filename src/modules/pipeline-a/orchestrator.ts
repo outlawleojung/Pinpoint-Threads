@@ -55,21 +55,35 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
   const account = await prisma.account.findUnique({ where: { id: input.accountId } });
   if (!account) return { status: 'REJECTED', stage: 'account', reason: 'account not found' };
 
-  // 2. SourceItem 생성 (dedup by contentHash)
+  // 2. SourceItem 생성/재사용 (dedup: sourceUrl 우선 · 없으면 contentHash)
+  //    sourceUrl 이 있으면 그 URL 당 SourceItem 1개 유지 (mediaUrls 는 후속 재추출로 바뀔 수 있어
+  //    contentHash 만으로 upsert 하면 sourceUrl UNIQUE 제약 위반).
   const contentHash = createHash('sha256')
     .update((input.sourceUrl ?? '') + '|' + input.sourceMediaUrls.join(','))
     .digest('hex');
-  const source = await prisma.sourceItem.upsert({
-    where: { contentHash },
-    update: {},
-    create: {
-      sourceUrl: input.sourceUrl ?? `manual://${contentHash.slice(0, 12)}`,
-      contentHash,
-      rawText: input.sourceText,
-      mediaUrls: input.sourceMediaUrls,
-      language: input.language,
-    },
-  });
+  const source = input.sourceUrl
+    ? await prisma.sourceItem.upsert({
+        where: { sourceUrl: input.sourceUrl },
+        update: {},
+        create: {
+          sourceUrl: input.sourceUrl,
+          contentHash,
+          rawText: input.sourceText,
+          mediaUrls: input.sourceMediaUrls,
+          language: input.language,
+        },
+      })
+    : await prisma.sourceItem.upsert({
+        where: { contentHash },
+        update: {},
+        create: {
+          sourceUrl: `manual://${contentHash.slice(0, 12)}`,
+          contentHash,
+          rawText: input.sourceText,
+          mediaUrls: input.sourceMediaUrls,
+          language: input.language,
+        },
+      });
 
   // 3. Post draft
   let post = await prisma.post.create({
