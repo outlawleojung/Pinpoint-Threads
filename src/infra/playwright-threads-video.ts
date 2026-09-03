@@ -40,6 +40,14 @@ export interface ThreadsVideoExtractResult {
  * Threads 게시글 URL 에서 실 mp4 URL 을 추출.
  * 게시글이 비디오 포함 아니면 빈 배열.
  */
+/**
+ * Threads URL 에서 shortcode 추출 (/post/{shortcode}).
+ */
+function extractShortcode(url: string): string | null {
+  const m = url.match(/\/post\/([A-Za-z0-9_-]+)/);
+  return m?.[1] ?? null;
+}
+
 export async function extractThreadsVideoUrls(url: string): Promise<ThreadsVideoExtractResult> {
   const browser = await getBrowser();
   const context = await browser.newContext({
@@ -50,28 +58,36 @@ export async function extractThreadsVideoUrls(url: string): Promise<ThreadsVideo
   });
   const page = await context.newPage();
 
-  // 우리는 페이지 최상단 (target 게시글) 의 비디오만 원함.
-  // 네트워크 캡처는 추천글까지 포함 → DOM 에서 첫 <article>·비디오 슬롯만 추출.
+  // 페이지엔 target 게시글 + 추천글 수십 개가 함께 렌더됨.
+  // 각 <video> 의 부모 [role="link"] 의 permalink 에서 shortcode 를 비교해
+  // **target 게시글 비디오만** 정확히 골라냄 (추천글 오염 방지).
+  const shortcode = extractShortcode(url);
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     // JS 렌더 + 미디어 로드 대기
     await page.waitForTimeout(6000);
 
-    // 첫 번째 <article> 요소 내부의 <video> src 만 추출 (target 게시글)
-    const videoSrcs: string[] = await page.evaluate(() => {
-      // @ts-expect-error - browser context
-      const article = document.querySelector('article');
-      // @ts-expect-error - browser context
-      const root = article ?? document;
-      return Array.from(root.querySelectorAll('video'))
-        .map((v: any) => v.src || v.currentSrc)
-        .filter((s: string) => s && s.includes('.mp4'));
-    });
+    const videoSrcs: string[] = await page.evaluate((sc: string | null) => {
+      const out: string[] = [];
+      // @ts-expect-error - browser context (document 는 페이지 컨텍스트에 존재)
+      document.querySelectorAll('video').forEach((v: any) => {
+        const src = v.src || v.currentSrc;
+        if (!src || !src.includes('.mp4')) return;
+        // 이 video 를 감싼 게시글 컨테이너의 permalink
+        const post = v.closest('[role="link"], article, [data-pressable-container]');
+        const permalink = post?.querySelector('a[href*="/post/"]')?.getAttribute('href') ?? null;
+        // shortcode 매칭되는 것만 (매칭 불가 시 sc 없으면 전체 통과)
+        if (!sc || (permalink && permalink.includes(sc))) {
+          out.push(src);
+        }
+      });
+      return out;
+    }, shortcode);
 
     const capturedMp4 = new Set<string>(videoSrcs);
     logger.info(
-      { url, mp4Count: capturedMp4.size },
-      'threads video extract done (article-scoped)',
+      { url, shortcode, mp4Count: capturedMp4.size },
+      'threads video extract done (shortcode-matched)',
     );
     return { mp4Urls: Array.from(capturedMp4), fetchedAt: new Date() };
   } catch (err) {

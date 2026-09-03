@@ -182,13 +182,15 @@ async function normalizeApifyItem(
   // 실행 트리거 (Apify 가 이미 mp4 잘 리턴하면 스킵 — 이 경우 Playwright 는 오히려 오염원):
   //   1) media_type='video'/'carousel' 인데 mediaUrls 에 mp4 없음 (Apify 가 커버 프레임만 리턴한 경우)
   //   2) mediaUrls 중 video_default_cover_frame 마커 포함 (교체 필요)
+  // Playwright 는 이제 shortcode 로 target 게시글 비디오만 정확히 잡음 (추천글 오염 X).
+  // Apify 가 mp4 이미 주면 그대로 · 아니면 비디오 게시글일 때 Playwright 로 보강.
   const rawMediaType = String(item.media_type ?? '').toLowerCase();
   const alreadyHasMp4 = result.mediaUrls.some((u) => /\.mp4(?:\?|$)/i.test(u));
   const hasCoverFrameMarker = result.mediaUrls.some((u) => u.includes('video_default_cover_frame'));
   const shouldTryVideo =
     !alreadyHasMp4 && (
       rawMediaType === 'video' ||
-      (rawMediaType === 'carousel' && hasCoverFrameMarker) ||
+      rawMediaType === 'carousel' ||
       hasCoverFrameMarker
     );
 
