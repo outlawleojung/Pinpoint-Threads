@@ -383,7 +383,55 @@ bot.on('message:text', async (ctx, next) => {
   const urls = extractUrls(text);
   if (urls.length === 0) return;
 
-  // 대기 카드에 답장으로 커머스 URL 던진 경우 → 하이브리드 Pipeline A 재실행
+  // 방식 1: "코드 URL" 일반 메시지 (텔레그램 답장 차단 회피 · 권장)
+  //   예: "K42 https://link.coupang.com/a/..."
+  const codeMatch = text.match(/^\s*([A-Za-z0-9]{4})\b/);
+  if (codeMatch) {
+    const { getPendingByCode, clearPendingByCode } = await import('./pending-match.js');
+    const code = codeMatch[1]!.toUpperCase();
+    const pending = await getPendingByCode(code);
+    if (pending) {
+      const commerceUrl = urls.find((u) => isCommerceUrl(u));
+      if (!commerceUrl) {
+        await ctx.reply(`⚠️ [${code}] 커머스 URL (쿠팡·무신사·네이버) 이 없어요.`);
+        return;
+      }
+      await ctx.reply(`🔁 [${code}] 하이브리드 재실행: ${pending.accountHandle} · ${commerceUrl.slice(0, 50)}...`);
+      try {
+        const b = await prisma.benchmarkPost.findUnique({
+          where: { id: pending.benchmarkPostId },
+          select: { text: true, mediaUrls: true, permalink: true, inboundLinkId: true },
+        });
+        if (!b) { await ctx.reply('❌ 벤치마크 조회 실패'); return; }
+        if (b.inboundLinkId) {
+          await prisma.inboundLink.update({
+            where: { id: b.inboundLinkId },
+            data: { manualCommerceUrl: commerceUrl },
+          }).catch((e) => logger.warn({ e }, 'manualCommerceUrl 저장 실패'));
+        }
+        const outcome = await runPipelineA({
+          accountId: pending.accountId,
+          sourceMediaUrls: b.mediaUrls,
+          sourceText: b.text,
+          sourceUrl: b.permalink,
+          explicitCommerceUrl: commerceUrl,
+        });
+        if (outcome.status === 'PENDING_APPROVAL') {
+          await ctx.reply(`✅ [${code}] 새 승인 카드 발송. 확인 후 승인/리젝 하세요.`);
+          await clearPendingByCode(code);
+        } else {
+          await ctx.reply(`❌ [${code}] 재실행 실패: stage=${outcome.stage} · ${outcome.reason}`);
+        }
+      } catch (err) {
+        logger.error({ err, code }, 'code-based pending 처리 실패');
+        await ctx.reply(`❌ [${code}] 처리 실패: ${(err as Error).message}`);
+      }
+      return;
+    }
+    // 코드 매칭 실패 → 아래 일반 흐름으로 계속 (오탐 방지)
+  }
+
+  // 방식 2 (백업): 대기 카드에 답장으로 커머스 URL 던진 경우
   const replyToId = ctx.message.reply_to_message?.message_id;
   if (replyToId) {
     const { getPendingMatch, clearPendingMatch } = await import('./pending-match.js');

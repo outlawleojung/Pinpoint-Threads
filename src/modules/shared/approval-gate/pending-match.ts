@@ -15,6 +15,7 @@ import { logger } from '../../../config/logger.js';
  */
 
 const KEY_PREFIX = 'pending-match:';
+const CODE_PREFIX = 'pending-code:';
 const TTL_SEC = 24 * 60 * 60;
 
 export interface PendingMatchEntry {
@@ -22,6 +23,25 @@ export interface PendingMatchEntry {
   accountId: string;
   accountHandle: string;
   createdAt: string;
+  code?: string;
+}
+
+/**
+ * 벤치마크 ID 로부터 4자리 회신 코드 생성 (혼동 문자 제외 · 대문자+숫자).
+ * 같은 벤치마크는 항상 같은 코드 (idempotent).
+ */
+function makeCode(benchmarkPostId: string): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // I,O,0,1 제외
+  let hash = 0;
+  for (let i = 0; i < benchmarkPostId.length; i++) {
+    hash = (hash * 31 + benchmarkPostId.charCodeAt(i)) >>> 0;
+  }
+  let code = '';
+  for (let i = 0; i < 4; i++) {
+    code += alphabet[hash % alphabet.length];
+    hash = Math.floor(hash / alphabet.length) + benchmarkPostId.charCodeAt(i % benchmarkPostId.length);
+  }
+  return code;
 }
 
 export async function sendMatchWaitingCard(input: {
@@ -32,17 +52,19 @@ export async function sendMatchWaitingCard(input: {
   benchmarkPermalink: string;
   benchmarkMediaUrls: string[];
 }): Promise<{ msgId: number } | null> {
+  const code = makeCode(input.benchmarkPostId);
   const caption = [
-    '⚠️ 매칭 실패 — URL 답장 부탁',
+    `⚠️ 매칭 실패 — 회신코드 [ ${code} ]`,
     `계정: ${input.accountHandle}`,
     `벤치마크: ${input.benchmarkPermalink}`,
     '',
     '━━━ 원본 텍스트 ━━━',
     input.benchmarkText.slice(0, 400),
     '',
-    '📎 이 메시지에 답장으로 **쿠팡·무신사·네이버 상품 URL** 을 보내주세요.',
-    '   → 자동으로 하이브리드 발행 파이프에 투입됩니다.',
-    '   24시간 내 답장 없으면 대기 해제.',
+    `📎 일반 메시지로 아래처럼 보내주세요 (답장 X):`,
+    `   ${code} https://링크...`,
+    '   → 쿠팡·무신사·네이버 상품 URL. 자동 하이브리드 발행.',
+    '   24시간 내 미회신 시 대기 해제.',
   ].join('\n');
 
   const media = input.benchmarkMediaUrls.slice(0, 10);
@@ -82,12 +104,15 @@ export async function sendMatchWaitingCard(input: {
       accountId: input.accountId,
       accountHandle: input.accountHandle,
       createdAt: new Date().toISOString(),
+      code,
     };
-    // 앨범이면 모든 메시지 ID 에 엔트리 저장 (사용자가 어느 이미지에 답장해도 매칭)
-    const idsToStore = groupMsgIds.length > 0 ? groupMsgIds : [msgId];
     const payload = JSON.stringify(entry);
+    // 1) 회신코드로 저장 (답장 없이 "코드 URL" 일반 메시지로 매칭 · 텔레그램 답장 차단 회피)
+    await redisConnection.set(CODE_PREFIX + code, payload, 'EX', TTL_SEC);
+    // 2) 앨범 메시지 ID 로도 저장 (답장 가능한 환경 백업)
+    const idsToStore = groupMsgIds.length > 0 ? groupMsgIds : [msgId];
     await Promise.all(idsToStore.map((id) => redisConnection.set(KEY_PREFIX + id, payload, 'EX', TTL_SEC)));
-    logger.info({ msgId, groupMsgIds: idsToStore, benchmarkPostId: input.benchmarkPostId, handle: input.accountHandle }, 'match-waiting card sent');
+    logger.info({ msgId, code, groupMsgIds: idsToStore, benchmarkPostId: input.benchmarkPostId, handle: input.accountHandle }, 'match-waiting card sent');
     return { msgId };
   } catch (err) {
     logger.error({ err, benchmarkPostId: input.benchmarkPostId }, 'sendMatchWaitingCard failed');
@@ -107,4 +132,21 @@ export async function getPendingMatch(msgId: number): Promise<PendingMatchEntry 
 
 export async function clearPendingMatch(msgId: number): Promise<void> {
   await redisConnection.del(KEY_PREFIX + msgId);
+}
+
+/**
+ * 회신코드로 대기 엔트리 조회 (답장 없이 "코드 URL" 메시지 매칭).
+ */
+export async function getPendingByCode(code: string): Promise<PendingMatchEntry | null> {
+  const raw = await redisConnection.get(CODE_PREFIX + code.toUpperCase());
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as PendingMatchEntry;
+  } catch {
+    return null;
+  }
+}
+
+export async function clearPendingByCode(code: string): Promise<void> {
+  await redisConnection.del(CODE_PREFIX + code.toUpperCase());
 }
