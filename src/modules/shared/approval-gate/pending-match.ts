@@ -50,17 +50,21 @@ export async function sendMatchWaitingCard(input: {
   try {
     let msgId: number;
     const isVideoUrl = (u: string) => /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/');
+    const withExt = (u: string): string =>
+      isVideoUrl(u) && !/\.mp4(?:\?|$)/i.test(u)
+        ? u.split('?')[0] + '.mp4' + (u.includes('?') ? '?' + u.split('?').slice(1).join('?') : '')
+        : u;
 
     if (media.length >= 2) {
       const group = media.map((url, i) => ({
         type: (isVideoUrl(url) ? 'video' : 'photo') as 'photo' | 'video',
-        media: url,
+        media: withExt(url),
         caption: i === 0 ? caption : undefined,
       }));
       const msgs = await bot.api.sendMediaGroup(env.TELEGRAM_ADMIN_CHAT_ID, group);
       msgId = msgs[0]?.message_id ?? 0;
     } else if (media.length === 1) {
-      const only = media[0]!;
+      const only = withExt(media[0]!);
       const msg = isVideoUrl(only)
         ? await bot.api.sendVideo(env.TELEGRAM_ADMIN_CHAT_ID, only, { caption })
         : await bot.api.sendPhoto(env.TELEGRAM_ADMIN_CHAT_ID, only, { caption });

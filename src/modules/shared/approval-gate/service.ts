@@ -61,11 +61,20 @@ export async function sendApprovalRequest(postId: string): Promise<void> {
   const isVideoUrl = (u: string) =>
     /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/');
 
+  // Telegram Bot API 는 URL 뒤 확장자로 포맷 판별 → Cloudinary 비디오 URL 에 .mp4 확장자 없으면 실패.
+  // 확장자 없는 비디오 URL 에 자동으로 .mp4 부착.
+  const withExt = (u: string): string => {
+    if (isVideoUrl(u) && !/\.mp4(?:\?|$)/i.test(u)) {
+      return u.split('?')[0] + '.mp4' + (u.includes('?') ? '?' + u.split('?').slice(1).join('?') : '');
+    }
+    return u;
+  };
+
   if (mediaUrls.length >= 2) {
-    // Media group: 각 항목별 video/photo 타입 지정
+    // Media group: 각 항목별 video/photo 타입 지정 · 확장자 보정
     const group = mediaUrls.slice(0, 10).map((url, i) => ({
       type: (isVideoUrl(url) ? 'video' : 'photo') as 'photo' | 'video',
-      media: url,
+      media: withExt(url),
       caption: i === 0 ? caption : undefined,
     }));
     const groupMessages = await bot.api.sendMediaGroup(env.TELEGRAM_ADMIN_CHAT_ID, group);
@@ -77,7 +86,7 @@ export async function sendApprovalRequest(postId: string): Promise<void> {
       { reply_markup: keyboard },
     );
   } else if (mediaUrls.length === 1) {
-    const only = mediaUrls[0]!;
+    const only = withExt(mediaUrls[0]!);
     const msg = isVideoUrl(only)
       ? await bot.api.sendVideo(env.TELEGRAM_ADMIN_CHAT_ID, only, { caption, reply_markup: keyboard })
       : await bot.api.sendPhoto(env.TELEGRAM_ADMIN_CHAT_ID, only, { caption, reply_markup: keyboard });
