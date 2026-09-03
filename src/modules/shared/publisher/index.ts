@@ -90,11 +90,31 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
   let threadsPostId: string;
   let threadsReplyId: string | null = null;
   try {
-    const main = await client.publish({
-      accessToken,
-      text: post.generatedBody,
-      mediaUrls: post.mediaUrls ?? [],
-    });
+    // 본문 발행: Threads 비디오 컨테이너가 일시적 "ERROR: UNKNOWN" 반환하는 경우 있음 → 자동 재시도.
+    const mainHasVideo = (post.mediaUrls ?? []).some(
+      (u: string) => /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/'),
+    );
+    const mainMaxAttempts = mainHasVideo ? 3 : 2;
+    let main: { threadsPostId: string } | null = null;
+    let mainErr: unknown = null;
+    for (let attempt = 1; attempt <= mainMaxAttempts; attempt++) {
+      try {
+        main = await client.publish({
+          accessToken,
+          text: post.generatedBody,
+          mediaUrls: post.mediaUrls ?? [],
+        });
+        mainErr = null;
+        break;
+      } catch (err) {
+        mainErr = err;
+        logger.warn({ err, postId: post.id, attempt, mainMaxAttempts }, 'main publish attempt failed, retrying');
+        if (attempt < mainMaxAttempts) {
+          await new Promise((r) => setTimeout(r, 15_000 * attempt)); // 15s · 30s 백오프
+        }
+      }
+    }
+    if (!main) throw mainErr ?? new Error('main publish failed');
     threadsPostId = main.threadsPostId;
     logger.info({ postId: post.id, threadsPostId, handle: post.account.handle }, 'main post published');
 
