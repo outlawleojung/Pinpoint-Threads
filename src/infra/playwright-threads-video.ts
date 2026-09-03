@@ -87,36 +87,14 @@ export async function extractThreadsVideoUrls(url: string): Promise<ThreadsVideo
 }
 
 /**
- * Threads CDN 은 같은 비디오의 여러 화질/버퍼 URL 을 병렬로 서빙.
- * 여러 URL 이 같은 비디오의 화질 변형인지, 서로 다른 비디오인지 구분해야 함.
+ * Threads 게시글에 비디오가 있으면 최적 mp4 1개만 반환.
  *
- * 관찰: Meta CDN mp4 URL 파일명은 `<videoId>_<qualitySuffix>.mp4` 패턴.
- *   예: `AQMabc123_720p_dashinit.mp4` · `AQMabc123_360p_dashinit.mp4` (같은 videoId → dedup)
- *   반면 캐러셀의 다른 비디오는 videoId 자체가 다름.
+ * Threads CDN 은 같은 비디오의 여러 화질/버퍼 URL 을 다른 파일명·asset_id 로 서빙 (병렬 요청).
+ * 실 캐러셀 다중 비디오 vs 단일 비디오 여러 화질 구분 신뢰 불가 → 항상 첫 URL 1개만.
  *
- * 전략: 파일명 앞 12자 (Meta ID prefix) 로 그룹핑, 각 그룹당 첫 URL 만 유지.
- * 캐러셀 다중 비디오 지원.
+ * 다중 비디오 게시글은 드물고, 대부분 케이스에서 1개만 잡아도 정확 · 재발 리스크 최소.
  */
 export function pickBestMp4s(urls: string[]): string[] {
   if (urls.length === 0) return [];
-  const seen = new Set<string>();
-  const picks: string[] = [];
-  for (const url of urls) {
-    try {
-      const pathname = new URL(url).pathname;
-      const filename = pathname.split('/').pop() ?? url;
-      // Meta ID prefix: 파일명 앞 12자 (예: AQMabc123XY) — 같은 비디오의 화질 변형은 앞 12자 동일
-      const key = filename.slice(0, 12);
-      if (!seen.has(key)) {
-        seen.add(key);
-        picks.push(url);
-      }
-    } catch {
-      if (!seen.has(url)) {
-        seen.add(url);
-        picks.push(url);
-      }
-    }
-  }
-  return picks;
+  return [urls[0]!];
 }
