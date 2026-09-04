@@ -381,22 +381,26 @@ bot.on('message:text', async (ctx, next) => {
     return;
   }
   const urls = extractUrls(text);
-  if (urls.length === 0) return;
 
-  // 방식 1: "코드 URL" 일반 메시지 (텔레그램 답장 차단 회피 · 권장)
-  //   예: "K42 https://link.coupang.com/a/..."
-  const codeMatch = text.match(/^\s*([A-Za-z0-9]{4})\b/);
+  // 방식 1: "코드 URL" 또는 "코드 상품명" 일반 메시지 (텔레그램 링크 차단 회피 · 권장)
+  //   예: "4UNB https://link.coupang.com/a/..."  또는  "4UNB 팍스홈 쿠션양말 페이크삭스"
+  //   URL 없어도 처리하므로 urls.length 게이트보다 먼저 검사.
+  const codeMatch = text.match(/^\s*([A-Za-z0-9]{4})\b(.*)$/s);
   if (codeMatch) {
     const { getPendingByCode, clearPendingByCode } = await import('./pending-match.js');
     const code = codeMatch[1]!.toUpperCase();
+    const rest = (codeMatch[2] ?? '').trim().replace(/^[-·:]\s*/, ''); // "4UNB - 상품명" 의 "-" 제거
     const pending = await getPendingByCode(code);
     if (pending) {
       const commerceUrl = urls.find((u) => isCommerceUrl(u));
-      if (!commerceUrl) {
-        await ctx.reply(`⚠️ [${code}] 커머스 URL (쿠팡·무신사·네이버) 이 없어요.`);
+      // 상품명 = URL 제거한 나머지 텍스트
+      const productName = rest.replace(/https?:\/\/\S+/g, '').trim();
+      if (!commerceUrl && productName.length < 2) {
+        await ctx.reply(`⚠️ [${code}] 뒤에 커머스 URL 또는 상품명을 붙여주세요.\n예: ${code} 팍스홈 쿠션양말`);
         return;
       }
-      await ctx.reply(`🔁 [${code}] 하이브리드 재실행: ${pending.accountHandle} · ${commerceUrl.slice(0, 50)}...`);
+      const via = commerceUrl ? `URL ${commerceUrl.slice(0, 40)}` : `상품명 "${productName}"`;
+      await ctx.reply(`🔁 [${code}] 재실행: ${pending.accountHandle} · ${via}...`);
       try {
         const b = await prisma.benchmarkPost.findUnique({
           where: { id: pending.benchmarkPostId },
@@ -406,8 +410,8 @@ bot.on('message:text', async (ctx, next) => {
         if (b.inboundLinkId) {
           await prisma.inboundLink.update({
             where: { id: b.inboundLinkId },
-            data: { manualCommerceUrl: commerceUrl },
-          }).catch((e) => logger.warn({ e }, 'manualCommerceUrl 저장 실패'));
+            data: commerceUrl ? { manualCommerceUrl: commerceUrl } : { manualProductName: productName },
+          }).catch((e) => logger.warn({ e }, 'inboundLink 저장 실패'));
         }
         const outcome = await runPipelineA({
           accountId: pending.accountId,
@@ -415,9 +419,10 @@ bot.on('message:text', async (ctx, next) => {
           sourceText: b.text,
           sourceUrl: b.permalink,
           explicitCommerceUrl: commerceUrl,
+          productNameHint: commerceUrl ? undefined : productName,
         });
         if (outcome.status === 'PENDING_APPROVAL') {
-          await ctx.reply(`✅ [${code}] 새 승인 카드 발송. 확인 후 승인/리젝 하세요.`);
+          await ctx.reply(`✅ [${code}] 매칭 상품: ${outcome.matchedProductName?.slice(0,40)} (유사도 ${outcome.visionScore?.toFixed(2)}) · 승인 카드 확인`);
           await clearPendingByCode(code);
         } else {
           await ctx.reply(`❌ [${code}] 재실행 실패: stage=${outcome.stage} · ${outcome.reason}`);
@@ -430,6 +435,8 @@ bot.on('message:text', async (ctx, next) => {
     }
     // 코드 매칭 실패 → 아래 일반 흐름으로 계속 (오탐 방지)
   }
+
+  if (urls.length === 0) return;
 
   // 방식 2 (백업): 대기 카드에 답장으로 커머스 URL 던진 경우
   const replyToId = ctx.message.reply_to_message?.message_id;
