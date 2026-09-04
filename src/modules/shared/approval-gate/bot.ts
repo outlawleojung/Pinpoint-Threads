@@ -623,11 +623,14 @@ async function pickLeastUsedAccount(gender?: 'male' | 'female' | null) {
     select: { id: true, handle: true, audienceGender: true },
     orderBy: { handle: 'asc' },
   });
-  if (gender) {
-    // 상품 성별과 충돌하는 계정 제외 (unisex 계정은 통과)
-    accounts = accounts.filter(
-      (a) => a.audienceGender === 'unisex' || a.audienceGender === gender,
-    );
+  if (gender === 'male') {
+    accounts = accounts.filter((a) => a.audienceGender === 'male' || a.audienceGender === 'unisex');
+  } else if (gender === 'female') {
+    accounts = accounts.filter((a) => a.audienceGender === 'female' || a.audienceGender === 'unisex');
+  } else {
+    // 성별 애매(상품명에 남성/여성 단어 없음) → **남성 계정 제외**.
+    // 남성 상품은 "남성" 명시된 경우만 · 애매한 건 여성/유니섹스 계정으로 (남성 오발행 방지).
+    accounts = accounts.filter((a) => a.audienceGender !== 'male');
   }
   if (accounts.length === 0) return null;
   const counts = await Promise.all(
