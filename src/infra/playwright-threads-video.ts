@@ -62,6 +62,22 @@ export async function extractThreadsVideoUrls(url: string): Promise<ThreadsVideo
   // 각 <video> 의 부모 [role="link"] 의 permalink 에서 shortcode 를 비교해
   // **target 게시글 비디오만** 정확히 골라냄 (추천글 오염 방지).
   const shortcode = extractShortcode(url);
+
+  // 네트워크 캡처: 브라우저가 실제로 받아오는 비디오 CDN 응답을 잡음.
+  //   DOM 의 <video>.src 는 MSE·지연 로드로 6초 내 mp4 로 안 채워질 때가 많아 불안정.
+  //   스크롤을 안 하므로 화면 상단 target 게시글 비디오만 자동재생·로드됨 (추천글은 아래라 미로드).
+  //   Threads/IG 비디오 progressive URL 패턴: /o1/v/t16/ · 또는 .mp4
+  const isVideoCdnUrl = (u: string) => /\/o1\/v\/t\d+\//.test(u) || /\.mp4(?:\?|$)/i.test(u);
+  const networkMp4s: string[] = [];
+  page.on('response', (resp) => {
+    try {
+      const u = resp.url();
+      if (isVideoCdnUrl(u) && !networkMp4s.includes(u)) networkMp4s.push(u);
+    } catch {
+      /* ignore */
+    }
+  });
+
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     // JS 렌더 + 미디어 로드 대기
@@ -84,15 +100,18 @@ export async function extractThreadsVideoUrls(url: string): Promise<ThreadsVideo
       return out;
     }, shortcode);
 
-    const capturedMp4 = new Set<string>(videoSrcs);
+    // DOM shortcode-매칭 우선 (가장 정확). 없으면 네트워크 캡처 fallback (스크롤 안 해서 target 만 로드됨).
+    const domMp4s = Array.from(new Set(videoSrcs));
+    const chosen = domMp4s.length > 0 ? domMp4s : Array.from(new Set(networkMp4s));
     logger.info(
-      { url, shortcode, mp4Count: capturedMp4.size },
-      'threads video extract done (shortcode-matched)',
+      { url, shortcode, domCount: domMp4s.length, networkCount: networkMp4s.length, source: domMp4s.length > 0 ? 'dom' : 'network' },
+      'threads video extract done',
     );
-    return { mp4Urls: Array.from(capturedMp4), fetchedAt: new Date() };
+    return { mp4Urls: chosen, fetchedAt: new Date() };
   } catch (err) {
     logger.warn({ err, url }, 'threads video extract failed');
-    return { mp4Urls: [], fetchedAt: new Date() };
+    // 예외 나도 네트워크로 잡힌 게 있으면 사용
+    return { mp4Urls: Array.from(new Set(networkMp4s)), fetchedAt: new Date() };
   } finally {
     await context.close().catch(() => {});
   }
