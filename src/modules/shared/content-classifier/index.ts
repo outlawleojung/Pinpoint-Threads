@@ -20,12 +20,13 @@ export type Category = (typeof CATEGORIES)[number];
 export const AUDIENCE_GENDERS = ['male', 'female', 'unisex'] as const;
 export type AudienceGender = (typeof AUDIENCE_GENDERS)[number];
 
+// nullish: LLM 이 optional 필드에 null 을 넣기도 함 → null·undefined 모두 허용
 const ClassifyResultSchema = z.object({
   suitable: z.boolean(),
-  category: z.enum(CATEGORIES).optional(),
-  searchKeyword: z.string().min(1).max(30).optional(),
-  reason: z.string().optional(),
-  audience: z.enum(AUDIENCE_GENDERS).optional(),
+  category: z.enum(CATEGORIES).nullish().transform((v) => v ?? undefined),
+  searchKeyword: z.string().min(1).max(30).nullish().transform((v) => v ?? undefined),
+  reason: z.string().nullish().transform((v) => v ?? undefined),
+  audience: z.enum(AUDIENCE_GENDERS).nullish().transform((v) => v ?? undefined),
 });
 
 export type ClassifyResult = z.infer<typeof ClassifyResultSchema>;
