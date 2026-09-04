@@ -124,8 +124,10 @@ export async function resolveThreadsShareUrl(shareUrl: string): Promise<string |
   });
   const page = await context.newPage();
   try {
-    await page.goto(shareUrl, { waitUntil: 'networkidle', timeout: 30000 });
-    await page.waitForTimeout(2500);
+    // networkidle 은 Threads 스트리밍 연결로 30s 내 안 떠서 타임아웃 → null.
+    // og:url 은 서버 렌더 HTML 에 이미 있으므로 domcontentloaded + 짧은 대기로 충분.
+    await page.goto(shareUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForTimeout(3500);
     const result = await page.evaluate(() => {
       // @ts-expect-error - browser context
       const og = document.querySelector('meta[property="og:url"]')?.getAttribute('content');
