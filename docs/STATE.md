@@ -9,7 +9,7 @@ status: "active"
 **새 세션 시작 시 이 파일을 먼저 읽으세요.**
 
 Last updated: 2026-09-03 (상품명 발행 흐름 확정 · 성별·비디오·1계정 정책 · 비용 절감)
-Last commit: `a175007` (fix: /share URL 해석·FAILED 재시도·동영상 플래그·페이크삭스 카피·텍스트 재생성)
+Last commit: `4aebadd` (hardening: 발행 경로 실위험 11건 · PUBLISHING 스톨 복구·멱등·미러순서·오매칭폐기 등, minyoung 실발행 검증)
 직전 세션 로그: [docs/session-log/2026-09-03.md](session-log/2026-09-03.md)
 
 ### 핵심 흐름 (2026-09-03 후반 확정) — [manual-shopping-flow](08-decisions/manual-shopping-flow.md)
