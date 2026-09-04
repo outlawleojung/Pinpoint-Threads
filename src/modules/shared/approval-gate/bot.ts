@@ -413,9 +413,11 @@ bot.on('message:text', async (ctx, next) => {
             data: commerceUrl ? { manualCommerceUrl: commerceUrl } : { manualProductName: productName },
           }).catch((e) => logger.warn({ e }, 'inboundLink 저장 실패'));
         }
+        const { ensureBenchmarkVideo } = await import('../../pipeline-a/video-rescue.js');
+        const media = await ensureBenchmarkVideo(pending.benchmarkPostId, b.permalink, b.mediaUrls);
         const outcome = await runPipelineA({
           accountId: pending.accountId,
-          sourceMediaUrls: b.mediaUrls,
+          sourceMediaUrls: media,
           sourceText: b.text,
           sourceUrl: b.permalink,
           explicitCommerceUrl: commerceUrl,
@@ -516,19 +518,22 @@ bot.on('message:text', async (ctx, next) => {
         }
         // 벤치마크 확보 (승격됐으면 BenchmarkPost)
         const bench = ing.inboundLinkId
-          ? await prisma.benchmarkPost.findFirst({ where: { inboundLinkId: ing.inboundLinkId }, select: { text: true, mediaUrls: true, permalink: true } })
+          ? await prisma.benchmarkPost.findFirst({ where: { inboundLinkId: ing.inboundLinkId }, select: { id: true, text: true, mediaUrls: true, permalink: true } })
           : null;
         const src = bench ?? (ing.inboundLinkId ? await prisma.inboundLink.findUnique({ where: { id: ing.inboundLinkId }, select: { rawText: true, mediaUrls: true, url: true } }) : null);
         if (!src) { await ctx.reply(`⚠️ ${burl.slice(0,50)} 소스 확보 실패`); continue; }
         const mediaUrls = 'mediaUrls' in src ? src.mediaUrls : [];
         const sourceText = 'text' in src ? src.text : (src as any).rawText;
         const permalink = 'permalink' in src ? src.permalink : (src as any).url;
+        // 비디오 구제 (Apify 가 비디오 놓친 경우 Playwright 재확인)
+        const { ensureBenchmarkVideo } = await import('../../pipeline-a/video-rescue.js');
+        const media = await ensureBenchmarkVideo(bench?.id ?? null, permalink, mediaUrls);
         // 발행 계정: 첫 활성 계정 (다계정 확산은 추후) — 성별 필터는 승인 카드 육안으로 대체
         const acc = await prisma.account.findFirst({ where: { isActive: true }, orderBy: { handle: 'asc' }, select: { id: true, handle: true } });
         if (!acc) { await ctx.reply('⚠️ 활성 계정 없음'); continue; }
         const outcome = await runPipelineA({
           accountId: acc.id,
-          sourceMediaUrls: mediaUrls,
+          sourceMediaUrls: media,
           sourceText: sourceText ?? '',
           sourceUrl: permalink,
           productNameHint: productName,
