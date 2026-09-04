@@ -7,6 +7,8 @@ import { logger } from '../../../config/logger.js';
 import { prisma } from '../../../db/prisma.js';
 import { assertTransition } from '../../../state/post-state-machine.js';
 import { publishQueue } from '../../../queues/queues.js';
+import { generateCopy } from '../copywriter/index.js';
+import { composeReply } from '../../pipeline-a/reply-composer/index.js';
 
 type PostWithRelations = Post & {
   account: Account;
@@ -128,19 +130,93 @@ export async function sendApprovalRequest(postId: string): Promise<void> {
 
 type Action = 'approve' | 'regen-text' | 'regen-product' | 'reject';
 
-const ACTION_TO_STATE: Record<Action, PostState> = {
-  approve: PostState.APPROVED,
-  'regen-text': PostState.COPYWRITING,
-  'regen-product': PostState.MATCHING,
-  reject: PostState.REJECTED,
-};
+/**
+ * 텔레그램 "텍스트 재생성" — 같은 상품·소스로 카피/고정댓글만 다시 생성 후 승인 카드 재발송.
+ * 이전 카피를 회피 힌트로 넘겨 다른 각도의 문장이 나오게 함.
+ */
+async function regenerateCopyAndResend(postId: string): Promise<void> {
+  const post = await prisma.post.findUnique({
+    where: { id: postId },
+    include: { account: true, sourceItem: true, commerceProduct: true },
+  });
+  if (!post) throw new Error('post not found');
+  if (!post.commerceProduct) throw new Error('상품 정보 없음 · 재생성 불가');
+
+  const isVideoUrl = (u: string) => /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/');
+  const srcMedia = post.sourceMediaUrls.length ? post.sourceMediaUrls : post.mediaUrls;
+  const imageOnly = srcMedia.filter((u) => !isVideoUrl(u));
+  const channel = post.commerceProduct.channel as 'COUPANG' | 'MUSINSA' | 'NAVER';
+  const category = post.commerceProduct.category ?? undefined;
+  const deeplinkUrl = post.commerceProduct.deeplinkUrl ?? undefined;
+
+  const copy = await generateCopy({
+    sourceText: post.sourceItem?.rawText ?? '',
+    sourceImageUrl: imageOnly[0],
+    productName: post.commerceProduct.productName,
+    productCategory: category,
+    accountSeed: post.accountId,
+    accountId: post.accountId,
+    personaPrompt: post.account.personaPrompt,
+    deeplinkUrl,
+    channel,
+    ragEnabled: true,
+    factCheckEnabled: true,
+    regenAvoid: post.generatedBody
+      ? `이전 카피와 확실히 다른 문장·다른 각도로 (그대로 반복 금지): "${post.generatedBody}"`
+      : undefined,
+  });
+  const reply = await composeReply({
+    body: copy.body,
+    productName: post.commerceProduct.productName,
+    productCategory: category,
+    deeplinkUrl,
+    accountId: post.accountId,
+    personaPrompt: post.account.personaPrompt,
+    channel,
+  });
+  await prisma.post.update({
+    where: { id: postId },
+    data: { generatedBody: copy.body, generatedReply: reply.text },
+  });
+  // sendApprovalRequest 가 state → PENDING_APPROVAL 로 되돌리고 새 카드 발송
+  await sendApprovalRequest(postId);
+}
 
 export async function handleApprovalCallback(action: Action, postId: string): Promise<string> {
   const post = await prisma.post.findUnique({ where: { id: postId } });
   if (!post) return `Post ${postId} not found`;
 
-  const nextState = ACTION_TO_STATE[action];
-  // 이미 같은 상태이면 idempotent skip (프로그램·크론이 이미 마킹한 뒤 사용자 클릭 케이스)
+  // 상품 재검색: 자동 매처는 같은 검색어로 재실행해도 같은 top 을 반환해 실효 없음.
+  // 정확한 교체는 "리젝 → 정확한 상품명 재전송" 흐름이 맞음 → 상태 변경 없이 안내만.
+  if (action === 'regen-product') {
+    return '🔄 상품이 틀리면 리젝 후 정확한 상품명을 다시 보내주세요 (자동 재검색은 같은 결과라 생략)';
+  }
+
+  // 텍스트 재생성: PENDING_APPROVAL → COPYWRITING → (재생성) → PENDING_APPROVAL
+  if (action === 'regen-text') {
+    // PENDING_APPROVAL(정상) 또는 COPYWRITING(이전에 눌러 멈춘 카드) 에서 재생성 허용
+    if (post.state !== PostState.PENDING_APPROVAL && post.state !== PostState.COPYWRITING) {
+      return `현재 상태(${post.state})에선 재생성 불가`;
+    }
+    if (post.state === PostState.PENDING_APPROVAL) {
+      await prisma.post.update({ where: { id: postId }, data: { state: PostState.COPYWRITING } });
+    }
+    try {
+      await regenerateCopyAndResend(postId);
+      logger.info({ postId }, 'regen-text done · new approval card sent');
+      return '📝 텍스트 재생성 완료 · 새 승인 카드 확인';
+    } catch (err) {
+      logger.error({ postId, err }, 'regen-text failed');
+      // 실패 시 카드가 죽지 않게 PENDING_APPROVAL 복귀
+      await prisma.post
+        .update({ where: { id: postId }, data: { state: PostState.PENDING_APPROVAL } })
+        .catch(() => {});
+      return `⚠ 텍스트 재생성 실패: ${(err as Error).message}`;
+    }
+  }
+
+  // approve · reject
+  const nextState = action === 'approve' ? PostState.APPROVED : PostState.REJECTED;
   if (post.state === nextState) {
     return `이미 ${nextState} 상태`;
   }
@@ -171,13 +247,5 @@ export async function handleApprovalCallback(action: Action, postId: string): Pr
     }
   }
 
-  // TODO: regen-text · regen-product 큐 잡 투입 (별도 태스크)
-
-  const labels: Record<Action, string> = {
-    approve: '✅ 승인' + scheduleNote,
-    'regen-text': '📝 텍스트 재생성 (큐 미구현)',
-    'regen-product': '🔄 상품 재검색 (큐 미구현)',
-    reject: '🗑 폐기 처리',
-  };
-  return labels[action];
+  return action === 'approve' ? '✅ 승인' + scheduleNote : '🗑 폐기 처리';
 }
