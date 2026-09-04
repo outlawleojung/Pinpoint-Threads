@@ -9,28 +9,41 @@ import { logger } from '../../config/logger.js';
  *
  * @returns 발행에 쓸 mediaUrls (비디오 있으면 mp4 를 앞에 붙인 것 · 없으면 원본)
  */
+/**
+ * @param hasVideo 사용자가 명시한 원본 비디오 유무.
+ *   true  → mp4 확보까지 강하게 재시도 (원본에 비디오 확실히 있음)
+ *   false → Playwright 스킵 (원본 이미지 전용 · 헛돎 방지)
+ *   undefined → 자동 판단 (기존 동작 · 3회 재시도)
+ */
 export async function ensureBenchmarkVideo(
   benchmarkId: string | null,
   permalink: string | null | undefined,
   mediaUrls: string[],
+  hasVideo?: boolean,
 ): Promise<string[]> {
   const isThreads = permalink?.includes('threads.') ?? false;
   const hasMp4 = mediaUrls.some((u) => /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/'));
   if (!isThreads || hasMp4 || !permalink) return mediaUrls;
+  // 사용자가 "비디오 없음" 명시 → 스크래핑 스킵
+  if (hasVideo === false) {
+    logger.info({ benchmarkId }, 'video-rescue: 사용자 "비디오 없음" → 스킵');
+    return mediaUrls;
+  }
 
+  // "비디오 있음" 이면 확보까지 강하게 (8회), 미지정이면 3회
+  const maxAttempts = hasVideo === true ? 8 : 3;
   try {
     const { extractThreadsVideoUrls, pickBestMp4s } = await import('../../infra/playwright-threads-video.js');
-    // Playwright 추출이 불안정(될 때·안 될 때) → 최대 3회 재시도
     let bestMp4s: string[] = [];
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const { mp4Urls } = await extractThreadsVideoUrls(permalink);
-      bestMp4s = pickBestMp4s(mp4Urls); // 최대 1개
+      bestMp4s = pickBestMp4s(mp4Urls);
       if (bestMp4s.length > 0) break;
-      logger.info({ benchmarkId, attempt }, 'video-rescue: mp4 미발견 · 재시도');
+      logger.info({ benchmarkId, attempt, maxAttempts, hasVideo }, 'video-rescue: mp4 미발견 · 재시도');
       await new Promise((r) => setTimeout(r, 2000 * attempt));
     }
     if (bestMp4s.length === 0) {
-      logger.info({ benchmarkId, permalink }, 'video-rescue: 3회 시도 후에도 비디오 없음 (실제 image-only)');
+      logger.warn({ benchmarkId, permalink, hasVideo }, `video-rescue: ${maxAttempts}회 시도 후에도 비디오 못 잡음`);
       return mediaUrls;
     }
     // 원본 이미지 유지 · mp4 를 앞에 (총 슬롯 max 10)

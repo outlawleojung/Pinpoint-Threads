@@ -500,10 +500,17 @@ bot.on('message:text', async (ctx, next) => {
 
   // 방식 3 (권장): 벤치마크 URL + **상품명(텍스트)** → 상품명으로 쿠팡 검색 → Vision best 매칭 → 발행
   //   텔레그램이 쿠팡 링크를 차단하므로 링크 대신 상품명으로 (docs/08-decisions/manual-shopping-flow.md)
-  //   URL·커머스URL 을 텍스트에서 제거한 나머지를 상품명으로 간주.
+  //   URL·커머스URL·비디오플래그 를 텍스트에서 제거한 나머지를 상품명으로 간주.
+  //   비디오 플래그: "비디오 있음"/"비디오 없음" (사용자가 원본 비디오 유무 명시 → 재시도 판단)
+  //   있음=true · 없음=false · 미지정=undefined(자동 판단)
+  const hasVideoFlag: boolean | undefined =
+    /비디오\s*있음|영상\s*있음/.test(text) ? true
+    : /비디오\s*없음|영상\s*없음/.test(text) ? false
+    : undefined;
   const productName = text
     .split('\n').map((l) => l.trim())
     .filter((l) => l && !/^https?:\/\//i.test(l) && extractUrls(l).length === 0)
+    .filter((l) => !/^비디오\s*(있음|없음)$|^영상\s*(있음|없음)$/.test(l))
     .join(' ').trim();
   if (commerceUrls.length === 0 && productName.length >= 2) {
     await ctx.reply(`🔍 "${productName}" 로 상품 검색 + 발행 시작 (${supported.length}개 벤치마크)...`);
@@ -525,9 +532,10 @@ bot.on('message:text', async (ctx, next) => {
         const mediaUrls = 'mediaUrls' in src ? src.mediaUrls : [];
         const sourceText = 'text' in src ? src.text : (src as any).rawText;
         const permalink = 'permalink' in src ? src.permalink : (src as any).url;
-        // 비디오 구제 (Apify 가 비디오 놓친 경우 Playwright 재확인)
+        // 비디오 구제: 사용자가 "비디오 있음" 명시하면 mp4 확보까지 강하게 재시도.
+        // "비디오 없음" 이면 Playwright 스킵 (헛돎 방지). 미지정이면 자동 판단.
         const { ensureBenchmarkVideo } = await import('../../pipeline-a/video-rescue.js');
-        const media = await ensureBenchmarkVideo(bench?.id ?? null, permalink, mediaUrls);
+        const media = await ensureBenchmarkVideo(bench?.id ?? null, permalink, mediaUrls, hasVideoFlag);
         // 발행 대상 = 1계정. 상품명에서 성별 추론 → 맞는 계정 중 오늘 덜 발행한 계정 선택.
         const gender = inferGender(productName);
         const acc = await pickLeastUsedAccount(gender);
