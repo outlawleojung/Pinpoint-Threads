@@ -281,7 +281,7 @@ export function buildReply(deeplinkUrl: string | undefined): string {
 
 export async function generateCopy(input: CopywriteInput): Promise<CopywriteResult> {
   const factCheck = input.factCheckEnabled ?? Boolean(input.productName); // 상품 있으면 기본 ON
-  const maxRetries = input.factCheckMaxRetries ?? 2;
+  const maxRetries = input.factCheckMaxRetries ?? 1; // 비용 절감: 2→1 (최대 2회 생성)
 
   let body = await generateBody(input, 0);
   let lastReason: string | undefined;

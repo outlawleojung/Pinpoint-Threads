@@ -111,7 +111,7 @@ export async function composeReply(input: ReplyComposeInput): Promise<ReplyCompo
   ].join('\n');
 
   const response = await llm().complete({
-    tier: 'main',
+    tier: 'fast', // 비용 절감: 짧은 리드 한 줄 · Haiku 충분
     system,
     userParts: [{ type: 'text', text: userPrompt }],
     maxOutputTokens: 200,

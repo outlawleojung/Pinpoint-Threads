@@ -59,7 +59,8 @@ export async function matchProduct(input: MatchInput): Promise<MatchOutcome> {
   for (attempts = 1; attempts <= maxAttempts; attempts++) {
     let candidates: CommerceSearchResult[];
     try {
-      candidates = await primary.search(keyword, { limit: 5 });
+      // 비용 절감: 후보 5→3 (Vision 호출이 후보당 1회 · 가장 비쌈)
+      candidates = await primary.search(keyword, { limit: 3 });
     } catch (err) {
       logger.error({ err, attempts, channel: primary.channel }, 'product search failed');
       return { success: false, reason: 'error', attempts };
@@ -68,6 +69,18 @@ export async function matchProduct(input: MatchInput): Promise<MatchOutcome> {
       logger.info({ keyword, attempts }, 'no candidates');
       keyword = broadenKeyword(keyword);
       continue;
+    }
+
+    // 비용 절감: 상품명을 사용자가 지정한 경우(trustKeyword) Vision 완전 스킵.
+    // 검색 top 결과 = 사용자 지정 상품과 거의 일치 · 최종 승인 카드에서 육안 확인.
+    if (input.trustKeyword) {
+      const top = candidates[0]!;
+      const deeplinkUrl = await primary.generateDeeplink(top.productUrl);
+      logger.info({ candidate: top.productName, trusted: true, visionSkipped: true }, 'match by trusted keyword (top result · no vision)');
+      return {
+        success: true,
+        result: { channel: primary.channel, product: top, visionScore: 1, attempts, deeplinkUrl },
+      };
     }
 
     let bestCandidate: CommerceSearchResult | null = null;
