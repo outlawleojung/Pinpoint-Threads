@@ -71,15 +71,15 @@ export async function matchProduct(input: MatchInput): Promise<MatchOutcome> {
       continue;
     }
 
-    // 비용 절감: 상품명을 사용자가 지정한 경우(trustKeyword) Vision 완전 스킵.
-    // 검색 top 결과 = 사용자 지정 상품과 거의 일치 · 최종 승인 카드에서 육안 확인.
+    // 상품명을 사용자가 지정한 경우(trustKeyword): Vision 스킵 · 검색어와 **이름이 가장 비슷한 후보** 선택.
+    // coupang 이 top 을 항상 정확히 주지 않으므로 (예: "팍스홈" 검색에 "어썸H" 를 top 으로) 문자열 유사도로 재정렬.
     if (input.trustKeyword) {
-      const top = candidates[0]!;
-      const deeplinkUrl = await primary.generateDeeplink(top.productUrl);
-      logger.info({ candidate: top.productName, trusted: true, visionSkipped: true }, 'match by trusted keyword (top result · no vision)');
+      const best = pickByNameSimilarity(input.searchKeyword, candidates);
+      const deeplinkUrl = await primary.generateDeeplink(best.productUrl);
+      logger.info({ candidate: best.productName, keyword: input.searchKeyword, trusted: true }, 'match by trusted keyword (name-similar)');
       return {
         success: true,
-        result: { channel: primary.channel, product: top, visionScore: 1, attempts, deeplinkUrl },
+        result: { channel: primary.channel, product: best, visionScore: 1, attempts, deeplinkUrl },
       };
     }
 
@@ -124,6 +124,25 @@ export async function matchProduct(input: MatchInput): Promise<MatchOutcome> {
   }
 
   return { success: false, reason: 'vision-failed', attempts: maxAttempts };
+}
+
+/**
+ * 검색어와 상품명의 토큰 겹침으로 가장 비슷한 후보 선택.
+ * 사용자가 입력한 상품명의 단어들이 가장 많이 포함된 상품 = 정답에 가까움.
+ */
+function pickByNameSimilarity(keyword: string, candidates: CommerceSearchResult[]): CommerceSearchResult {
+  const kwTokens = keyword.split(/\s+/).filter((t) => t.length >= 2);
+  let best = candidates[0]!;
+  let bestScore = -1;
+  for (const c of candidates) {
+    const name = c.productName ?? '';
+    const hits = kwTokens.filter((t) => name.includes(t)).length;
+    if (hits > bestScore) {
+      bestScore = hits;
+      best = c;
+    }
+  }
+  return best;
 }
 
 function broadenKeyword(keyword: string): string {
