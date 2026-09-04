@@ -110,3 +110,45 @@ export function pickBestMp4s(urls: string[]): string[] {
   if (urls.length === 0) return [];
   return [urls[0]!];
 }
+
+/**
+ * Threads /share/ 단축 URL → 실제 게시글 URL(@user/post/id) 해석.
+ * JS 클라이언트 렌더라 fetch 로는 안 되고 브라우저 필요. 실패 시 null.
+ */
+export async function resolveThreadsShareUrl(shareUrl: string): Promise<string | null> {
+  const browser = await getBrowser();
+  const context = await browser.newContext({
+    userAgent:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+    locale: 'ko-KR',
+  });
+  const page = await context.newPage();
+  try {
+    await page.goto(shareUrl, { waitUntil: 'networkidle', timeout: 30000 });
+    await page.waitForTimeout(2500);
+    const result = await page.evaluate(() => {
+      // @ts-expect-error - browser context
+      const og = document.querySelector('meta[property="og:url"]')?.getAttribute('content');
+      // @ts-expect-error - browser context
+      const loc = location.href;
+      return { og, loc };
+    });
+    // og:url 우선 (트래킹 파라미터 없는 깔끔한 형태), 없으면 현재 위치
+    const candidate = (result.og && /\/@[^/]+\/post\//i.test(result.og))
+      ? result.og
+      : (/\/@[^/]+\/post\//i.test(result.loc) ? result.loc : null);
+    if (!candidate) return null;
+    // 트래킹 파라미터 제거
+    try {
+      const u = new URL(candidate);
+      return `${u.origin}${u.pathname}`;
+    } catch {
+      return candidate;
+    }
+  } catch (err) {
+    logger.warn({ err, shareUrl }, 'resolveThreadsShareUrl failed');
+    return null;
+  } finally {
+    await context.close().catch(() => {});
+  }
+}

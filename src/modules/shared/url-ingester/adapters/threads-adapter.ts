@@ -50,10 +50,20 @@ export class ThreadsFetchError extends Error {
  * Apify actor (예: apify/threads-scraper) 가 설정되어 있으면 그것을 사용.
  */
 export async function fetchThreadsPost(input: ThreadsAdapterInput): Promise<ThreadsAdapterResult> {
-  const parsed = parseThreadsUrl(input.url);
+  // /share/ 단축 URL 은 실제 게시글로 리다이렉트 → 최종 URL 해석
+  let effectiveUrl = input.url;
+  if (/\/share\//i.test(input.url)) {
+    const resolved = await resolveShareUrl(input.url);
+    if (resolved) {
+      logger.info({ from: input.url, to: resolved }, 'threads share URL 해석');
+      effectiveUrl = resolved;
+    }
+  }
+  const parsed = parseThreadsUrl(effectiveUrl);
   if (!parsed) {
     throw new ThreadsFetchError(`Not a recognized Threads post URL: ${input.url}`);
   }
+  input = { ...input, url: effectiveUrl };
 
   // Apify 경로
   if (isApifyConfigured() && env.APIFY_ACTOR_THREADS_URL) {
@@ -311,6 +321,21 @@ async function fetchViaOg(url: string, parsed: ParsedUrl): Promise<ThreadsAdapte
 interface ParsedUrl {
   authorHandle: string | null;
   postShortcode: string | null;
+}
+
+/**
+ * Threads /share/ 단축 URL → 실제 게시글 URL 해석 (리다이렉트 추적).
+ * 실패 시 null.
+ */
+async function resolveShareUrl(shareUrl: string): Promise<string | null> {
+  // Threads /share/ 는 JS 클라이언트 렌더 → fetch 리다이렉트 안 됨. Playwright 로 최종 URL 확인.
+  try {
+    const { resolveThreadsShareUrl } = await import('../../../../infra/playwright-threads-video.js');
+    return await resolveThreadsShareUrl(shareUrl);
+  } catch (err) {
+    logger.warn({ err, shareUrl }, 'share URL 해석 실패');
+    return null;
+  }
 }
 
 function parseThreadsUrl(url: string): ParsedUrl | null {
