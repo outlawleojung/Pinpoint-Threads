@@ -8,9 +8,14 @@ status: "active"
 
 **새 세션 시작 시 이 파일을 먼저 읽으세요.**
 
-Last updated: 2026-09-03 (쇼핑 자동발행 실 e2e 검증 · 비디오 추출 안정화 · 매칭 실패 URL 답장 흐름)
-Last commit: `fe5511e` (fix: 완성 쿠팡 딥링크 그대로 사용)
+Last updated: 2026-09-03 (상품명 기반 수동 발행 흐름 · 텔레그램 쿠팡링크 차단 회피 · 비용 절감)
+Last commit: `ce79ade` (perf: LLM 비용 절감)
 직전 세션 로그: [docs/session-log/2026-09-03.md](session-log/2026-09-03.md)
+
+### 핵심 흐름 (2026-09-03 후반 확정) — [manual-shopping-flow](08-decisions/manual-shopping-flow.md)
+- **텔레그램은 쿠팡 링크 전송 차단** → 사용자는 **벤치마크 URL + 상품명(텍스트)** 만 보냄
+- 상품명 → 쿠팡 검색 → productUrl(itemId 포함) → 딥링크 자동 생성 → 특징 반영 카피 → 승인 카드
+- `productNameHint` · `trustKeyword` · `InboundLink.manualProductName` · Threads `/share/` URL 해석
 
 ## Phase & 진행률
 
