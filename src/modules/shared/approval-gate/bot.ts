@@ -528,27 +528,21 @@ bot.on('message:text', async (ctx, next) => {
         // 비디오 구제 (Apify 가 비디오 놓친 경우 Playwright 재확인)
         const { ensureBenchmarkVideo } = await import('../../pipeline-a/video-rescue.js');
         const media = await ensureBenchmarkVideo(bench?.id ?? null, permalink, mediaUrls);
-        // 5계정 전부 발행 (각 계정 페르소나로 각각 카피). 성별 필터는 승인 카드 육안으로.
-        const accounts = await prisma.account.findMany({ where: { isActive: true }, orderBy: { handle: 'asc' }, select: { id: true, handle: true } });
-        if (accounts.length === 0) { await ctx.reply('⚠️ 활성 계정 없음'); continue; }
-        for (const acc of accounts) {
-          try {
-            const outcome = await runPipelineA({
-              accountId: acc.id,
-              sourceMediaUrls: media,
-              sourceText: sourceText ?? '',
-              sourceUrl: permalink,
-              productNameHint: productName,
-            });
-            if (outcome.status === 'PENDING_APPROVAL') {
-              await ctx.reply(`✅ [${acc.handle}] ${outcome.matchedProductName?.slice(0,30)} · 승인 카드`);
-              handled += 1;
-            } else {
-              await ctx.reply(`❌ [${acc.handle}] 실패: ${outcome.stage} · ${outcome.reason}`);
-            }
-          } catch (e) {
-            await ctx.reply(`❌ [${acc.handle}] 오류: ${(e as Error).message.slice(0,60)}`);
-          }
+        // 발행 대상 = 1계정 (사용자 방침). 계정 골고루 위해 **오늘 SHOPPING 덜 발행한 계정** 자동 선택.
+        const acc = await pickLeastUsedAccount();
+        if (!acc) { await ctx.reply('⚠️ 활성 계정 없음'); continue; }
+        const outcome = await runPipelineA({
+          accountId: acc.id,
+          sourceMediaUrls: media,
+          sourceText: sourceText ?? '',
+          sourceUrl: permalink,
+          productNameHint: productName,
+        });
+        if (outcome.status === 'PENDING_APPROVAL') {
+          await ctx.reply(`✅ [${acc.handle}] ${outcome.matchedProductName?.slice(0,40)} · 승인 카드 확인 (틀리면 리젝)`);
+          handled += 1;
+        } else {
+          await ctx.reply(`❌ [${acc.handle}] 실패: ${outcome.stage} · ${outcome.reason}`);
         }
       }
       if (handled > 0) return;
@@ -597,6 +591,36 @@ bot.callbackQuery(/^(approve|regen-text|regen-product|reject):(.+)$/, async (ctx
  * 실 발행하지 않고 카피 · 승인카드 렌더링에만 사용.
  * dummy 계정 자동 생성 로직은 폐기됨 — 활성 계정 중 첫 번째 사용.
  */
+/**
+ * 오늘 SHOPPING 발행이 가장 적은 활성 계정 선택 (계정 골고루 발행).
+ * 동수면 handle 순.
+ */
+async function pickLeastUsedAccount() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const accounts = await prisma.account.findMany({
+    where: { isActive: true },
+    select: { id: true, handle: true },
+    orderBy: { handle: 'asc' },
+  });
+  if (accounts.length === 0) return null;
+  const counts = await Promise.all(
+    accounts.map(async (a) => ({
+      acc: a,
+      n: await prisma.post.count({
+        where: {
+          accountId: a.id,
+          kind: 'SHOPPING',
+          createdAt: { gte: today },
+          state: { notIn: ['REJECTED', 'FAILED'] },
+        },
+      }),
+    })),
+  );
+  counts.sort((x, y) => x.n - y.n);
+  return counts[0]!.acc;
+}
+
 async function getAnyActiveAccount() {
   const account = await prisma.account.findFirst({
     where: { isActive: true },
