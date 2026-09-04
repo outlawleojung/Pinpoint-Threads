@@ -64,9 +64,11 @@ export async function sendApprovalRequest(postId: string): Promise<void> {
   const showProductThumb = Boolean(productThumb) && baseMediaUrls.length > 0 && baseMediaUrls.length < 10;
   const mediaUrls = showProductThumb ? [...baseMediaUrls, productThumb!] : baseMediaUrls;
   const captionCore = buildPreviewCaption(post, showProductThumb);
-  const caption = videoCount > 0
-    ? `🎬 실 발행 시 비디오 ${videoCount}개 첨부됨 (여기 미리보기에는 이미지만 표시)\n\n${captionCore}`
-    : captionCore;
+  // 비디오 포함 여부를 카드 최상단에 명확히 (사용자가 발행 전 확인 가능하게)
+  const videoBadge = videoCount > 0
+    ? `🎬 비디오 ${videoCount}개 포함됨 ✅ (프리뷰엔 이미지만 · 발행 시 비디오 나감)`
+    : `🖼 비디오 없음 · 이미지 ${imageOnly.length}개`;
+  const caption = `${videoBadge}\n\n${captionCore}`;
 
   let anchorMessageId: number;
 
@@ -111,23 +113,6 @@ export async function sendApprovalRequest(postId: string): Promise<void> {
       reply_markup: keyboard,
     });
     anchorMessageId = msg.message_id;
-  }
-
-  // 비디오가 있으면 승인 전에 사용자가 직접 볼 수 있게 압축본을 별도 전송 (fetch 성공률↑).
-  // 실패해도 발행엔 영향 없음 (실 발행 미디어는 원본 mp4).
-  const videoUrl = allMediaUrls.find(isVideoUrl);
-  if (videoUrl && videoUrl.includes('res.cloudinary.com') && videoUrl.includes('/video/upload/')) {
-    const compact = videoUrl
-      .replace('/video/upload/', '/video/upload/w_480,q_auto:low,br_800k,vc_h264,du_15/')
-      .replace(/\.[^./?]+(\?|$)/, '.mp4$1');
-    try {
-      await bot.api.sendVideo(env.TELEGRAM_ADMIN_CHAT_ID, compact, {
-        caption: `🎬 위 승인 카드에 첨부될 비디오 (미리보기 · 실 발행은 원본 화질)`,
-      });
-    } catch (err) {
-      logger.warn({ err, postId }, '비디오 미리보기 전송 실패 (발행엔 영향 없음)');
-      await bot.api.sendMessage(env.TELEGRAM_ADMIN_CHAT_ID, '🎬 비디오 미리보기 전송 실패 · 실 발행엔 비디오 포함됨').catch(() => {});
-    }
   }
 
   await prisma.post.update({
