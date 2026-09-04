@@ -44,6 +44,28 @@ function makeCode(benchmarkPostId: string): string {
   return code;
 }
 
+/**
+ * 충돌 없는 회신 코드 확보.
+ * 같은 벤치마크는 기존 코드 재사용(idempotent) · 다른 벤치마크가 이미 그 코드를 쓰면 대체 코드 생성.
+ * (4자 해시 충돌 시 다른 벤치마크/계정으로 오라우팅되던 문제 방지)
+ */
+async function resolveFreeCode(benchmarkPostId: string): Promise<string> {
+  for (let i = 0; i < 12; i++) {
+    const code = makeCode(i === 0 ? benchmarkPostId : `${benchmarkPostId}:${i}`);
+    const existing = await redisConnection.get(CODE_PREFIX + code);
+    if (!existing) return code;
+    try {
+      const e = JSON.parse(existing) as PendingMatchEntry;
+      if (e.benchmarkPostId === benchmarkPostId) return code; // 같은 벤치마크 → 재사용
+    } catch {
+      /* 파싱 실패한 죽은 값 → 덮어써도 됨 */
+      return code;
+    }
+    // 다른 벤치마크가 점유 → 다음 후보 코드 시도
+  }
+  return makeCode(`${benchmarkPostId}:z`);
+}
+
 export async function sendMatchWaitingCard(input: {
   benchmarkPostId: string;
   accountId: string;
@@ -52,7 +74,7 @@ export async function sendMatchWaitingCard(input: {
   benchmarkPermalink: string;
   benchmarkMediaUrls: string[];
 }): Promise<{ msgId: number } | null> {
-  const code = makeCode(input.benchmarkPostId);
+  const code = await resolveFreeCode(input.benchmarkPostId);
   const caption = [
     `⚠️ 매칭 실패 — 회신코드 [ ${code} ]`,
     `계정: ${input.accountHandle}`,

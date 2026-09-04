@@ -223,6 +223,13 @@ export async function handleApprovalCallback(action: Action, postId: string): Pr
   if (post.state === nextState) {
     return `이미 ${nextState} 상태`;
   }
+  // 이미 승인·발행 단계면 리젝 불가 (상태머신 예외 대신 친절한 안내)
+  if (
+    action === 'reject' &&
+    (post.state === PostState.APPROVED || post.state === PostState.PUBLISHING || post.state === PostState.PUBLISHED)
+  ) {
+    return '⚠ 이미 승인·발행 단계라 리젝 불가 (필요하면 Threads 에서 직접 삭제하세요)';
+  }
   assertTransition(post.state, nextState);
 
   await prisma.post.update({

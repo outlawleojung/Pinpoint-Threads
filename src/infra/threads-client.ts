@@ -84,7 +84,8 @@ interface CreateContainerParams {
 }
 
 const CONTAINER_POLL_INTERVAL_MS = 2000;
-const CONTAINER_POLL_TIMEOUT_MS = 60_000;
+// 비디오 트랜스코딩은 60초를 자주 초과 → 3분으로. 이미지는 FINISHED 시 즉시 반환하므로 상향해도 손해 없음.
+const CONTAINER_POLL_TIMEOUT_MS = 180_000;
 
 export function buildAuthorizeUrl(input: {
   appId: string;
@@ -228,6 +229,31 @@ export class ThreadsClient {
       url = next;
     }
     return oldest;
+  }
+
+  /**
+   * 최근 게시글 조회 (발행 멱등 확인용).
+   * 2-step 발행 중 응답 읽기 실패로 재시도할 때, 실제로는 이미 게시된 경우를 감지해 중복 방지.
+   */
+  async fetchRecentPosts(
+    accessToken: string,
+    limit = 5,
+  ): Promise<Array<{ id: string; text: string; timestamp: Date | null }>> {
+    const params = new URLSearchParams({
+      fields: 'id,text,timestamp',
+      limit: String(limit),
+      access_token: accessToken,
+    });
+    const res = await request(`${GRAPH_BASE}/v1.0/me/threads?${params.toString()}`, { method: 'GET' });
+    const json = (await res.body.json()) as any;
+    if (res.statusCode !== 200 || !Array.isArray(json.data)) {
+      throw new Error(`Threads recent posts fetch failed: ${res.statusCode} ${JSON.stringify(json).slice(0, 200)}`);
+    }
+    return json.data.map((d: any) => ({
+      id: String(d.id),
+      text: String(d.text ?? ''),
+      timestamp: d.timestamp ? new Date(d.timestamp) : null,
+    }));
   }
 
   async fetchUserProfile(accessToken: string): Promise<ThreadsUserProfile> {

@@ -66,6 +66,13 @@ export async function ingestUrl(input: IngestInput): Promise<IngestResult> {
         message: `이미 등록된 URL입니다 (상태: ${existing.status}).`,
       };
     }
+    // 재시도 시에도 같은 메시지에 붙인 커머스 URL 을 보존 (신규 생성 경로에서만 저장되던 버그).
+    if (input.manualCommerceUrl) {
+      await prisma.inboundLink.update({
+        where: { id: existing.id },
+        data: { manualCommerceUrl: input.manualCommerceUrl },
+      }).catch(() => {});
+    }
     logger.info(
       { inboundLinkId: existing.id, platform, prevError: existing.errorMessage },
       'URL 재전송 · 이전 FAILED → 재시도',

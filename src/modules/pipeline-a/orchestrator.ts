@@ -126,9 +126,23 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
   // 5. State transition → MATCHING
   await transitionPost(post.id, PostState.CLASSIFYING, PostState.MATCHING);
 
-  // 6. Product Matcher
+  // 미디어 미러부터 이후 단계에서 예외가 나면 포스트를 FAILED 로 종결.
+  // (안 하면 MATCHING/COPYWRITING 에 방치돼 그 계정 하루 발행 소진 + 벤치마크 14일 블랙리스트)
+  try {
+  // 6. Media Handler — Cloudinary 미러를 **매칭보다 먼저**.
+  //   원본 IG/Threads CDN(~10분) 이 매칭(최대 3회 Vision) 도중 만료돼 업로드 실패하는 것을 방지 + 2개 이상 하드룰 조기 검증.
+  logger.info({ postId: post.id }, 'pipeline-a: media upload (pre-match)');
+  const media = await handleMedia({
+    postId: post.id,
+    sourceMediaUrls: input.sourceMediaUrls,
+  });
+  // 이후 Vision·카피는 영구 Cloudinary 이미지를 사용 (원본 만료 무관)
+  const uploadedImageForVision = media.publicUrls.find((u) => !isVideoUrl(u))
+    ?? (media.publicUrls[0] ? videoToJpgThumb(media.publicUrls[0]) : firstImageForVision);
+
+  // 7. Product Matcher
   //   - explicitCommerceUrl 있으면: 그 URL 로 딥링크 (Matcher/Vision 스킵)
-  //   - productNameHint 있으면: 사용자 상품명으로 검색 → Vision 으로 best 후보 선택
+  //   - productNameHint 있으면: 사용자 상품명으로 검색 → best 후보 선택
   //   - 둘 다 없으면: classifier searchKeyword 자동 매칭
   let matchedResult: MatchResult;
   if (input.explicitCommerceUrl) {
@@ -143,21 +157,21 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
       { postId: post.id, keyword: searchKeyword, fromHint: !!input.productNameHint },
       'pipeline-a: matching',
     );
-    const matched = await matchProduct({
+    const matchedOutcome = await matchProduct({
       category: classified.category ?? '생활용품',
       searchKeyword,
-      sourceImageUrl: firstImageForVision,
+      sourceImageUrl: uploadedImageForVision,
       maxAttempts: 3,
       trustKeyword: !!input.productNameHint, // 사용자 상품명이면 best 후보 신뢰
     });
-    if (!matched.success) {
-      return finishRejected(post.id, 'matcher', matched.reason);
+    if (!matchedOutcome.success) {
+      return finishRejected(post.id, 'matcher', matchedOutcome.reason);
     }
-    matchedResult = matched.result;
+    matchedResult = matchedOutcome.result;
   }
   const matched = { success: true as const, result: matchedResult };
 
-  // 7. CommerceProduct upsert
+  // 8. CommerceProduct upsert
   const product = await prisma.commerceProduct.upsert({
     where: {
       channel_externalId: {
@@ -185,13 +199,6 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
     },
   });
 
-  // 8. Media Handler — Cloudinary 업로드 (2개 이상 하드 룰)
-  logger.info({ postId: post.id }, 'pipeline-a: media upload');
-  const media = await handleMedia({
-    postId: post.id,
-    sourceMediaUrls: input.sourceMediaUrls,
-  });
-
   // 9. State transition → COPYWRITING
   await transitionPost(post.id, PostState.MATCHING, PostState.COPYWRITING);
 
@@ -199,8 +206,8 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
   logger.info({ postId: post.id }, 'pipeline-a: copywriting');
   const copy = await generateCopy({
     sourceText: input.sourceText,
-    // 이미지 없으면 텍스트만으로 카피 생성 (Vision 은 비디오 URL 처리 못함)
-    sourceImageUrl: imageOnlyUrls[0],
+    // 영구 Cloudinary 이미지 사용 (원본 만료 무관 · 없으면 undefined → 텍스트만)
+    sourceImageUrl: uploadedImageForVision && !isVideoUrl(uploadedImageForVision) ? uploadedImageForVision : undefined,
     productName: matched.result.product.productName,
     productCategory: matched.result.product.category ?? classified.category,
     accountSeed: account.id,
@@ -249,6 +256,9 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
     replyText: reply.text,
     replyLead: reply.lead,
   };
+  } catch (err) {
+    return finishFailed(post.id, 'post-match', err);
+  }
 }
 
 /**
@@ -323,5 +333,20 @@ async function finishRejected(postId: string, stage: string, reason: string): Pr
     data: { state: PostState.REJECTED, rejectionReason: `${stage}: ${reason}` },
   });
   logger.warn({ postId, stage, reason }, 'pipeline-a rejected');
+  return { status: 'REJECTED', stage, reason, postId };
+}
+
+/**
+ * 매칭 이후 단계에서 예외 발생 시 포스트를 FAILED 로 종결.
+ * FAILED 는 todayCount·벤치마크 dedup 에서 제외되므로 계정 발행 소진·블랙리스트를 유발하지 않고,
+ * 상태머신상 재시도(CLASSIFYING/MATCHING/COPYWRITING/PUBLISHING) 도 가능.
+ */
+async function finishFailed(postId: string, stage: string, err: unknown): Promise<PipelineAOutcome> {
+  const reason = String((err as Error)?.message ?? err).slice(0, 500);
+  await prisma.post.update({
+    where: { id: postId },
+    data: { state: PostState.FAILED, rejectionReason: `${stage}: ${reason}` },
+  }).catch(() => {});
+  logger.error({ postId, stage, err }, 'pipeline-a failed (post-match) → FAILED');
   return { status: 'REJECTED', stage, reason, postId };
 }

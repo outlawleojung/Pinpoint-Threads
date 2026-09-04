@@ -393,8 +393,9 @@ bot.on('message:text', async (ctx, next) => {
     const pending = await getPendingByCode(code);
     if (pending) {
       const commerceUrl = urls.find((u) => isCommerceUrl(u));
-      // 상품명 = URL 제거한 나머지 텍스트
-      const productName = rest.replace(/https?:\/\/\S+/g, '').trim();
+      const codeHasVideoFlag = detectVideoFlag(rest);
+      // 상품명 = URL·비디오플래그 제거한 나머지 텍스트
+      const productName = stripVideoFlag(rest.replace(/https?:\/\/\S+/g, '')).trim();
       if (!commerceUrl && productName.length < 2) {
         await ctx.reply(`⚠️ [${code}] 뒤에 커머스 URL 또는 상품명을 붙여주세요.\n예: ${code} 팍스홈 쿠션양말`);
         return;
@@ -414,7 +415,7 @@ bot.on('message:text', async (ctx, next) => {
           }).catch((e) => logger.warn({ e }, 'inboundLink 저장 실패'));
         }
         const { ensureBenchmarkVideo } = await import('../../pipeline-a/video-rescue.js');
-        const media = await ensureBenchmarkVideo(pending.benchmarkPostId, b.permalink, b.mediaUrls);
+        const media = await ensureBenchmarkVideo(pending.benchmarkPostId, b.permalink, b.mediaUrls, codeHasVideoFlag);
         const outcome = await runPipelineA({
           accountId: pending.accountId,
           sourceMediaUrls: media,
@@ -504,14 +505,12 @@ bot.on('message:text', async (ctx, next) => {
   //   비디오 플래그: "비디오 있음"/"비디오 없음" (사용자가 원본 비디오 유무 명시 → 재시도 판단)
   //   있음=true · 없음=false · 미지정=undefined(자동 판단)
   // 비디오 플래그: "비디오/영상/동영상 + 있음/없음" (사용자 표현 편차 흡수)
-  const hasVideoFlag: boolean | undefined =
-    /(비디오|동영상|영상)\s*있음/.test(text) ? true
-    : /(비디오|동영상|영상)\s*없음/.test(text) ? false
-    : undefined;
+  const hasVideoFlag = detectVideoFlag(text);
   const productName = text
-    .split('\n').map((l) => l.trim())
-    .filter((l) => l && !/^https?:\/\//i.test(l) && extractUrls(l).length === 0)
-    .filter((l) => !/^(비디오|동영상|영상)\s*(있음|없음)$/.test(l))
+    .split('\n')
+    .map((l) => l.replace(/https?:\/\/\S+/gi, ''))   // 줄 안 URL 제거 (상품명이 URL과 같은 줄이어도 살림)
+    .map((l) => stripVideoFlag(l))                    // 비디오 플래그 제거 (위치·구두점 무관)
+    .filter((l) => l.length > 0)
     .join(' ').trim();
   if (commerceUrls.length === 0 && productName.length >= 2) {
     await ctx.reply(`🔍 "${productName}" 로 상품 검색 + 발행 시작 (${supported.length}개 벤치마크)...`);
@@ -555,7 +554,10 @@ bot.on('message:text', async (ctx, next) => {
           await ctx.reply(`❌ [${acc.handle}] 실패: ${outcome.stage} · ${outcome.reason}`);
         }
       }
-      if (handled > 0) return;
+      // 상품명 경로로 처리했으면(성공·실패 무관) 여기서 종료 — 아래 일반 인제스트로 떨어져
+      // 이중 "인제스트 결과" 가 나오지 않게. (전건 실패해도 계정별 실패 메시지는 이미 보냄)
+      void handled;
+      return;
     } catch (err) {
       logger.error({ err }, 'URL+상품명 처리 실패');
       await ctx.reply(`❌ 처리 실패: ${(err as Error).message}`);
@@ -566,14 +568,19 @@ bot.on('message:text', async (ctx, next) => {
     ? ` (+ 커머스 URL ${commerceUrls.length}개 자동 페어링 · Product Matcher 스킵)`
     : '';
   await ctx.reply(`🔍 URL ${supported.length}개 자동 인제스트 시작...${commerceNote}`);
-  const { results } = await ingestUrlsFromText(text, InboundSource.MANUAL_TELEGRAM);
-  const summary = results
-    .map(
-      (r, i) =>
-        `${i + 1}. ${r.isNew ? '✅' : 'ℹ️'} [${r.platform}] ${r.status}\n   ${r.message}`,
-    )
-    .join('\n\n');
-  await ctx.reply(`📥 인제스트 결과 (${results.length}건)${commerceNote}\n\n${summary}`);
+  try {
+    const { results } = await ingestUrlsFromText(text, InboundSource.MANUAL_TELEGRAM);
+    const summary = results
+      .map(
+        (r, i) =>
+          `${i + 1}. ${r.isNew ? '✅' : 'ℹ️'} [${r.platform}] ${r.status}\n   ${r.message}`,
+      )
+      .join('\n\n');
+    await ctx.reply(`📥 인제스트 결과 (${results.length}건)${commerceNote}\n\n${summary}`);
+  } catch (err) {
+    logger.error({ err }, 'ingestUrlsFromText 실패');
+    await ctx.reply(`❌ 인제스트 실패: ${(err as Error).message}`);
+  }
 });
 
 // 승인/거부 콜백
@@ -610,6 +617,21 @@ bot.callbackQuery(/^(approve|regen-text|regen-product|reject):(.+)$/, async (ctx
  * 상품명에서 타겟 성별 추론 (기존 Account.audienceGender 정책과 동일 체계).
  * 여성/남성 단서 없으면 null(unisex · 전 계정 허용).
  */
+/** 텍스트에서 비디오 플래그("비디오/동영상/영상 + 있음/없음")를 괄호·구두점 포함 제거. */
+function stripVideoFlag(s: string): string {
+  return s
+    .replace(/[([]?\s*(비디오|동영상|영상)\s*(있음|없음)\s*[)\]!.]*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** 텍스트에서 비디오 유무 플래그 추출 (있음=true·없음=false·미지정=undefined). */
+function detectVideoFlag(text: string): boolean | undefined {
+  return /(비디오|동영상|영상)\s*있음/.test(text) ? true
+    : /(비디오|동영상|영상)\s*없음/.test(text) ? false
+    : undefined;
+}
+
 function inferGender(productName: string): 'male' | 'female' | null {
   if (/여성|여자|우먼|레이디|women|female/i.test(productName)) return 'female';
   if (/남성|남자|맨즈|men|male/i.test(productName)) return 'male';

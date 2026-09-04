@@ -74,12 +74,29 @@ export async function matchProduct(input: MatchInput): Promise<MatchOutcome> {
     // 상품명을 사용자가 지정한 경우(trustKeyword): Vision 스킵 · 검색어와 **이름이 가장 비슷한 후보** 선택.
     // coupang 이 top 을 항상 정확히 주지 않으므로 (예: "팍스홈" 검색에 "어썸H" 를 top 으로) 문자열 유사도로 재정렬.
     if (input.trustKeyword) {
-      const best = pickByNameSimilarity(input.searchKeyword, candidates);
-      const deeplinkUrl = await primary.generateDeeplink(best.productUrl);
-      logger.info({ candidate: best.productName, keyword: input.searchKeyword, trusted: true }, 'match by trusted keyword (name-similar)');
+      const { candidate: best, hits, tokenCount } = pickByNameSimilarity(input.searchKeyword, candidates);
+      // 0 토큰 겹침 = 검색어의 어떤 단어도 후보 이름에 없음 → 쿠팡이 엉뚱한 상품만 반환한 것.
+      // (예: "동영상 없음" → 산업기사 교재, 상품명 오추출 시). candidates[0] 을 신뢰하면 오발행 → 폐기.
+      if (hits === 0) {
+        logger.warn(
+          { keyword: input.searchKeyword, candidates: candidates.map((c) => c.productName) },
+          'trustKeyword: 0 토큰 겹침 — 오매칭 의심 → 폐기',
+        );
+        return { success: false, reason: 'no-candidates', attempts };
+      }
+      let deeplinkUrl: string;
+      try {
+        deeplinkUrl = await primary.generateDeeplink(best.productUrl);
+      } catch (err) {
+        logger.error({ err, product: best.productName }, 'deeplink 생성 실패 (trusted)');
+        return { success: false, reason: 'error', attempts };
+      }
+      // 겹친 토큰 비율을 신뢰도로 (가짜 1.0 대신 실제 유사도 노출 → 승인 카드에서 판단 근거)
+      const visionScore = Math.min(1, hits / Math.max(1, tokenCount));
+      logger.info({ candidate: best.productName, keyword: input.searchKeyword, hits, tokenCount, visionScore, trusted: true }, 'match by trusted keyword (name-similar)');
       return {
         success: true,
-        result: { channel: primary.channel, product: best, visionScore: 1, attempts, deeplinkUrl },
+        result: { channel: primary.channel, product: best, visionScore, attempts, deeplinkUrl },
       };
     }
 
@@ -130,7 +147,10 @@ export async function matchProduct(input: MatchInput): Promise<MatchOutcome> {
  * 검색어와 상품명의 토큰 겹침으로 가장 비슷한 후보 선택.
  * 사용자가 입력한 상품명의 단어들이 가장 많이 포함된 상품 = 정답에 가까움.
  */
-function pickByNameSimilarity(keyword: string, candidates: CommerceSearchResult[]): CommerceSearchResult {
+function pickByNameSimilarity(
+  keyword: string,
+  candidates: CommerceSearchResult[],
+): { candidate: CommerceSearchResult; hits: number; tokenCount: number } {
   const kwTokens = keyword.split(/\s+/).filter((t) => t.length >= 2);
   let best = candidates[0]!;
   let bestScore = -1;
@@ -142,7 +162,7 @@ function pickByNameSimilarity(keyword: string, candidates: CommerceSearchResult[
       best = c;
     }
   }
-  return best;
+  return { candidate: best, hits: Math.max(0, bestScore), tokenCount: kwTokens.length };
 }
 
 function broadenKeyword(keyword: string): string {
