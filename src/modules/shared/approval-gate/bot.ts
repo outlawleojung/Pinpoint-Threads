@@ -528,9 +528,10 @@ bot.on('message:text', async (ctx, next) => {
         // 비디오 구제 (Apify 가 비디오 놓친 경우 Playwright 재확인)
         const { ensureBenchmarkVideo } = await import('../../pipeline-a/video-rescue.js');
         const media = await ensureBenchmarkVideo(bench?.id ?? null, permalink, mediaUrls);
-        // 발행 대상 = 1계정 (사용자 방침). 계정 골고루 위해 **오늘 SHOPPING 덜 발행한 계정** 자동 선택.
-        const acc = await pickLeastUsedAccount();
-        if (!acc) { await ctx.reply('⚠️ 활성 계정 없음'); continue; }
+        // 발행 대상 = 1계정. 상품명에서 성별 추론 → 맞는 계정 중 오늘 덜 발행한 계정 선택.
+        const gender = inferGender(productName);
+        const acc = await pickLeastUsedAccount(gender);
+        if (!acc) { await ctx.reply(`⚠️ ${gender ?? ''} 발행 가능한 계정 없음`); continue; }
         const outcome = await runPipelineA({
           accountId: acc.id,
           sourceMediaUrls: media,
@@ -592,17 +593,34 @@ bot.callbackQuery(/^(approve|regen-text|regen-product|reject):(.+)$/, async (ctx
  * dummy 계정 자동 생성 로직은 폐기됨 — 활성 계정 중 첫 번째 사용.
  */
 /**
- * 오늘 SHOPPING 발행이 가장 적은 활성 계정 선택 (계정 골고루 발행).
- * 동수면 handle 순.
+ * 상품명에서 타겟 성별 추론 (기존 Account.audienceGender 정책과 동일 체계).
+ * 여성/남성 단서 없으면 null(unisex · 전 계정 허용).
  */
-async function pickLeastUsedAccount() {
+function inferGender(productName: string): 'male' | 'female' | null {
+  if (/여성|여자|우먼|레이디|women|female/i.test(productName)) return 'female';
+  if (/남성|남자|맨즈|men|male/i.test(productName)) return 'male';
+  return null;
+}
+
+/**
+ * 오늘 SHOPPING 발행이 가장 적은 활성 계정 선택 (계정 골고루).
+ * gender 지정 시 **기존 Account.audienceGender 정책 재사용** — 성별 충돌 계정 제외
+ * (male 상품↔female 계정 X · unisex 계정은 모두 허용).
+ */
+async function pickLeastUsedAccount(gender?: 'male' | 'female' | null) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const accounts = await prisma.account.findMany({
+  let accounts = await prisma.account.findMany({
     where: { isActive: true },
-    select: { id: true, handle: true },
+    select: { id: true, handle: true, audienceGender: true },
     orderBy: { handle: 'asc' },
   });
+  if (gender) {
+    // 상품 성별과 충돌하는 계정 제외 (unisex 계정은 통과)
+    accounts = accounts.filter(
+      (a) => a.audienceGender === 'unisex' || a.audienceGender === gender,
+    );
+  }
   if (accounts.length === 0) return null;
   const counts = await Promise.all(
     accounts.map(async (a) => ({
