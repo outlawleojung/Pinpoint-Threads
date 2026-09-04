@@ -503,14 +503,15 @@ bot.on('message:text', async (ctx, next) => {
   //   URL·커머스URL·비디오플래그 를 텍스트에서 제거한 나머지를 상품명으로 간주.
   //   비디오 플래그: "비디오 있음"/"비디오 없음" (사용자가 원본 비디오 유무 명시 → 재시도 판단)
   //   있음=true · 없음=false · 미지정=undefined(자동 판단)
+  // 비디오 플래그: "비디오/영상/동영상 + 있음/없음" (사용자 표현 편차 흡수)
   const hasVideoFlag: boolean | undefined =
-    /비디오\s*있음|영상\s*있음/.test(text) ? true
-    : /비디오\s*없음|영상\s*없음/.test(text) ? false
+    /(비디오|동영상|영상)\s*있음/.test(text) ? true
+    : /(비디오|동영상|영상)\s*없음/.test(text) ? false
     : undefined;
   const productName = text
     .split('\n').map((l) => l.trim())
     .filter((l) => l && !/^https?:\/\//i.test(l) && extractUrls(l).length === 0)
-    .filter((l) => !/^비디오\s*(있음|없음)$|^영상\s*(있음|없음)$/.test(l))
+    .filter((l) => !/^(비디오|동영상|영상)\s*(있음|없음)$/.test(l))
     .join(' ').trim();
   if (commerceUrls.length === 0 && productName.length >= 2) {
     await ctx.reply(`🔍 "${productName}" 로 상품 검색 + 발행 시작 (${supported.length}개 벤치마크)...`);

@@ -49,17 +49,28 @@ export async function ingestUrl(input: IngestInput): Promise<IngestResult> {
   });
 
   if (existing) {
+    // 이전에 FETCHED 성공한 URL 은 dedup 반환 (재fetch 낭비 X).
+    // 단, FAILED 였던 링크는 재전송 = 재시도 요청으로 보고 다시 fetch (원인 고친 뒤 재발행 가능하게).
+    const retryable =
+      existing.status === InboundStatus.FAILED && existing.platform !== InboundPlatform.UNKNOWN;
+    if (!retryable) {
+      logger.info(
+        { inboundLinkId: existing.id, platform, status: existing.status },
+        'URL already ingested (dedup hit)',
+      );
+      return {
+        inboundLinkId: existing.id,
+        platform: existing.platform,
+        status: existing.status,
+        isNew: false,
+        message: `이미 등록된 URL입니다 (상태: ${existing.status}).`,
+      };
+    }
     logger.info(
-      { inboundLinkId: existing.id, platform, status: existing.status },
-      'URL already ingested (dedup hit)',
+      { inboundLinkId: existing.id, platform, prevError: existing.errorMessage },
+      'URL 재전송 · 이전 FAILED → 재시도',
     );
-    return {
-      inboundLinkId: existing.id,
-      platform: existing.platform,
-      status: existing.status,
-      isNew: false,
-      message: `이미 등록된 URL입니다 (상태: ${existing.status}).`,
-    };
+    return await fetchAndStore(existing.id, existing.platform, normalized, false);
   }
 
   if (platform === InboundPlatform.UNKNOWN) {
@@ -94,31 +105,43 @@ export async function ingestUrl(input: IngestInput): Promise<IngestResult> {
     };
   }
 
+  return await fetchAndStore(link.id, platform, normalized, true);
+}
+
+/**
+ * 어댑터 fetch → InboundLink 갱신 → 자동 승격. 신규·재시도 공통.
+ */
+async function fetchAndStore(
+  linkId: string,
+  platform: InboundPlatform,
+  normalizedUrl: string,
+  isNew: boolean,
+): Promise<IngestResult> {
   // Adapter 디스패치 (동기: 짧은 fetch면 즉시 응답 가능, 장시간은 이후 BullMQ 이관)
   const adapter = getAdapter(platform);
   if (!adapter) {
     await prisma.inboundLink.update({
-      where: { id: link.id },
+      where: { id: linkId },
       data: { status: InboundStatus.FAILED, errorMessage: 'Adapter not implemented yet' },
     });
     return {
-      inboundLinkId: link.id,
+      inboundLinkId: linkId,
       platform,
       status: InboundStatus.FAILED,
-      isNew: true,
+      isNew,
       message: `${platform} 어댑터 미구현 (Task #6e/f/g에서 활성화).`,
     };
   }
 
   await prisma.inboundLink.update({
-    where: { id: link.id },
-    data: { status: InboundStatus.FETCHING },
+    where: { id: linkId },
+    data: { status: InboundStatus.FETCHING, errorMessage: null },
   });
 
   try {
-    const fetched = await adapter({ url: normalized });
+    const fetched = await adapter({ url: normalizedUrl });
     const updated = await prisma.inboundLink.update({
-      where: { id: link.id },
+      where: { id: linkId },
       data: {
         status: InboundStatus.FETCHED,
         rawText: fetched.text,
@@ -127,11 +150,12 @@ export async function ingestUrl(input: IngestInput): Promise<IngestResult> {
         authorHandle: fetched.authorHandle,
         engagement: fetched.engagement as any,
         publishedAt: fetched.publishedAt,
+        errorMessage: null,
       },
     });
     logger.info(
       {
-        inboundLinkId: link.id,
+        inboundLinkId: linkId,
         platform,
         textLen: fetched.text.length,
         mediaCount: fetched.mediaUrls.length,
@@ -149,14 +173,14 @@ export async function ingestUrl(input: IngestInput): Promise<IngestResult> {
         promoteNote = ` · 벤치마크 기존 존재`;
       }
     } catch (err) {
-      logger.warn({ err, inboundLinkId: link.id }, 'auto-promote failed');
+      logger.warn({ err, inboundLinkId: linkId }, 'auto-promote failed');
     }
 
     return {
-      inboundLinkId: link.id,
+      inboundLinkId: linkId,
       platform,
       status: updated.status,
-      isNew: true,
+      isNew,
       message:
         `${platform} 조회 완료 — 저자: ${fetched.authorHandle ?? '?'} · ` +
         `본문 ${fetched.text.length}자 · 미디어 ${fetched.mediaUrls.length}개 · 언어 ${fetched.language ?? '?'}` +
@@ -165,15 +189,15 @@ export async function ingestUrl(input: IngestInput): Promise<IngestResult> {
   } catch (err) {
     const errorMessage = (err as Error)?.message ?? String(err);
     await prisma.inboundLink.update({
-      where: { id: link.id },
+      where: { id: linkId },
       data: { status: InboundStatus.FAILED, errorMessage },
     });
-    logger.error({ err, inboundLinkId: link.id, platform }, 'adapter fetch failed');
+    logger.error({ err, inboundLinkId: linkId, platform }, 'adapter fetch failed');
     return {
-      inboundLinkId: link.id,
+      inboundLinkId: linkId,
       platform,
       status: InboundStatus.FAILED,
-      isNew: true,
+      isNew,
       message: `${platform} 조회 실패: ${errorMessage}`,
     };
   }
