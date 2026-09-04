@@ -64,12 +64,16 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
   });
 
   if (!post) throw new PublisherError(`Post ${input.postId} not found`, 'INVALID_STATE');
-  if (post.state !== 'APPROVED' && post.state !== 'FAILED') {
+  // PUBLISHING 도 허용: 이전 시도가 스톨(워커 재기동 등)로 PUBLISHING 에 갇힌 경우 복구.
+  // 중복 발행은 아래 멱등 프리체크로 방지.
+  if (post.state !== 'APPROVED' && post.state !== 'FAILED' && post.state !== 'PUBLISHING') {
     throw new PublisherError(
-      `Post ${input.postId} state is ${post.state}, expected APPROVED or FAILED`,
+      `Post ${input.postId} state is ${post.state}, expected APPROVED/FAILED/PUBLISHING`,
       'INVALID_STATE',
     );
   }
+  // 복구 상황(이전에 발행 시도한 흔적) 여부 → 멱등 프리체크 대상
+  const isRecovery = post.state === 'PUBLISHING' || post.state === 'FAILED';
   if (!post.generatedBody) {
     throw new PublisherError(`Post ${input.postId} has no generatedBody`, 'INVALID_STATE');
   }
@@ -122,15 +126,34 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
   let threadsPostId: string;
   let threadsReplyId: string | null = null;
   try {
+    const bodyNorm = normalizeBody(post.generatedBody);
+    // 멱등 프리체크(복구 시): 스톨·재시도로 이미 본문이 게시됐을 수 있음 → 재발행 대신 그 id 채택 (중복 방지).
+    let preId: string | null = null;
+    if (isRecovery) {
+      try {
+        const recent = await client.fetchRecentPosts(accessToken, 5);
+        const hit = recent.find((p) => {
+          const t = normalizeBody(p.text);
+          const fresh = !p.timestamp || Date.now() - p.timestamp.getTime() < 30 * 60 * 1000;
+          return fresh && (t === bodyNorm || (bodyNorm.length >= 15 && t.startsWith(bodyNorm.slice(0, 15))));
+        });
+        if (hit) {
+          preId = hit.id;
+          logger.warn({ postId: post.id, threadsPostId: preId }, '멱등 프리체크: 본문 이미 게시됨 → 재발행 스킵, 고정댓글만 진행');
+        }
+      } catch (err) {
+        logger.warn({ err, postId: post.id }, '멱등 프리체크 실패 · 정상 발행 진행');
+      }
+    }
+
     // 본문 발행: Threads 비디오 컨테이너가 일시적 "ERROR: UNKNOWN" 반환하는 경우 있음 → 자동 재시도.
     const mainHasVideo = (post.mediaUrls ?? []).some(
       (u: string) => /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/'),
     );
     const mainMaxAttempts = mainHasVideo ? 3 : 2;
-    let main: { threadsPostId: string } | null = null;
+    let main: { threadsPostId: string } | null = preId ? { threadsPostId: preId } : null;
     let mainErr: unknown = null;
-    const bodyNorm = normalizeBody(post.generatedBody);
-    for (let attempt = 1; attempt <= mainMaxAttempts; attempt++) {
+    for (let attempt = 1; !main && attempt <= mainMaxAttempts; attempt++) {
       try {
         main = await client.publish({
           accessToken,
