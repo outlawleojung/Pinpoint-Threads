@@ -123,7 +123,7 @@ export async function sendApprovalRequest(postId: string): Promise<void> {
     },
   });
 
-  logger.info({ postId, anchorMessageId, mediaCount: mediaUrls.length, hasVideo: !!videoUrl }, 'approval request sent');
+  logger.info({ postId, anchorMessageId, mediaCount: mediaUrls.length, videoCount }, 'approval request sent');
 }
 
 type Action = 'approve' | 'regen-text' | 'regen-product' | 'reject';
