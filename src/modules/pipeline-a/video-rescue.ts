@@ -46,8 +46,13 @@ export async function ensureBenchmarkVideo(
       logger.warn({ benchmarkId, permalink, hasVideo }, `video-rescue: ${maxAttempts}회 시도 후에도 비디오 못 잡음`);
       return mediaUrls;
     }
-    // 원본 이미지 유지 · mp4 를 앞에 (총 슬롯 max 10)
-    const effective = [bestMp4s[0]!, ...mediaUrls].slice(0, 10);
+    // 비디오 커버(캡처) 프레임 이미지 제거 후 mp4 를 앞에.
+    //   Apify 는 비디오의 커버 프레임을 별도 이미지로 저장함 (IG CDN t51.71878 패턴 · video_default_cover_frame 마커).
+    //   mp4 를 확보했으므로 커버 프레임은 중복 → 제거.
+    const isCoverFrame = (u: string) =>
+      u.includes('video_default_cover_frame') || /\/t51\.71878-15\//.test(u);
+    const nonCover = mediaUrls.filter((u) => !isCoverFrame(u));
+    const effective = [bestMp4s[0]!, ...nonCover].slice(0, 10);
     if (benchmarkId) {
       await prisma.benchmarkPost.update({
         where: { id: benchmarkId },
