@@ -528,21 +528,27 @@ bot.on('message:text', async (ctx, next) => {
         // 비디오 구제 (Apify 가 비디오 놓친 경우 Playwright 재확인)
         const { ensureBenchmarkVideo } = await import('../../pipeline-a/video-rescue.js');
         const media = await ensureBenchmarkVideo(bench?.id ?? null, permalink, mediaUrls);
-        // 발행 계정: 첫 활성 계정 (다계정 확산은 추후) — 성별 필터는 승인 카드 육안으로 대체
-        const acc = await prisma.account.findFirst({ where: { isActive: true }, orderBy: { handle: 'asc' }, select: { id: true, handle: true } });
-        if (!acc) { await ctx.reply('⚠️ 활성 계정 없음'); continue; }
-        const outcome = await runPipelineA({
-          accountId: acc.id,
-          sourceMediaUrls: media,
-          sourceText: sourceText ?? '',
-          sourceUrl: permalink,
-          productNameHint: productName,
-        });
-        if (outcome.status === 'PENDING_APPROVAL') {
-          await ctx.reply(`✅ [${acc.handle}] 매칭 상품: ${outcome.matchedProductName?.slice(0,40)} (유사도 ${outcome.visionScore?.toFixed(2)}) · 승인 카드 확인`);
-          handled += 1;
-        } else {
-          await ctx.reply(`❌ [${acc.handle}] 실패: stage=${outcome.stage} · ${outcome.reason}`);
+        // 5계정 전부 발행 (각 계정 페르소나로 각각 카피). 성별 필터는 승인 카드 육안으로.
+        const accounts = await prisma.account.findMany({ where: { isActive: true }, orderBy: { handle: 'asc' }, select: { id: true, handle: true } });
+        if (accounts.length === 0) { await ctx.reply('⚠️ 활성 계정 없음'); continue; }
+        for (const acc of accounts) {
+          try {
+            const outcome = await runPipelineA({
+              accountId: acc.id,
+              sourceMediaUrls: media,
+              sourceText: sourceText ?? '',
+              sourceUrl: permalink,
+              productNameHint: productName,
+            });
+            if (outcome.status === 'PENDING_APPROVAL') {
+              await ctx.reply(`✅ [${acc.handle}] ${outcome.matchedProductName?.slice(0,30)} · 승인 카드`);
+              handled += 1;
+            } else {
+              await ctx.reply(`❌ [${acc.handle}] 실패: ${outcome.stage} · ${outcome.reason}`);
+            }
+          } catch (e) {
+            await ctx.reply(`❌ [${acc.handle}] 오류: ${(e as Error).message.slice(0,60)}`);
+          }
         }
       }
       if (handled > 0) return;
