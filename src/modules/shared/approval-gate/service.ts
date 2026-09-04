@@ -143,15 +143,18 @@ async function regenerateCopyAndResend(postId: string): Promise<void> {
   if (!post.commerceProduct) throw new Error('상품 정보 없음 · 재생성 불가');
 
   const isVideoUrl = (u: string) => /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/');
-  const srcMedia = post.sourceMediaUrls.length ? post.sourceMediaUrls : post.mediaUrls;
-  const imageOnly = srcMedia.filter((u) => !isVideoUrl(u));
+  // 원본 벤치마크 이미지(sourceMediaUrls)는 IG/Threads CDN 이라 ~10분 후 만료 → 재생성 시점엔 죽어있음.
+  // Cloudinary 재호스팅된 mediaUrls(영구) 이미지를 우선, 없으면 원본 fallback.
+  const uploadedImg = post.mediaUrls.find((u) => !isVideoUrl(u));
+  const originalImg = post.sourceMediaUrls.find((u) => !isVideoUrl(u));
+  const sourceImageForCopy = uploadedImg ?? originalImg;
   const channel = post.commerceProduct.channel as 'COUPANG' | 'MUSINSA' | 'NAVER';
   const category = post.commerceProduct.category ?? undefined;
   const deeplinkUrl = post.commerceProduct.deeplinkUrl ?? undefined;
 
   const copy = await generateCopy({
     sourceText: post.sourceItem?.rawText ?? '',
-    sourceImageUrl: imageOnly[0],
+    sourceImageUrl: sourceImageForCopy,
     productName: post.commerceProduct.productName,
     productCategory: category,
     accountSeed: post.accountId,
