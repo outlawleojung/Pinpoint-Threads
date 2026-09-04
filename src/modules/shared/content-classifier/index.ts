@@ -186,6 +186,8 @@ function extractJson(raw: string): unknown {
   const stripped = raw
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```\s*$/i, '')
+    // LLM 이 종종 리터럴 undefined 를 뱉음 → 유효 JSON 아님 → null 로 정제
+    .replace(/:\s*undefined\b/g, ': null')
     .trim();
   try {
     return JSON.parse(stripped);

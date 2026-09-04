@@ -254,6 +254,7 @@ function extractJson(raw: string): unknown {
   const stripped = raw
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```\s*$/i, '')
+    .replace(/:\s*undefined\b/g, ': null')
     .trim();
   try {
     return JSON.parse(stripped);
