@@ -5,6 +5,7 @@ import { prisma } from '../../../db/prisma.js';
 import { searchSimilar, type SimilarBenchmark } from '../../shared/source-collector/embedder.js';
 import { isVoyageConfigured } from '../../../infra/voyage-client.js';
 import { getAccountContext, type AccountContext } from './follower-sync.js';
+import { PostKind, PostState } from '@prisma/client';
 
 /**
  * Pipeline B 스하리 각색 카피라이터.
@@ -73,6 +74,16 @@ const HOOK_QUERIES: HookDef[] = [
 const FORBIDDEN_TERMS = [
   '팔로워',   // 스레드 문화 어휘 아님 → "스친", "N명" 형태로만
   '팔로워수', '팔로워 늘리', 'follower',
+];
+
+/**
+ * 금지 오프너·템플릿 패턴 (코드 강제 · 노출 시 재생성).
+ * 프롬프트로만 막던 "몇 달째 하는 중인데 아직 N도 못 채움" 계열이 5계정 매일 똑같이 나와서 정규식으로 차단.
+ */
+//   "몇 달째" 자체는 성숙 계정엔 사실이라 허용. 5계정 매일 반복되던 **정확한 조합 템플릿만** 차단.
+const FORBIDDEN_PATTERNS: Array<{ re: RegExp; label: string }> = [
+  // "몇 달째 … 아직 N도 못 채움/안 됨" whine 오프너 (반복 주범)
+  { re: /몇\s*달째[\s\S]{0,30}(아직|겨우)[\s\S]{0,12}(못\s*채|안\s*(됨|돼|되))/, label: '몇달째-아직못채움-템플릿' },
 ];
 
 const BodyResultSchema = z.object({
@@ -154,6 +165,7 @@ async function generateOne(
   hook: { label: string; query: string },
   benchmarks: SimilarBenchmark[],
   variantIndex: number,
+  recentBodies: string[] = [],
 ): Promise<string> {
   const refBlock =
     benchmarks.length > 0
@@ -181,6 +193,14 @@ async function generateOne(
     '',
     '== 참고 스하리 벤치마크 (훅·리듬만 흡수, 문장·수치 복사 X) ==',
     refBlock,
+    ...(recentBodies.length > 0
+      ? [
+          '',
+          '== ⛔ 최근 이미 쓴 스하리 글 (오프너·구조·표현 절대 반복 X · 완전히 다른 각도로) ==',
+          ...recentBodies.slice(0, 10).map((b, i) => `${i + 1}. "${b.replace(/\n/g, ' ').slice(0, 80)}"`),
+          '위와 다른 오프너·다른 문장 구조로 써라. 특히 "몇 달째", "아직 N도 못 채움" 류는 절대 금지.',
+        ]
+      : []),
     '',
     `variant=${variantIndex}. 위 훅 유형·벤치마크 개성 + 실 계정 상황(팔로워 구간·나이)에 맞는 표현만 사용해 스하리 글 하나 각색.`,
     `마지막 줄 ${HASHTAG} 포함. JSON 만 반환.`,
@@ -205,14 +225,16 @@ async function generateOne(
   const withHash = body.includes(HASHTAG) ? body : `${body.trimEnd()}\n${HASHTAG}`;
 
   const hit = FORBIDDEN_TERMS.find((t) => withHash.includes(t));
-  if (hit) throw new SharingBlacklistError(hit, withHash);
+  if (hit) throw new SharingBlacklistError(hit, withHash, false); // 금지어 = 하드
+  const patHit = FORBIDDEN_PATTERNS.find((p) => p.re.test(withHash));
+  if (patHit) throw new SharingBlacklistError(patHit.label, withHash, true); // 템플릿 패턴 = 소프트
 
   return withHash;
 }
 
 export class SharingBlacklistError extends Error {
-  constructor(public term: string, public body: string) {
-    super(`SHARING body contains forbidden term "${term}": ${body.slice(0, 100)}`);
+  constructor(public term: string, public body: string, public soft = false) {
+    super(`SHARING body contains forbidden ${soft ? 'pattern' : 'term'} "${term}": ${body.slice(0, 100)}`);
     this.name = 'SharingBlacklistError';
   }
 }
@@ -223,19 +245,27 @@ async function generateOneWithRetry(
   hook: { label: string; query: string },
   benchmarks: SimilarBenchmark[],
   variantIndex: number,
+  recentBodies: string[] = [],
 ): Promise<string> {
   let lastErr: Error | null = null;
+  let lastSoftBody: string | null = null; // 소프트 패턴 위반이지만 최종 fallback 으로 쓸 본문
   for (let attempt = 0; attempt <= MAX_RETRY; attempt++) {
     try {
-      return await generateOne(context, hook, benchmarks, variantIndex + attempt * 10);
+      return await generateOne(context, hook, benchmarks, variantIndex + attempt * 10, recentBodies);
     } catch (err) {
       lastErr = err as Error;
       if (err instanceof SharingBlacklistError) {
-        logger.warn({ term: err.term, attempt, variantIndex, hook: hook.label }, 'blacklist hit');
+        logger.warn({ term: err.term, soft: err.soft, attempt, variantIndex, hook: hook.label }, 'blacklist hit');
+        if (err.soft) lastSoftBody = err.body; // 템플릿 패턴 = 소프트 → 최종 시도까지 실패하면 이거라도 씀
         continue;
       }
       throw err;
     }
+  }
+  // 소프트 패턴만 계속 걸렸으면 아예 실패시키지 말고 마지막 본문 채택 (다양성 < 발행 자체)
+  if (lastSoftBody) {
+    logger.warn({ variantIndex, hook: hook.label }, 'soft-pattern 재시도 소진 → 마지막 본문 수용');
+    return lastSoftBody;
   }
   throw lastErr ?? new Error('sharing generation failed');
 }
@@ -258,6 +288,9 @@ export async function generateSharingCopy(
 
   const context = await getAccountContext(input.accountId);
 
+  // 최근 7일 스하리 본문 (전 계정) → 반복 회피용. 같은 오프너·구조 재생성 방지.
+  const recentBodies = await loadRecentSharingBodies(20);
+
   // 계정 나이 구간에 맞는 훅만 필터
   const eligibleHooks = HOOK_QUERIES.filter((h) => h.ageOK.includes(context.accountAgeBucket));
   if (eligibleHooks.length === 0) {
@@ -272,19 +305,21 @@ export async function generateSharingCopy(
     let benchmarks: SimilarBenchmark[] = [];
     if (isVoyageConfigured()) {
       try {
-        benchmarks = await searchSimilar({
+        // 다양성: top-3 고정 대신 넓은 풀(top-12)에서 offset 으로 회전 선택 → 계정·날짜마다 다른 few-shot.
+        const pool = await searchSimilar({
           queryText: hook.query,
-          topK: 3,
+          topK: 12,
           contentType: 'SHARING',
           minLikes: 0,
         });
+        benchmarks = rotatePick(pool, offset + i, 3);
       } catch (err) {
         logger.warn({ err, hook: hook.label }, 'SHARING RAG failed, falling back to no-few-shot');
       }
     }
 
     try {
-      const body = await generateOneWithRetry(context, hook, benchmarks, i);
+      const body = await generateOneWithRetry(context, hook, benchmarks, i, recentBodies);
       variants.push({
         body,
         hookLabel: hook.label,
@@ -319,6 +354,36 @@ export async function generateSharingCopy(
     followerBucket: context.followerBucket,
     variants,
   };
+}
+
+/** 최근 7일 스하리 본문 (전 계정 · 리젝/실패 제외) — 반복 회피용. */
+async function loadRecentSharingBodies(limit: number): Promise<string[]> {
+  try {
+    const since = new Date(Date.now() - 7 * 864e5);
+    const posts = await prisma.post.findMany({
+      where: {
+        kind: PostKind.SHARING,
+        createdAt: { gte: since },
+        generatedBody: { not: null },
+        state: { notIn: [PostState.REJECTED, PostState.FAILED] },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      select: { generatedBody: true },
+    });
+    return posts.map((p) => p.generatedBody).filter((b): b is string => !!b);
+  } catch {
+    return [];
+  }
+}
+
+/** 풀에서 offset 부터 n개를 회전 선택 (계정·날짜별 다른 few-shot). */
+function rotatePick<T>(pool: T[], offset: number, n: number): T[] {
+  if (pool.length <= n) return pool;
+  const start = ((offset % pool.length) + pool.length) % pool.length;
+  const out: T[] = [];
+  for (let i = 0; i < n; i++) out.push(pool[(start + i) % pool.length]!);
+  return out;
 }
 
 function extractJson(raw: string): unknown {
