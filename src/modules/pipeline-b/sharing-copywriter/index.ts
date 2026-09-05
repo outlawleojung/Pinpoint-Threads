@@ -2,8 +2,7 @@ import { z } from 'zod';
 import { llm } from '../../../infra/llm/index.js';
 import { logger } from '../../../config/logger.js';
 import { prisma } from '../../../db/prisma.js';
-import { searchSimilar, type SimilarBenchmark } from '../../shared/source-collector/embedder.js';
-import { isVoyageConfigured } from '../../../infra/voyage-client.js';
+import { type SimilarBenchmark } from '../../shared/source-collector/embedder.js';
 import { getAccountContext, type AccountContext } from './follower-sync.js';
 import { PostKind, PostState } from '@prisma/client';
 
@@ -210,7 +209,7 @@ async function generateOne(
     tier: 'main',
     system: SYSTEM_PROMPT,
     userParts: [{ type: 'text', text: userPrompt }],
-    maxOutputTokens: 400,
+    maxOutputTokens: 700,
     temperature: 0.9 + variantIndex * 0.03,
     jsonMode: true,
     jsonSchema: {
@@ -259,7 +258,8 @@ async function generateOneWithRetry(
         if (err.soft) lastSoftBody = err.body; // 템플릿 패턴 = 소프트 → 최종 시도까지 실패하면 이거라도 씀
         continue;
       }
-      throw err;
+      // JSON 잘림·API 일시 오류 등도 재시도 (기존엔 즉시 throw 라 일회성 오류에 계정 전체 실패했음)
+      logger.warn({ err, attempt, variantIndex, hook: hook.label }, 'sharing generation transient error → retry');
     }
   }
   // 소프트 패턴만 계속 걸렸으면 아예 실패시키지 말고 마지막 본문 채택 (다양성 < 발행 자체)
@@ -297,26 +297,17 @@ export async function generateSharingCopy(
     throw new Error(`No eligible hooks for age bucket ${context.accountAgeBucket}`);
   }
 
+  // ✅ 트렌드 반영: 유사도(옛 고참여 글)로 뽑지 않고 **최근 수집·게시된 스하리 글** 을 few-shot 으로.
+  //    "예전 조회수 높은 글만 반복" 방지 → 지금 스하리 태그에서 도는 최신 흐름을 각색.
+  const trendPool = await loadTrendingSharingBenchmarks(7, 30);
+
   const variants: SharingCopyResult['variants'] = [];
   const offset = input.hookOffset ?? 0;
   for (let i = 0; i < variantCount; i++) {
     const hook = eligibleHooks[(i + offset) % eligibleHooks.length]!;
 
-    let benchmarks: SimilarBenchmark[] = [];
-    if (isVoyageConfigured()) {
-      try {
-        // 다양성: top-3 고정 대신 넓은 풀(top-12)에서 offset 으로 회전 선택 → 계정·날짜마다 다른 few-shot.
-        const pool = await searchSimilar({
-          queryText: hook.query,
-          topK: 12,
-          contentType: 'SHARING',
-          minLikes: 0,
-        });
-        benchmarks = rotatePick(pool, offset + i, 3);
-      } catch (err) {
-        logger.warn({ err, hook: hook.label }, 'SHARING RAG failed, falling back to no-few-shot');
-      }
-    }
+    // 최근 트렌드 풀에서 계정·날짜별로 다른 4개 회전 선택 (다양성)
+    const benchmarks: SimilarBenchmark[] = rotatePick(trendPool, offset + i, 4);
 
     try {
       const body = await generateOneWithRetry(context, hook, benchmarks, i, recentBodies);
@@ -354,6 +345,34 @@ export async function generateSharingCopy(
     followerBucket: context.followerBucket,
     variants,
   };
+}
+
+/**
+ * 최근 트렌드 스하리 벤치마크 풀 (유사도 X · 최신성 우선).
+ *   - 목적: "예전 조회수 높은 글만 반복" 방지. 지금 스하리 태그에 도는 최신 흐름을 각색.
+ *   - collectedAt 최근 N일 + 실게시 시각(publishedAt) 최신 우선. (수집 시 이미 repliesCount≥20 필터됨)
+ */
+async function loadTrendingSharingBenchmarks(days: number, poolSize: number): Promise<SimilarBenchmark[]> {
+  try {
+    const since = new Date(Date.now() - days * 864e5);
+    const rows = await prisma.benchmarkPost.findMany({
+      where: { contentType: 'SHARING', collectedAt: { gte: since }, text: { not: '' } },
+      orderBy: [{ publishedAt: { sort: 'desc', nulls: 'last' } }, { collectedAt: 'desc' }],
+      take: poolSize,
+      select: { id: true, sourceHandle: true, text: true, likesCount: true, repliesCount: true, viralFactors: true },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      sourceHandle: r.sourceHandle,
+      text: r.text,
+      likesCount: r.repliesCount ?? r.likesCount, // 스하리 참여 = 댓글 수
+      distance: 0,
+      viralFactors: (r.viralFactors as Record<string, unknown> | null) ?? null,
+    }));
+  } catch (err) {
+    logger.warn({ err }, 'loadTrendingSharingBenchmarks failed');
+    return [];
+  }
 }
 
 /** 최근 7일 스하리 본문 (전 계정 · 리젝/실패 제외) — 반복 회피용. */
@@ -396,7 +415,18 @@ function extractJson(raw: string): unknown {
   } catch {
     const s = stripped.indexOf('{');
     const e = stripped.lastIndexOf('}');
-    if (s === -1 || e === -1) throw new Error(`no JSON in response: ${stripped.slice(0, 200)}`);
-    return JSON.parse(stripped.slice(s, e + 1));
+    if (s !== -1 && e !== -1 && e > s) {
+      try {
+        return JSON.parse(stripped.slice(s, e + 1));
+      } catch {
+        /* fallthrough to salvage */
+      }
+    }
+    // 잘린 응답 salvage: "body" 값만이라도 추출 (닫는 따옴표·괄호 없어도)
+    const m = stripped.match(/"body"\s*:\s*"((?:[^"\\]|\\.)*)/);
+    if (m && m[1] && m[1].trim().length >= 20) {
+      return { body: m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').trim() };
+    }
+    throw new Error(`no JSON in response: ${stripped.slice(0, 200)}`);
   }
 }
