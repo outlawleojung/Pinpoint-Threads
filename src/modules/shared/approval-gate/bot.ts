@@ -49,6 +49,20 @@ bot.command('ping', async (ctx) => {
   await ctx.reply('pong 🏓');
 });
 
+// /published (별칭 /status) — 계정별 실제 발행 이력 + 성과 요약
+bot.command(['published', 'status'], async (ctx) => {
+  try {
+    const report = await buildPublishedReport();
+    // 텔레그램 4096자 제한 → 청크 분할 전송
+    for (const chunk of chunkText(report, 3800)) {
+      await ctx.reply(chunk);
+    }
+  } catch (err) {
+    logger.error({ err }, '/published failed');
+    await ctx.reply(`❌ 실패: ${(err as Error).message}`);
+  }
+});
+
 // Claude 분류 테스트
 bot.command('classify', async (ctx) => {
   await ctx.reply('분류 중... (Haiku)');
@@ -676,6 +690,75 @@ async function pickLeastUsedAccount(gender?: 'male' | 'female' | null) {
   );
   counts.sort((x, y) => x.n - y.n);
   return counts[0]!.acc;
+}
+
+/** 텔레그램 4096자 제한 대응 · 줄 단위로 안전 분할. */
+function chunkText(text: string, max: number): string[] {
+  const lines = text.split('\n');
+  const chunks: string[] = [];
+  let cur = '';
+  for (const line of lines) {
+    if (cur.length + line.length + 1 > max) {
+      if (cur) chunks.push(cur);
+      cur = line;
+    } else {
+      cur = cur ? `${cur}\n${line}` : line;
+    }
+  }
+  if (cur) chunks.push(cur);
+  return chunks.length ? chunks : ['(없음)'];
+}
+
+/** 계정별 실제 발행 이력 + 최신 성과 스냅샷 요약. */
+async function buildPublishedReport(): Promise<string> {
+  const accounts = await prisma.account.findMany({
+    where: { isActive: true },
+    select: { id: true, handle: true },
+    orderBy: { handle: 'asc' },
+  });
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  const out: string[] = ['📊 계정별 발행 현황 (실 발행분)'];
+  for (const acc of accounts) {
+    const posts = await prisma.post.findMany({
+      where: { accountId: acc.id, state: 'PUBLISHED' },
+      orderBy: { publishedAt: 'desc' },
+      select: {
+        kind: true, publishedAt: true, generatedBody: true, threadsReplyId: true,
+        commerceProduct: { select: { productName: true } },
+        insightSnapshots: { orderBy: { hoursAfterPublish: 'desc' }, take: 1, select: { views: true, likes: true, replies: true, hoursAfterPublish: true } },
+      },
+    });
+    const shopping = posts.filter((p) => p.kind === 'SHOPPING').length;
+    const sharing = posts.filter((p) => p.kind === 'SHARING').length;
+    const daily = posts.filter((p) => p.kind === 'DAILY').length;
+    const today = posts.filter((p) => p.publishedAt && p.publishedAt >= todayStart).length;
+
+    out.push('');
+    out.push(`[${acc.handle}] 총 ${posts.length} (쇼핑 ${shopping} · 스하리 ${sharing}${daily ? ` · 일상 ${daily}` : ''}) · 오늘 ${today}`);
+    for (const p of posts.slice(0, 3)) {
+      const d = p.publishedAt ? p.publishedAt.toISOString().slice(5, 10) : '--';
+      const kindLabel = p.kind === 'SHOPPING' ? '쇼핑' : p.kind === 'SHARING' ? '스하리' : '일상';
+      const label = p.kind === 'SHOPPING'
+        ? (p.commerceProduct?.productName?.slice(0, 24) ?? '')
+        : (p.generatedBody?.replace(/\n/g, ' ').slice(0, 24) ?? '');
+      const s = p.insightSnapshots[0];
+      const perf = s
+        ? `👁${fmtNum(s.views)} ❤️${fmtNum(s.likes)} 💬${fmtNum(s.replies)} (${s.hoursAfterPublish}h)`
+        : '성과 수집전';
+      const replyFlag = p.kind === 'SHOPPING' && !p.threadsReplyId ? ' ⚠댓글X' : '';
+      out.push(`  • ${d} ${kindLabel} "${label}" ${perf}${replyFlag}`);
+    }
+  }
+  out.push('');
+  out.push('💡 성과는 발행 24h·72h 후 자동 수집. "성과 수집전"=아직 24h 미경과.');
+  return out.join('\n');
+}
+
+function fmtNum(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
 }
 
 async function getAnyActiveAccount() {

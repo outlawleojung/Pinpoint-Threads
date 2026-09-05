@@ -300,7 +300,8 @@ async function buildExplicitMatch(
     try {
       const { fetchCoupangProductTitle } = await import('../../infra/coupang-product-title.js');
       const title = await fetchCoupangProductTitle(commerceUrl);
-      if (title) productName = title;
+      // 방어: 봇 차단 페이지 문구가 혹시 새어나와도 상품명으로 쓰지 않음
+      if (title && !/access denied|접근이 거부|잠시 후 다시/i.test(title)) productName = title;
     } catch (err) {
       logger.warn({ err }, 'coupang title 추출 스킵 · 검색어 사용');
     }
