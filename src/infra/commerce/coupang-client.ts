@@ -81,7 +81,9 @@ export class CoupangAdapter implements CommerceAdapter {
   async search(keyword: string, opts?: { limit?: number }): Promise<CommerceSearchResult[]> {
     this.assertCredentials();
     const limit = Math.min(opts?.limit ?? 5, 10); // API 상한 10
-    const query = `keyword=${encodeURIComponent(keyword)}&limit=${limit}`;
+    // 쿠팡 검색 키워드 상한 50자 (초과 시 rCode=400). 방어적 절단 — 호출부에서 압축 못했을 때 크래시 방지.
+    const safeKeyword = keyword.length > 50 ? keyword.slice(0, 50).trim() : keyword;
+    const query = `keyword=${encodeURIComponent(safeKeyword)}&limit=${limit}`;
     const authorization = buildCoupangAuthHeader({
       method: 'GET',
       path: SEARCH_PATH,

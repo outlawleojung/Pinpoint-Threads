@@ -556,7 +556,7 @@ bot.on('message:text', async (ctx, next) => {
     .filter((l) => l.length > 0)
     .join(' ').trim();
   if (commerceUrls.length === 0 && productName.length >= 2) {
-    await ctx.reply(`🔍 "${productName}" 로 상품 검색 + 발행 시작 (${supported.length}개 벤치마크)...`);
+    await ctx.reply(`🔍 "${productName}" 저장 + 상품 검색 → 승인 카드 생성 중 (${supported.length}개 벤치마크 · 실발행 아님, 승인해야 나감)...`);
     try {
       const { ingestUrl } = await import('../url-ingester/index.js');
       let handled = 0;

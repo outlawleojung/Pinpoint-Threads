@@ -5,6 +5,36 @@ import type { CommerceSearchResult } from '../../../infra/commerce/types.js';
 import { verifyProductMatch, type VisionMatchResult } from '../vision-verifier/index.js';
 import { env } from '../../../config/env.js';
 import { logger } from '../../../config/logger.js';
+import { llm } from '../../../infra/llm/index.js';
+
+// 쿠팡 검색 API 키워드 상한 (rCode=400 "keyword maximum length is 50")
+const COUPANG_KEYWORD_MAX = 50;
+
+/**
+ * 50자 초과 상품명을 쿠팡 검색용 짧은 한국어 키워드로 압축.
+ * 브랜드·해외직구·정품·영어 나열 등 노이즈 제거, 핵심 상품종류 위주.
+ * 실패 시 앞 50자로 안전 절단.
+ */
+async function compactKeyword(long: string): Promise<string> {
+  try {
+    const res = await llm().complete({
+      tier: 'fast',
+      system:
+        '상품명을 쿠팡 검색용 짧은 한국어 검색어로 바꿔라. 핵심 상품 종류 위주 3~6단어, ' +
+        '유명 브랜드만 유지, "정품·해외직구·세트·수량·영어 나열" 같은 노이즈 제거. 결과 검색어만 출력.',
+      userParts: [{ type: 'text', text: long }],
+      maxOutputTokens: 40,
+      temperature: 0.2,
+      thinking: 'disabled',
+    });
+    const out = (res.text.trim().split('\n')[0] ?? '').replace(/^["'`]|["'`]$/g, '').trim();
+    const capped = out.slice(0, COUPANG_KEYWORD_MAX);
+    return capped.length >= 2 ? capped : long.slice(0, COUPANG_KEYWORD_MAX);
+  } catch (err) {
+    logger.warn({ err }, 'compactKeyword 실패 · 앞 50자 절단');
+    return long.slice(0, COUPANG_KEYWORD_MAX);
+  }
+}
 
 /**
  * Product Matcher — Pipeline A 전용.
@@ -53,7 +83,15 @@ export async function matchProduct(input: MatchInput): Promise<MatchOutcome> {
   const router = createRouter();
   const primary = router.pick(input.category);
   const maxAttempts = input.maxAttempts ?? 3;
-  let keyword = input.searchKeyword;
+  // 쿠팡 검색어 50자 초과 시 압축 (긴 상품명 그대로 보내면 400 · matcher error).
+  //   검색엔 압축 키워드, 이름 유사도(pickByNameSimilarity)엔 원본 상품명 유지.
+  let keyword =
+    input.searchKeyword.length > COUPANG_KEYWORD_MAX
+      ? await compactKeyword(input.searchKeyword)
+      : input.searchKeyword;
+  if (keyword !== input.searchKeyword) {
+    logger.info({ original: input.searchKeyword.slice(0, 80), compacted: keyword }, 'search keyword compacted (>50자)');
+  }
   let attempts = 0;
 
   for (attempts = 1; attempts <= maxAttempts; attempts++) {
