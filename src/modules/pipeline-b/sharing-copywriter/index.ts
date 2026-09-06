@@ -5,6 +5,9 @@ import { prisma } from '../../../db/prisma.js';
 import { type SimilarBenchmark } from '../../shared/source-collector/embedder.js';
 import { getAccountContext, type AccountContext } from './follower-sync.js';
 import { PostKind, PostState } from '@prisma/client';
+import { getSharingLearnings, type SharingLearnings } from '../../shared/performance-feedback/copy-learning.js';
+
+const NO_LEARNINGS: SharingLearnings = { factors: [], avoidOpeners: [] };
 
 /**
  * Pipeline B 스하리 각색 카피라이터.
@@ -165,6 +168,7 @@ async function generateOne(
   benchmarks: SimilarBenchmark[],
   variantIndex: number,
   recentBodies: string[] = [],
+  learnings: SharingLearnings = NO_LEARNINGS,
 ): Promise<string> {
   const refBlock =
     benchmarks.length > 0
@@ -190,6 +194,13 @@ async function generateOne(
     `== 이번 variant 훅 유형: ${hook.label} ==`,
     `이 유형의 개성을 살려서 각색해라.`,
     '',
+    ...(learnings.factors.length > 0
+      ? [
+          '== ✅ 우리 계정에서 실제 반응 좋았던 구조 요인 (성과 데이터 기반 · 이 구조를 살려라) ==',
+          ...learnings.factors.map((f, i) => `${i + 1}. ${f}`),
+          '',
+        ]
+      : []),
     '== 참고 스하리 벤치마크 (훅·리듬만 흡수, 문장·수치 복사 X) ==',
     refBlock,
     ...(recentBodies.length > 0
@@ -246,12 +257,13 @@ async function generateOneWithRetry(
   benchmarks: SimilarBenchmark[],
   variantIndex: number,
   recentBodies: string[] = [],
+  learnings: SharingLearnings = NO_LEARNINGS,
 ): Promise<string> {
   let lastErr: Error | null = null;
   let lastSoftBody: string | null = null; // 소프트 패턴 위반이지만 최종 fallback 으로 쓸 본문
   for (let attempt = 0; attempt <= MAX_RETRY; attempt++) {
     try {
-      return await generateOne(context, hook, benchmarks, variantIndex + attempt * 10, recentBodies);
+      return await generateOne(context, hook, benchmarks, variantIndex + attempt * 10, recentBodies, learnings);
     } catch (err) {
       lastErr = err as Error;
       if (err instanceof SharingBlacklistError) {
@@ -292,6 +304,10 @@ export async function generateSharingCopy(
   // 최근 7일 스하리 본문 (전 계정) → 반복 회피용. 같은 오프너·구조 재생성 방지.
   const recentBodies = await loadRecentSharingBodies(20);
 
+  // 성과 피드백: winner 구조 요인 + loser 오프너 회피 (유닛② copy-learning)
+  const learnings = await getSharingLearnings();
+  const avoidBodies = [...recentBodies, ...learnings.avoidOpeners];
+
   // 계정 나이 구간에 맞는 훅만 필터
   const eligibleHooks = HOOK_QUERIES.filter((h) => h.ageOK.includes(context.accountAgeBucket));
   if (eligibleHooks.length === 0) {
@@ -311,7 +327,7 @@ export async function generateSharingCopy(
     const benchmarks: SimilarBenchmark[] = rotatePick(trendPool, offset + i, 4);
 
     try {
-      const body = await generateOneWithRetry(context, hook, benchmarks, i, recentBodies);
+      const body = await generateOneWithRetry(context, hook, benchmarks, i, avoidBodies, learnings);
       variants.push({
         body,
         hookLabel: hook.label,
