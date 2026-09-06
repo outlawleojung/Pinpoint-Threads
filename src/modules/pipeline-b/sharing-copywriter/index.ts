@@ -233,7 +233,17 @@ async function generateOne(
 
   const parsed = extractJson(response.text);
   const { body } = BodyResultSchema.parse(parsed);
-  const withHash = body.includes(HASHTAG) ? body : `${body.trimEnd()}\n${HASHTAG}`;
+  // "스하리1000명프로젝트"는 **해시태그 전용** — 본문 문장에 섞이면 안 됨 (사용자 방침).
+  //   LLM이 # 없이 프로세이 안에 넣는 경우가 있어, 본문에서 문구(해시태그 형태 포함)를 모두 제거하고
+  //   맨 끝에 정규 해시태그 1회만 부착한다. (단독 "스하리" 단어는 정상 어휘라 건드리지 않음)
+  const cleaned = body
+    .replace(/#?\s*스하리\s*1000\s*명\s*프로젝트/g, '') // "#스하리1000명프로젝트" / "스하리 1000명 프로젝트" 등 변형 포함
+    .replace(/[ \t]{2,}/g, ' ') // 제거 후 남은 이중 공백
+    .replace(/^[ \t]+/gm, '') // 줄 앞 공백 (문구가 줄 첫머리에 있던 경우)
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  const withHash = `${cleaned}\n\n${HASHTAG}`;
 
   const hit = FORBIDDEN_TERMS.find((t) => withHash.includes(t));
   if (hit) throw new SharingBlacklistError(hit, withHash, false); // 금지어 = 하드
