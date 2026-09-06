@@ -38,6 +38,8 @@ bot.command('start', async (ctx) => {
       '- /copy : 게시글 카피 1개 생성\n' +
       '- /copy3 : 게시글 카피 3개 후보 생성\n' +
       '- /vision : Claude Vision 이미지 정합성 테스트\n' +
+      '- /lineb : Line B(상품 우선) 자동 큐레이션 카드 생성 · /lineb one = 1건만\n' +
+      '- /published : 계정별 발행+성과 현황\n' +
       '- /coupang <검색어> : 쿠팡 상품 검색 실 API 테스트\n' +
       '- /deeplink <쿠팡URL> : 쿠팡 딥링크 생성 실 API 테스트\n' +
       '- /ingest <URL> : URL 인제스터 수동 테스트 (Threads·TikTok·샤오홍슈·Instagram)\n\n' +
@@ -60,6 +62,33 @@ bot.command(['published', 'status'], async (ctx) => {
   } catch (err) {
     logger.error({ err }, '/published failed');
     await ctx.reply(`❌ 실패: ${(err as Error).message}`);
+  }
+});
+
+// /lineb — Line B(상품 우선) 수동 트리거. 인자 없으면 전 계정, "one" 이면 첫 미달 계정 1건.
+bot.command('lineb', async (ctx) => {
+  const arg = ctx.match?.trim();
+  await ctx.reply('🛒 Line B 실행 중… (쿠팡 베스트셀러 → 미니 세트 → 승인 카드)');
+  try {
+    const { runLineBForAllAccounts, runLineBForAccount } = await import(
+      '../../pipeline-a/line-b/orchestrator.js'
+    );
+    if (arg === 'one') {
+      const acc = await prisma.account.findFirst({ where: { isActive: true }, select: { id: true, handle: true } });
+      if (!acc) return void (await ctx.reply('활성 계정 없음'));
+      const r = await runLineBForAccount(acc.id);
+      return void (await ctx.reply(`[${acc.handle}] ${r.status}${r.categoryKr ? ` · ${r.categoryKr}` : ''}${r.reason ? ` · ${r.reason}` : ''}`));
+    }
+    const summary = await runLineBForAllAccounts();
+    const lines = summary.perAccount.map(
+      (p) => `· ${p.handle}: ${p.result.status}${p.result.categoryKr ? ` (${p.result.categoryKr})` : ''}${p.result.reason ? ` — ${p.result.reason}` : ''}`,
+    );
+    await ctx.reply(
+      `🛒 Line B 완료 — 발송 ${summary.sent} · 스킵 ${summary.skipped} · 실패 ${summary.failed}\n\n` + lines.join('\n'),
+    );
+  } catch (err) {
+    logger.error({ err }, '/lineb failed');
+    await ctx.reply(`❌ Line B 실패: ${(err as Error).message}`);
   }
 });
 

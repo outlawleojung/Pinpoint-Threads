@@ -59,7 +59,7 @@ const NEUTRAL_PERSONA =
  * 플랫폼 규칙 (누구에게나 공통).
  * 페르소나 특유 톤·연령대·성별 언급 없음 — 그건 personaPrompt 담당.
  */
-const UNIVERSAL_PRINCIPLES = `너는 한국 Threads 피드에 자연스럽게 섞일 짧은 게시글 한 문장을 만드는 도구다.
+export const UNIVERSAL_PRINCIPLES = `너는 한국 Threads 피드에 자연스럽게 섞일 짧은 게시글 한 문장을 만드는 도구다.
 
 플랫폼 규칙:
 - 문장 1개, 최대 2~3줄, 대략 18~80자 (넘어가도 150자 이내).
@@ -426,6 +426,85 @@ async function loadRecentRejections(
     logger.warn({ err }, 'loadRecentRejections failed');
     return [];
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Line B — 미니 큐레이션 (상품 2~3개 묶음) 전용 카피/리플
+//   단일 상품 카피와 보이스 규칙(UNIVERSAL_PRINCIPLES)은 동일하되,
+//   "요즘 몇 개 찾아본 것들" 톤으로 미니 세트를 한 문장에 담는다.
+//   판매·비교·최저가 톤 금지(기존 금지 어휘 그대로). 링크는 고정댓글로만.
+// ─────────────────────────────────────────────────────────────────────────
+
+export interface CurationCopyInput {
+  personaPrompt?: string;
+  accountSeed: string;
+  accountId?: string;
+  categoryKr: string; // 테마 (예: "뷰티", "주방")
+  productNames: string[]; // 2~3개
+  seedIndex?: number;
+}
+
+export async function generateCurationBody(input: CurationCopyInput): Promise<string> {
+  const persona = input.personaPrompt?.trim() || NEUTRAL_PERSONA;
+  const seedIndex = input.seedIndex ?? 0;
+  const system = `${UNIVERSAL_PRINCIPLES}
+
+== 이 계정의 페르소나 (seed=${input.accountSeed}, variant=${seedIndex}) ==
+${persona}
+
+이 페르소나는 톤·타겟·문체의 유일한 기준이다.
+
+== 이번 글의 특수 규칙 (미니 큐레이션) ==
+- 상품 하나가 아니라 **같은 테마로 요즘 찾아본 몇 개**를 가볍게 언급하는 글이다.
+- "요즘 ○○ 뭐 쓸지 고민하다 찾아본 것들" 같은 **발견·고민 훅**. 판매·비교·추천 톤 절대 X.
+- 상품명을 그대로 나열하지 마라. 테마(용도·상황)만 자연스럽게. 개수는 "몇 개" 정도로만 암시 가능.
+- 링크·가격·브랜드 나열 금지 (링크는 고정댓글).`;
+
+  const userText = `테마: ${input.categoryKr}
+이번에 묶은 상품(참고용, 그대로 노출 금지): ${input.productNames.map((n) => n.slice(0, 40)).join(' / ')}
+
+위 테마로 "요즘 찾아본 것들" 느낌의 본문 문장 1개를 JSON으로만 반환.`;
+
+  const generateOnce = async (idx: number, avoid?: string): Promise<string> => {
+    const parts: LlmContentPart[] = [{ type: 'text', text: userText }];
+    if (avoid) {
+      parts.push({
+        type: 'text',
+        text: `⛔ 방금 실패 사유 · 이번엔 반드시 회피: ${avoid}`,
+      });
+    }
+    const response = await llm().complete({
+      tier: 'main',
+      system: system.replace(`variant=${seedIndex}`, `variant=${idx}`),
+      userParts: parts,
+      maxOutputTokens: 400,
+      temperature: 0.9 + idx * 0.05,
+      jsonMode: true,
+      thinking: 'disabled',
+      jsonSchema: {
+        type: 'object',
+        properties: { body: { type: 'string' } },
+        required: ['body'],
+      },
+    });
+    return BodyResultSchema.parse(extractJson(response.text)).body;
+  };
+
+  // 개인정보(자녀·직업 등)·사실 검증 — 페르소나가 가족/직업을 새게 만드는 것 방지.
+  // 큐레이션은 대표 상품명·카테고리를 컨텍스트로 넘겨 정책 검사를 활성화한다.
+  let body = await generateOnce(seedIndex);
+  const maxRetries = 2;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const check = await factCheckCopy({
+      body,
+      productName: input.productNames[0],
+      productCategory: input.categoryKr,
+    });
+    if (check.ok) break;
+    logger.warn({ attempt, body, reason: check.reason }, 'curation copy fact-check 실패 → 재생성');
+    body = await generateOnce(seedIndex + attempt + 1, check.reason);
+  }
+  return body;
 }
 
 export async function generateBodyVariants(

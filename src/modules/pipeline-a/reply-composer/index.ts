@@ -137,6 +137,59 @@ export async function composeReply(input: ReplyComposeInput): Promise<ReplyCompo
   return { text, lead };
 }
 
+/**
+ * Line B 미니 큐레이션 고정 댓글 (상품 2~3개).
+ * 기존 단일 상품 형식과 동일 규칙: [광고] 리드 + zero-width space 마스킹 링크 + 공정위 문구.
+ * 리드는 대표 상품·테마 맥락으로 AI 감초 한 문장 생성 (composeReply 와 동일 프롬프트).
+ */
+export interface CurationReplyInput {
+  body: string;
+  categoryKr: string;
+  items: Array<{ name: string; deeplinkUrl: string }>; // 2~3개
+  accountId: string;
+  personaPrompt?: string;
+  channel?: 'COUPANG' | 'MUSINSA' | 'NAVER';
+}
+
+export async function composeCurationReply(input: CurationReplyInput): Promise<ReplyComposeResult> {
+  const persona = input.personaPrompt
+    ? `\n\n== 계정 페르소나 (seed=${input.accountId}) ==\n${input.personaPrompt}`
+    : '';
+  const system = SYSTEM_PROMPT + persona;
+
+  const userPrompt = [
+    `테마: ${input.categoryKr} (요즘 찾아본 상품 ${input.items.length}개 묶음)`,
+    '',
+    '본문 (연결 참고):',
+    `"""${input.body}"""`,
+    '',
+    '위 본문 톤과 자연스럽게 이어지는 리드 한 문장을 JSON으로만 반환. (개별 상품 언급 X · 묶음 전체를 가볍게)',
+  ].join('\n');
+
+  let lead = '요즘 찾아본 것들 여기 둠';
+  try {
+    const response = await llm().complete({
+      tier: 'fast',
+      system,
+      userParts: [{ type: 'text', text: userPrompt }],
+      maxOutputTokens: 200,
+      temperature: 0.85,
+      jsonMode: true,
+      jsonSchema: { type: 'object', properties: { lead: { type: 'string' } }, required: ['lead'] },
+    });
+    lead = LeadResultSchema.parse(extractJson(response.text)).lead;
+  } catch (err) {
+    logger.warn({ err }, 'composeCurationReply lead 생성 실패 · 기본 리드 사용');
+  }
+
+  const labeledLead = lead.startsWith('[광고]') ? lead : `[광고] ${lead}`;
+  // 각 링크 앞 zero-width space (Threads 링크 프리뷰 카드 억제)
+  const linkLines = input.items.slice(0, 3).map((it) => `​${it.deeplinkUrl}`);
+  const text = [labeledLead, ...linkLines, '', disclaimerFor(input.channel)].join('\n');
+  logger.debug({ lead, links: linkLines.length }, 'composeCurationReply');
+  return { text, lead };
+}
+
 function extractJson(raw: string): unknown {
   const stripped = raw
     .replace(/^```(?:json)?\s*/i, '')
