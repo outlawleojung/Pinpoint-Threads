@@ -9,7 +9,9 @@ import {
   sharingPublishQueue,
   accountMetricsSyncQueue,
   shoppingPublishQueue,
+  lineBPublishQueue,
 } from '../queues/queues.js';
+import { prisma } from '../db/prisma.js';
 import { logger } from '../config/logger.js';
 import {
   pollAllAdapters,
@@ -27,6 +29,7 @@ import { safeCollectSharingBenchmarks } from '../modules/pipeline-b/sharing-coll
 import { runSharingForAllAccounts } from '../modules/pipeline-b/sharing-publisher/orchestrator.js';
 import { syncAllAccountMetrics } from '../modules/pipeline-b/sharing-copywriter/follower-sync.js';
 import { runShoppingForAllAccounts } from '../modules/pipeline-a/shopping-publisher/orchestrator.js';
+import { runLineBForAccount } from '../modules/pipeline-a/line-b/orchestrator.js';
 
 /**
  * Lane 2 자율 트렌드 워커 · 스케줄러.
@@ -182,11 +185,30 @@ export function startTrendWorkers(): Worker[] {
     ),
   );
 
+  // Line B (상품 우선) — 계정별 잡. 계정마다 다른 시각에 1건씩 (스태거).
+  workers.push(
+    new Worker(
+      QUEUE_NAMES.LINE_B_PUBLISH,
+      async (job) => {
+        const { accountId } = job.data;
+        logger.info({ jobId: job.id, accountId }, 'line-b-publish start');
+        const result = await runLineBForAccount(accountId);
+        logger.info({ jobId: job.id, accountId, result }, 'line-b-publish done');
+        return result;
+      },
+      { connection: redisConnection, concurrency: 1 },
+    ),
+  );
+
   logger.info(
-    'Started 7 trend workers (trend-poll · trend-digest · trend-search · sharing-collect · sharing-publish · account-metrics-sync · shopping-publish)',
+    'Started 8 trend workers (trend-poll · trend-digest · trend-search · sharing-collect · sharing-publish · account-metrics-sync · shopping-publish · line-b-publish)',
   );
   return workers;
 }
+
+// Line B 계정별 발행 시각 (KST). 5계정을 하루에 걸쳐 분산 · 1~4h 시차 (CLAUDE.md 안전 방침).
+// 불규칙한 분(minute)으로 봇 티 최소화. 계정 수 > 슬롯이면 순환.
+const LINE_B_SLOTS = ['20 10 * * *', '10 13 * * *', '40 15 * * *', '20 18 * * *', '10 21 * * *'];
 
 export async function scheduleTrendJobs(): Promise<void> {
   // daily poll at 07:00 KST (하루 1회. 다이제스트 1h 전)
@@ -258,6 +280,10 @@ export async function scheduleTrendJobs(): Promise<void> {
     .removeRepeatable('shopping-publish-daily', { pattern: SHOPPING_PUBLISH_CRON, tz: 'Asia/Seoul' }, 'shopping-publish-daily')
     .catch(() => {});
 
+  // Line B (상품 우선) 계정별 스태거 크론 — 각 계정 하루 1건, 서로 다른 시각.
+  //   같은 상품 금지(크로스계정 DB dedup) · 동시 발행 금지(계정별 다른 slot).
+  await scheduleLineBPerAccount();
+
   logger.info(
     {
       pollCron: POLL_CRON,
@@ -265,7 +291,33 @@ export async function scheduleTrendJobs(): Promise<void> {
       searchCron: SEARCH_CRON,
       sharingCron: SHARING_CRON,
       sharingPublishCron: SHARING_PUBLISH_CRON,
+      lineBSlots: LINE_B_SLOTS.length,
     },
     'trend jobs scheduled (repeat)',
   );
+}
+
+/**
+ * 활성 계정마다 Line B 발행 잡을 서로 다른 시각(slot)에 등록.
+ * jobId = line-b-<accountId> 로 idempotent. 계정 순서(handle)로 slot 배정 → 안정적.
+ */
+async function scheduleLineBPerAccount(): Promise<void> {
+  const accounts = await prisma.account.findMany({
+    where: { isActive: true },
+    select: { id: true, handle: true },
+    orderBy: { handle: 'asc' },
+  });
+  for (let i = 0; i < accounts.length; i++) {
+    const acc = accounts[i]!;
+    const pattern = LINE_B_SLOTS[i % LINE_B_SLOTS.length]!;
+    await lineBPublishQueue.add(
+      `line-b-${acc.id}`,
+      { accountId: acc.id },
+      {
+        repeat: { pattern, tz: 'Asia/Seoul' },
+        jobId: `line-b-${acc.id}`,
+      },
+    );
+    logger.info({ handle: acc.handle, pattern }, 'Line B per-account cron scheduled');
+  }
 }

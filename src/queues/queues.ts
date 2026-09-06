@@ -16,6 +16,7 @@ export const QUEUE_NAMES = {
   SHARING_PUBLISH: 'sharing-publish',
   ACCOUNT_METRICS_SYNC: 'account-metrics-sync',
   SHOPPING_PUBLISH: 'shopping-publish',
+  LINE_B_PUBLISH: 'line-b-publish',
   PERFORMANCE_COLLECT: 'performance-collect',
 } as const;
 
@@ -43,6 +44,7 @@ export type SharingCollectJob = { triggeredBy?: string };
 export type SharingPublishJob = { triggeredBy?: string };
 export type AccountMetricsSyncJob = { triggeredBy?: string };
 export type ShoppingPublishJob = { triggeredBy?: string };
+export type LineBPublishJob = { accountId: string };
 export type PerformanceCollectJob = { postId: string; hoursAfterPublish: number };
 
 const defaultJobOptions = {
@@ -153,6 +155,15 @@ export const shoppingPublishQueue = new Queue<ShoppingPublishJob>(QUEUE_NAMES.SH
   },
 });
 
+export const lineBPublishQueue = new Queue<LineBPublishJob>(QUEUE_NAMES.LINE_B_PUBLISH, {
+  connection: redisConnection,
+  defaultJobOptions: {
+    attempts: 1, // 쿠팡 API·딥링크 호출 있으니 자동 재시도 X (중복 카드 방지)
+    removeOnComplete: { age: 7 * 24 * 3600, count: 60 },
+    removeOnFail: { age: 14 * 24 * 3600 },
+  },
+});
+
 export const performanceQueue = new Queue<PerformanceCollectJob>(QUEUE_NAMES.PERFORMANCE_COLLECT, {
   connection: redisConnection,
   defaultJobOptions: {
@@ -194,6 +205,9 @@ export const queueEvents: Record<QueueName, QueueEvents> = {
     connection: redisConnection,
   }),
   [QUEUE_NAMES.SHOPPING_PUBLISH]: new QueueEvents(QUEUE_NAMES.SHOPPING_PUBLISH, {
+    connection: redisConnection,
+  }),
+  [QUEUE_NAMES.LINE_B_PUBLISH]: new QueueEvents(QUEUE_NAMES.LINE_B_PUBLISH, {
     connection: redisConnection,
   }),
   [QUEUE_NAMES.PERFORMANCE_COLLECT]: new QueueEvents(QUEUE_NAMES.PERFORMANCE_COLLECT, {

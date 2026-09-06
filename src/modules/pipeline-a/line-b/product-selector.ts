@@ -19,7 +19,8 @@ import { PostKind, PostState } from '@prisma/client';
 const PRICE_MIN = 8_000;
 const PRICE_MAX = 300_000;
 const SET_SIZE = 3; // 목표 상품 수 (최소 2 충족 시 발행 가능 — 미디어 2+ 룰)
-const DEDUP_DAYS = 14;
+const DEDUP_DAYS = 14; // 같은 계정 재사용 금지 기간
+const GLOBAL_DEDUP_DAYS = 3; // 크로스계정: 최근 N일 어느 계정이든 쓴 상품 제외 (5계정 겹침 방지)
 
 // 쿠팡 카테고리 코드 (성별·페르소나 정합)
 const CATEGORY_KR: Record<number, string> = {
@@ -71,8 +72,12 @@ export async function selectLineBSet(
     select: { audienceGender: true },
   });
 
-  const recentlyUsed = await getRecentlyUsedProductIds(accountId, DEDUP_DAYS);
-  const exclude = new Set<string>([...recentlyUsed, ...excludeExternalIds]);
+  // dedup: (a) 이 계정 14일 + (b) **아무 계정이나** 최근 3일(크로스계정 · 계정별 스태거 시 같은 상품 방지)
+  const [recentlyUsed, globallyUsed] = await Promise.all([
+    getRecentlyUsedProductIds(accountId, DEDUP_DAYS),
+    getGloballyUsedProductIds(GLOBAL_DEDUP_DAYS),
+  ]);
+  const exclude = new Set<string>([...recentlyUsed, ...globallyUsed, ...excludeExternalIds]);
 
   const client = new CoupangAdapter(env.COUPANG_ACCESS_KEY, env.COUPANG_SECRET_KEY);
   const pool = categoryPoolFor(account.audienceGender);
@@ -140,6 +145,24 @@ async function getRecentlyUsedProductIds(accountId: string, days: number): Promi
   const posts = await prisma.post.findMany({
     where: {
       accountId,
+      kind: PostKind.SHOPPING,
+      createdAt: { gte: since },
+      state: { notIn: [PostState.REJECTED, PostState.FAILED] },
+      commerceProduct: { isNot: null },
+    },
+    select: { commerceProduct: { select: { externalId: true } } },
+  });
+  return posts.map((p) => p.commerceProduct?.externalId).filter((x): x is string => !!x);
+}
+
+/**
+ * 최근 N일 **모든 계정**에서 사용된 CommerceProduct.externalId (크로스계정 dedup).
+ * 계정별 크론이 서로 다른 시각에 돌아 in-memory 조율이 불가하므로 DB 기반으로 겹침 방지.
+ */
+async function getGloballyUsedProductIds(days: number): Promise<string[]> {
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const posts = await prisma.post.findMany({
+    where: {
       kind: PostKind.SHOPPING,
       createdAt: { gte: since },
       state: { notIn: [PostState.REJECTED, PostState.FAILED] },
