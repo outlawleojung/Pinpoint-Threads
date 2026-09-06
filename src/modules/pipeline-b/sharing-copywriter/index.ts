@@ -208,7 +208,8 @@ async function generateOne(
   const response = await llm().complete({
     tier: 'main',
     system: SYSTEM_PROMPT,
-    userParts: [{ type: 'text', text: userPrompt }],
+    // slice() 로 반쪽 잘린 이모지(lone surrogate) 제거 → Anthropic 'no low surrogate' 요청오류 방지
+    userParts: [{ type: 'text', text: sanitizeForLlm(userPrompt) }],
     maxOutputTokens: 700,
     temperature: 0.9 + variantIndex * 0.03,
     jsonMode: true,
@@ -403,6 +404,13 @@ function rotatePick<T>(pool: T[], offset: number, n: number): T[] {
   const out: T[] = [];
   for (let i = 0; i < n; i++) out.push(pool[(start + i) % pool.length]!);
   return out;
+}
+
+/** slice 로 짝 잃은 서로게이트(반쪽 이모지) 제거 — LLM 요청 JSON 깨짐 방지. */
+function sanitizeForLlm(s: string): string {
+  return s
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, '') // 짝 없는 high surrogate
+    .replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, ''); // 짝 없는 low surrogate
 }
 
 function extractJson(raw: string): unknown {

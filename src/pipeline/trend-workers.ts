@@ -81,9 +81,10 @@ export function startTrendWorkers(): Worker[] {
       async (job) => {
         const limit = job.data.limit ?? 15;
         logger.info({ jobId: job.id, limit }, 'trend-digest start');
-        const top = await getTopActiveSignals({ limit });
+        // 쇼핑 관련(카테고리 태깅된) 신호만 — 인물·뉴스·지명 노이즈(category=null) 제외 (사용자 방침)
+        const top = await getTopActiveSignals({ limit, shoppingOnly: true });
         if (top.length === 0) {
-          await sendDigestMessage('📊 오늘의 트렌드 다이제스트\n\n(감지된 신호 없음. Poll 실행 필요)');
+          await sendDigestMessage('📊 오늘의 트렌드 다이제스트\n\n(쇼핑 관련 신호 없음)');
           return { sent: 0 };
         }
         const lines = top.map((s, i) => {

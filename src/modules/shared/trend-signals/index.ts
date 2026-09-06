@@ -132,14 +132,17 @@ export interface TopSignalsFilter {
   category?: TrendCategory;
   minVelocityPct?: number;
   minCrossPlatform?: number;
+  /** true 면 카테고리 태깅된 신호만 (쇼핑 관련). null 카테고리 = 인물·뉴스·지명 노이즈 → 제외. */
+  shoppingOnly?: boolean;
 }
 
 export async function getTopActiveSignals(filter: TopSignalsFilter = {}) {
-  const { limit = 20, category, minVelocityPct, minCrossPlatform } = filter;
+  const { limit = 20, category, minVelocityPct, minCrossPlatform, shoppingOnly } = filter;
   return prisma.trendSignal.findMany({
     where: {
       decayedAt: null,
       ...(category ? { category } : {}),
+      ...(shoppingOnly ? { category: { not: null } } : {}),
       ...(minVelocityPct !== undefined ? { velocityPct: { gte: minVelocityPct } } : {}),
       ...(minCrossPlatform !== undefined
         ? { crossPlatformScore: { gte: minCrossPlatform } }

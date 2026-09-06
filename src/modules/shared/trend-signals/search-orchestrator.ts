@@ -62,7 +62,8 @@ export async function runTrendSearchIngest(
   if (!isApifyConfigured()) throw new ApifyNotConfiguredError();
 
   // 넉넉히 뽑아서 필터 통과율(~60%) 감안하고 topN 확보
-  const rawSignals = await getTopActiveSignals({ limit: topN * 2 });
+  // 쇼핑 관련(카테고리 태깅) 신호만 검색 — 인물·뉴스·지명 노이즈 제외
+  const rawSignals = await getTopActiveSignals({ limit: topN * 2, shoppingOnly: true });
   logger.info({ topN, rawFound: rawSignals.length }, 'trend search orchestrator start');
 
   // 필터·키워드 압축 (정치·인물·시사 drop + 긴 상품명 → 검색어 압축)
