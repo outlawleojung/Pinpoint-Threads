@@ -27,6 +27,11 @@ export interface ShoppingPublishInput {
   accountId: string;
   accountIndex?: number; // 계정 간 시차 배정용 (0..4)
   maxNewPosts?: number; // 이 실행에서 만들 최대 카드 수 (계정당)
+  /**
+   * 이번 배치에서 다른 계정이 이미 가져간 벤치마크 ID.
+   * **계정 간 dedup** — 5계정이 같은 top 벤치마크를 동시에 받던 문제 방지 (계정마다 다른 콘텐츠).
+   */
+  excludeBenchmarkIds?: string[];
 }
 
 export interface ShoppingPublishResult {
@@ -68,6 +73,8 @@ export async function runShoppingForAccount(
 
   // 최근 duplicateLookback 내 이 계정에 이미 사용된 benchmarkPostId (via inboundLinkId 또는 sourceItemId)
   const recentBenchmarkIdsUsed = await getRecentlyUsedBenchmarkIds(account.id, DUPLICATE_LOOKBACK_DAYS);
+  // 계정 간 dedup: 이번 배치에서 다른 계정이 가져간 것도 제외 → 5계정 서로 다른 콘텐츠.
+  const excludeIds = new Set<string>([...recentBenchmarkIdsUsed, ...(input.excludeBenchmarkIds ?? [])]);
 
   const lookbackDate = new Date(Date.now() - BENCHMARK_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
   // 하이브리드 + 자동 매칭 모두 후보. 승인 카드에서 사용자님이 매칭 확인 후 승인/리젝.
@@ -76,7 +83,7 @@ export async function runShoppingForAccount(
       contentType: ContentType.SHOPPING,
       collectedAt: { gte: lookbackDate },
       mediaUrls: { isEmpty: false },
-      id: { notIn: Array.from(recentBenchmarkIdsUsed) },
+      id: { notIn: Array.from(excludeIds) },
     },
     orderBy: [{ likesCount: 'desc' }, { collectedAt: 'desc' }],
     take: slotsLeft * 6,
@@ -240,10 +247,17 @@ export async function runShoppingForAllAccounts(): Promise<ShoppingBatchSummary>
     perAccount: [],
   };
 
+  // 계정 간 dedup: 이번 배치에서 이미 배정된 벤치마크는 다음 계정에서 제외 (같은 콘텐츠 동시 배포 방지)
+  const usedBenchmarkIds = new Set<string>();
   for (let i = 0; i < accounts.length; i++) {
     const acc = accounts[i]!;
     try {
-      const results = await runShoppingForAccount({ accountId: acc.id, accountIndex: i });
+      const results = await runShoppingForAccount({
+        accountId: acc.id,
+        accountIndex: i,
+        excludeBenchmarkIds: Array.from(usedBenchmarkIds),
+      });
+      for (const r of results) if (r.benchmarkPostId) usedBenchmarkIds.add(r.benchmarkPostId);
       summary.perAccount.push({ handle: acc.handle, results });
       for (const r of results) {
         if (r.status === 'sent_for_approval') summary.sent += 1;
