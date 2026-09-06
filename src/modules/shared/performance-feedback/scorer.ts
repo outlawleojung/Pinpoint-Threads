@@ -106,8 +106,12 @@ export function classifyPool(kind: PostKind, posts: RawPost[]): ScoredPost[] {
   });
 }
 
-/** DB에서 PUBLISHED 게시글 최신 스냅샷(72h 우선) 로드 → 종류별 분류. */
-export async function scoreAllPublished(): Promise<ScoredPost[]> {
+/**
+ * DB에서 PUBLISHED 게시글 스냅샷 로드 → 종류별 분류.
+ * @param horizon 특정 시점(24·72)으로 채점. 미지정이면 최신 스냅샷(72h 우선).
+ *   확산 판정("24h·72h 둘 다 winner")에 사용.
+ */
+export async function scoreAllPublished(horizon?: 24 | 72): Promise<ScoredPost[]> {
   const posts = await prisma.post.findMany({
     where: { state: PostState.PUBLISHED },
     select: {
@@ -116,16 +120,18 @@ export async function scoreAllPublished(): Promise<ScoredPost[]> {
       account: { select: { handle: true } },
       insightSnapshots: {
         orderBy: { hoursAfterPublish: 'desc' },
-        take: 1,
         select: { hoursAfterPublish: true, views: true, likes: true, replies: true, reposts: true },
       },
     },
   });
 
+  const pickSnap = (snaps: { hoursAfterPublish: number; views: number; likes: number; replies: number; reposts: number }[]) =>
+    horizon ? snaps.find((s) => s.hoursAfterPublish === horizon) : snaps[0]; // snaps 는 desc 정렬 → [0]=최신
+
   const raws: RawPost[] = posts
-    .filter((p) => p.insightSnapshots.length > 0)
-    .map((p) => {
-      const s = p.insightSnapshots[0]!;
+    .map((p) => ({ p, s: pickSnap(p.insightSnapshots) }))
+    .filter((x): x is { p: typeof x.p; s: NonNullable<typeof x.s> } => !!x.s)
+    .map(({ p, s }) => {
       return {
         postId: p.id,
         kind: p.kind,
