@@ -33,7 +33,7 @@ export type EngagementJob = {
   targetPostId: string;
 };
 export type TrendPollJob = { triggeredBy?: string };
-export type TrendDigestJob = { limit?: number };
+export type TrendDigestJob = { limit?: number; perBucket?: number };
 export type TrendSearchJob = {
   topSignals?: number;
   perPlatformResults?: number;

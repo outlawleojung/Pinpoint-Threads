@@ -26,6 +26,12 @@ export interface LlmCompletionInput {
   temperature?: number;
   jsonMode?: boolean;   // true면 JSON 응답 강제
   jsonSchema?: unknown; // Gemini responseSchema (Vertex AI OpenAPI 3.0 스타일)
+  /**
+   * 확장 사고(extended thinking) 제어. claude-sonnet-5는 기본 ON이라
+   * thinking 블록이 max_tokens 예산을 잠식해 긴 JSON 출력을 잘라먹을 수 있다.
+   * 긴 구조화 출력엔 'disabled' 권장. 미지정 시 모델/서버 기본값.
+   */
+  thinking?: 'disabled';
 }
 
 export interface LlmCompletionResult {

@@ -41,12 +41,20 @@ export class AnthropicProvider implements LlmProvider {
       model,
       max_tokens: input.maxOutputTokens ?? 1024,
       system: input.system,
+      // claude-sonnet-5는 thinking 기본 ON → 긴 JSON 출력이 잘리는 문제. 호출부가 요청 시 비활성화.
+      ...(input.thinking === 'disabled' ? { thinking: { type: 'disabled' as const } } : {}),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       messages: [{ role: 'user', content: content as any }],
     });
 
     const block = response.content.find((b) => b.type === 'text');
-    if (!block || block.type !== 'text') throw new Error('no text block in anthropic response');
+    if (!block || block.type !== 'text') {
+      // thinking 블록이 max_tokens를 소진해 text가 없을 때 원인을 명확히 남긴다.
+      const types = response.content.map((b) => b.type).join(',');
+      throw new Error(
+        `no text block in anthropic response (stop=${response.stop_reason}, blocks=[${types}])`,
+      );
+    }
 
     logger.debug(
       { model, inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens },

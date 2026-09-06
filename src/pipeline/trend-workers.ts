@@ -13,10 +13,10 @@ import {
 import { logger } from '../config/logger.js';
 import {
   pollAllAdapters,
-  getTopActiveSignals,
   decayOldSignals,
   type TrendSourceAdapter,
 } from '../modules/shared/trend-signals/index.js';
+import { generatePostableTopics } from '../modules/shared/trend-signals/topic-generator.js';
 import { NaverDatalabAdapter } from '../modules/shared/trend-signals/adapters/naver-datalab.js';
 import { GoogleTrendsAdapter } from '../modules/shared/trend-signals/adapters/google-trends.js';
 import { CoupangRankingAdapter } from '../modules/shared/trend-signals/adapters/coupang-ranking.js';
@@ -79,32 +79,35 @@ export function startTrendWorkers(): Worker[] {
     new Worker(
       QUEUE_NAMES.TREND_DIGEST,
       async (job) => {
-        const limit = job.data.limit ?? 15;
-        logger.info({ jobId: job.id, limit }, 'trend-digest start');
-        // 쇼핑 관련(카테고리 태깅된) 신호만 — 인물·뉴스·지명 노이즈(category=null) 제외 (사용자 방침)
-        const top = await getTopActiveSignals({ limit, shoppingOnly: true });
-        if (top.length === 0) {
-          await sendDigestMessage('📊 오늘의 트렌드 다이제스트\n\n(쇼핑 관련 신호 없음)');
-          return { sent: 0 };
-        }
-        const lines = top.map((s, i) => {
-          const v =
-            s.velocityPct == null
-              ? ''
-              : s.velocityPct > 0
-                ? ` +${s.velocityPct.toFixed(0)}%`
-                : ` ${s.velocityPct.toFixed(0)}%`;
-          const cross = s.crossPlatformScore > 1 ? ` ×${s.crossPlatformScore}` : '';
-          const cat = s.category ? ` [${s.category}]` : '';
-          return `${i + 1}. ${s.keyword}${cat}${v}${cross}`;
-        });
-        const body =
-          `📊 오늘의 트렌드 다이제스트 (상위 ${top.length})\n\n` +
-          lines.join('\n') +
-          '\n\n💡 관심 있는 항목을 각 플랫폼에서 검색해서 좋은 게시글 URL을 이 챗에 붙여넣으면 자동 처리됩니다.';
+        const perBucket = job.data.perBucket ?? job.data.limit ?? 6;
+        logger.info({ jobId: job.id, perBucket }, 'trend-digest start');
 
-        await sendDigestMessage(body);
-        return { sent: top.length };
+        // 원시 신호가 아니라 **발행 가능한 주제(앵글)** 로 변환 (topic-generator).
+        //   - shopping[]: 트렌드 상품/카테고리 → 비교·최저가·추천 앵글 (Line B)
+        //   - engagement[]: 일상·공감 훅 (인물·정치·스포츠 하드 드롭)
+        const topics = await generatePostableTopics({ perBucket });
+
+        if (topics.shopping.length === 0 && topics.engagement.length === 0) {
+          await sendDigestMessage('📊 오늘의 트렌드 주제\n\n(발행 가능한 주제 없음 — 신호 부족)');
+          return { shopping: 0, engagement: 0 };
+        }
+
+        const fmt = (t: (typeof topics.shopping)[number], i: number) =>
+          `${i + 1}. ${t.title}\n   └ ${t.angle} · 근거: ${t.basis}\n   💬 "${t.hook}"`;
+
+        const sections: string[] = ['📊 오늘의 트렌드 발행 주제'];
+        if (topics.shopping.length) {
+          sections.push('🛒 쇼핑 앵글 (비교·최저가·추천)\n' + topics.shopping.map(fmt).join('\n'));
+        }
+        if (topics.engagement.length) {
+          sections.push('💬 일상·공감 훅\n' + topics.engagement.map(fmt).join('\n'));
+        }
+        sections.push(
+          '💡 마음에 드는 주제로 각 플랫폼에서 좋은 게시글 URL을 찾아 붙여넣으면 자동 처리됩니다.',
+        );
+
+        await sendDigestMessage(sections.join('\n\n'));
+        return { shopping: topics.shopping.length, engagement: topics.engagement.length };
       },
       { connection: redisConnection, concurrency: 1 },
     ),
@@ -199,7 +202,7 @@ export async function scheduleTrendJobs(): Promise<void> {
   // daily digest at 08:00 KST
   await trendDigestQueue.add(
     'trend-digest-daily',
-    { limit: 15 },
+    { perBucket: 6 },
     {
       repeat: { pattern: DIGEST_CRON, tz: 'Asia/Seoul' },
       jobId: 'trend-digest-daily',
