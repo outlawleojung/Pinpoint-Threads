@@ -23,6 +23,7 @@ export interface ScoredPost {
   likes: number;
   replies: number;
   reposts: number;
+  replyViews: number | null;
   hoursAfterPublish: number;
   score: number;
   rank: Rank;
@@ -31,9 +32,9 @@ export interface ScoredPost {
 
 /** 풀이 이 크기 미만이면 판정 보류(전원 neutral). */
 export const MIN_POOL = 5;
-/** 쇼핑 winner 절대 바닥 (조회). 배수 규칙과 AND. */
-export const SHOPPING_MIN_VIEWS = 200;
-/** 쇼핑 winner = 조회 ≥ 풀 중앙값 × 이 배수. */
+/** 쇼핑 winner 절대 바닥. 배수 규칙과 AND. 댓글조회(~한자릿수)·본문조회 양쪽에 맞게 작게. */
+export const SHOPPING_MIN_SCORE = 10;
+/** 쇼핑 winner = 점수 ≥ 풀 중앙값 × 이 배수 (스케일 무관 상대 규칙). */
 export const SHOPPING_WINNER_MULT = 5;
 /** 상·하위 백분위 컷 (스하리 winner/loser · 쇼핑 loser). */
 export const TOP_PCT = 0.7;
@@ -53,13 +54,21 @@ interface RawPost {
   likes: number;
   replies: number;
   reposts: number;
+  /** 고정 댓글(쿠팡 링크) 조회 = 쇼핑 클릭 게이트. null = 미수집(구 데이터) → 본문 조회 fallback. */
+  replyViews: number | null;
   hoursAfterPublish: number;
+}
+
+/** 쇼핑 점수 = 댓글 조회(클릭 게이트) 우선, 없으면 본문 조회 fallback. */
+function shoppingMetric(p: RawPost): { score: number; fromReply: boolean } {
+  if (p.replyViews != null) return { score: p.replyViews, fromReply: true };
+  return { score: p.views, fromReply: false };
 }
 
 /** 종류별 원시 성과 배열 → 분류. 순수 함수(테스트 대상). */
 export function classifyPool(kind: PostKind, posts: RawPost[]): ScoredPost[] {
   const scoreOf = (p: RawPost) =>
-    kind === PostKind.SHOPPING ? p.views : p.likes + p.replies + p.reposts;
+    kind === PostKind.SHOPPING ? shoppingMetric(p).score : p.likes + p.replies + p.reposts;
 
   const withScore = posts.map((p) => ({ ...p, score: scoreOf(p) }));
 
@@ -81,15 +90,16 @@ export function classifyPool(kind: PostKind, posts: RawPost[]): ScoredPost[] {
     let rank: Rank = 'neutral';
     let basis = '';
     if (kind === PostKind.SHOPPING) {
-      const thr = Math.max(SHOPPING_MIN_VIEWS, median * SHOPPING_WINNER_MULT);
+      const src = shoppingMetric(p).fromReply ? '댓글조회' : '본문조회(댓글미수집)';
+      const thr = Math.max(SHOPPING_MIN_SCORE, median * SHOPPING_WINNER_MULT);
       if (p.score >= thr) {
         rank = 'winner';
-        basis = `조회 ${p.score} ≥ max(${SHOPPING_MIN_VIEWS}, 중앙값${median}×${SHOPPING_WINNER_MULT}=${median * SHOPPING_WINNER_MULT})`;
+        basis = `${src} ${p.score} ≥ max(${SHOPPING_MIN_SCORE}, 중앙값${median}×${SHOPPING_WINNER_MULT}=${median * SHOPPING_WINNER_MULT})`;
       } else if (p.score <= pBottom) {
         rank = 'loser';
-        basis = `조회 ${p.score} ≤ 하위30%(${pBottom})`;
+        basis = `${src} ${p.score} ≤ 하위30%(${pBottom})`;
       } else {
-        basis = `조회 ${p.score} · 중간(신호 미약)`;
+        basis = `${src} ${p.score} · 중간(신호 미약)`;
       }
     } else {
       if (p.score >= pTop) {
@@ -120,12 +130,12 @@ export async function scoreAllPublished(horizon?: 24 | 72): Promise<ScoredPost[]
       account: { select: { handle: true } },
       insightSnapshots: {
         orderBy: { hoursAfterPublish: 'desc' },
-        select: { hoursAfterPublish: true, views: true, likes: true, replies: true, reposts: true },
+        select: { hoursAfterPublish: true, views: true, likes: true, replies: true, reposts: true, replyViews: true },
       },
     },
   });
 
-  const pickSnap = (snaps: { hoursAfterPublish: number; views: number; likes: number; replies: number; reposts: number }[]) =>
+  const pickSnap = (snaps: { hoursAfterPublish: number; views: number; likes: number; replies: number; reposts: number; replyViews: number | null }[]) =>
     horizon ? snaps.find((s) => s.hoursAfterPublish === horizon) : snaps[0]; // snaps 는 desc 정렬 → [0]=최신
 
   const raws: RawPost[] = posts
@@ -140,6 +150,7 @@ export async function scoreAllPublished(horizon?: 24 | 72): Promise<ScoredPost[]
         likes: s.likes,
         replies: s.replies,
         reposts: s.reposts,
+        replyViews: s.replyViews,
         hoursAfterPublish: s.hoursAfterPublish,
       };
     });

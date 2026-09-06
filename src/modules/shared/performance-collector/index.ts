@@ -91,6 +91,22 @@ export async function collectSnapshot(input: {
   const quotes = insights.quotes ?? 0;
   const views = insights.views ?? 0;
 
+  // 고정 댓글(쿠팡 링크 위치) 자체 성과 = 쇼핑 클릭 게이트. 링크 클릭하려면 댓글을 봐야 하므로
+  // 본문 조회보다 이게 실 클릭 가능성에 직결(실측: 본문58 vs 댓글3 ≈ 5%). best-effort.
+  let replyViews: number | null = null;
+  let replyLikes: number | null = null;
+  let replyReplies: number | null = null;
+  if (post.threadsReplyId) {
+    try {
+      const r = await client.fetchInsights({ accessToken, threadsPostId: post.threadsReplyId });
+      replyViews = r.views ?? 0;
+      replyLikes = r.likes ?? 0;
+      replyReplies = r.replies ?? 0;
+    } catch (err) {
+      logger.warn({ err, postId: input.postId, replyId: post.threadsReplyId }, 'reply insights fetch 실패 (본문은 정상)');
+    }
+  }
+
   // engagementScore = (likes + replies*3 + reposts*5 + quotes*4) / max(views, 1)
   // 가중치 이유: repost > quote > reply > like (확산 기여도 순)
   const rawScore = likes + replies * 3 + reposts * 5 + quotes * 4;
@@ -111,6 +127,9 @@ export async function collectSnapshot(input: {
       reposts,
       quotes,
       views,
+      replyViews,
+      replyLikes,
+      replyReplies,
       engagementScore,
       raw: insights as any,
     },
@@ -120,6 +139,9 @@ export async function collectSnapshot(input: {
       reposts,
       quotes,
       views,
+      replyViews,
+      replyLikes,
+      replyReplies,
       engagementScore,
       collectedAt: new Date(),
       raw: insights as any,

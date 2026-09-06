@@ -173,6 +173,12 @@ model PostInsightSnapshot {
   quotes             Int       @default(0)
   views              Int       @default(0)
 
+  // 고정 댓글(쿠팡 링크 위치) 자체 성과 — 쇼핑 클릭 게이트. 링크 클릭하려면 댓글을 봐야 하므로
+  // 본문 조회보다 이게 실제 클릭 가능성에 직결. null = 아직 수집 안 됨(구 데이터·댓글 없음).
+  replyViews         Int?
+  replyLikes         Int?
+  replyReplies       Int?
+
   engagementScore    Float?    // (likes + replies*3 + reposts*5 + quotes*4) / max(views, 1)
 
   raw                Json?
