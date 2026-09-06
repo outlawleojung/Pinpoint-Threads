@@ -59,8 +59,10 @@ export async function matchProduct(input: MatchInput): Promise<MatchOutcome> {
   for (attempts = 1; attempts <= maxAttempts; attempts++) {
     let candidates: CommerceSearchResult[];
     try {
-      // 비용 절감: 후보 5→3 (Vision 호출이 후보당 1회 · 가장 비쌈)
-      candidates = await primary.search(keyword, { limit: 3 });
+      // trustKeyword(수동 상품명): Vision 안 쓰므로 3개. 자동 매칭: Vision 이 올바른 색/변형을
+      // 고르려면 후보에 그 변형이 있어야 함 → 6개로 넓혀 정확도↑ (색 포함 검색어와 결합).
+      const searchLimit = input.trustKeyword ? 3 : 6;
+      candidates = await primary.search(keyword, { limit: searchLimit });
     } catch (err) {
       logger.error({ err, attempts, channel: primary.channel }, 'product search failed');
       return { success: false, reason: 'error', attempts };
