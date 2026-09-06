@@ -8,9 +8,18 @@ status: "active"
 
 **새 세션 시작 시 이 파일을 먼저 읽으세요.**
 
-Last updated: 2026-09-03 (상품명 발행 흐름 확정 · 성별·비디오·1계정 정책 · 비용 절감)
-Last commit: `4aebadd` (hardening: 발행 경로 실위험 11건 · PUBLISHING 스톨 복구·멱등·미러순서·오매칭폐기 등, minyoung 실발행 검증)
-직전 세션 로그: [docs/session-log/2026-09-03.md](session-log/2026-09-03.md)
+Last updated: 2026-09-06 (성과 피드백 루프 · 매칭 정확도 T2 · 2라인 쇼핑 전략)
+Last commit: `915546f` (계정 간 벤치마크 dedup)
+직전 세션 로그: [docs/session-log/2026-09-06.md](session-log/2026-09-06.md) · 로드맵: [docs/ROADMAP.md](ROADMAP.md)
+
+### 🔴 2026-09-06 주요 변경 (아래 표들보다 이게 최신)
+- **성과 피드백 루프 구축·라이브**: scorer(쇼핑=댓글조회 클릭게이트·스하리=참여합) · copy-learning(스하리 winner 요인학습) · propagation(본문조회≥10,000 절대기준 → 계정별 재생성 카드, 72h 트리거). spec: docs/superpowers/specs/2026-09-06-performance-feedback-loop-design.md
+- **자동 쇼핑 크론 정지 상태 유지** (아래 크론표의 "shopping-publish 완전 자동"은 **폐기됨**). 수동 3줄 흐름 + (재개 대비)계정간 dedup 완료.
+- **트렌드 다이제스트/서치 = 쇼핑관련(category≠null)만** (인물·뉴스·지명 노이즈 제거).
+- **매칭 T2**: 검색어 색/변형 포함 · Vision 색·모델 엄격화 · 자동후보 6.
+- **스하리**: 트렌드 기반 벤치마크 + 다양성 + 서로게이트 sanitize.
+- **2라인 쇼핑 전략 확정**: Line A(콘텐츠우선·현행) + Line B(상품우선·트렌드→돈되는상품→비교/최저가·신규) · 쿠팡+네이버 병행. → ROADMAP.md
+- **schema**: PostInsightSnapshot.replyViews/replyLikes/replyReplies (댓글 성과).
 
 ### 핵심 흐름 (2026-09-03 후반 확정) — [manual-shopping-flow](08-decisions/manual-shopping-flow.md)
 - **텔레그램은 쿠팡 링크 전송 차단** → 사용자는 **3줄** 로 보냄: 벤치마크 URL + 상품명(텍스트) + "비디오 있음/없음"
