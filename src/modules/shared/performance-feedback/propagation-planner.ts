@@ -16,12 +16,12 @@ const SHOPPING_DAILY_CAP = 2;
 const DUP_LOOKBACK_DAYS = 14;
 
 /**
- * 확산 절대 기준: 고정 댓글(쿠팡 링크) 조회 ≥ 이 값이면 확산 후보.
- * 상대(내 글 중 best) 아님 — 절대 수치로 "실제로 잘된 것"만 타 계정에 확산.
- * 24h·72h 둘 다 이 기준을 넘어야 함(지속 검증).
- * TODO: 쿠팡 대시보드 클릭/전환 확보 시 이 값을 실 데이터로 보정.
+ * 확산 절대 기준: **본문 조회 ≥ 이 값** 이면 확산 후보 (2026-09-06 사용자 방침).
+ * 상대(내 글 중 best) 아님 — 절대 수치로 "진짜 터진 것"만 타 계정에 확산.
+ * 24h·72h 둘 다 이 기준을 넘어야 함(지속 검증). 현재 최고 본문조회 3359 → 아직 아무것도 확산 안 됨(의도).
+ * 본문조회 →(~10%) 댓글조회 →(∝) 클릭 퍼널 · 대시보드 확보 시 정밀 보정.
  */
-export const PROPAGATION_MIN_COMMENT_VIEWS = 100;
+export const PROPAGATION_MIN_POST_VIEWS = 10000;
 
 export interface PropagationTarget {
   accountId: string;
@@ -110,15 +110,15 @@ export async function planPropagation(): Promise<PropagationPlan[]> {
       commerceProductId: true,
       account: { select: { handle: true } },
       commerceProduct: { select: { productName: true } },
-      insightSnapshots: { select: { hoursAfterPublish: true, replyViews: true } },
+      insightSnapshots: { select: { hoursAfterPublish: true, views: true } },
     },
   });
   const confirmed = posts.filter((p) => {
-    const cv = (h: number) => p.insightSnapshots.find((s) => s.hoursAfterPublish === h)?.replyViews;
-    const cv24 = cv(24);
-    const cv72 = cv(72);
-    // 댓글 조회 미수집(null)이면 게이트 확인 불가 → 확산 안 함.
-    return cv24 != null && cv72 != null && cv24 >= PROPAGATION_MIN_COMMENT_VIEWS && cv72 >= PROPAGATION_MIN_COMMENT_VIEWS;
+    const v = (h: number) => p.insightSnapshots.find((s) => s.hoursAfterPublish === h)?.views;
+    const v24 = v(24);
+    const v72 = v(72);
+    // 본문 조회가 24h·72h 둘 다 절대 기준 이상 (지속 검증).
+    return v24 != null && v72 != null && v24 >= PROPAGATION_MIN_POST_VIEWS && v72 >= PROPAGATION_MIN_POST_VIEWS;
   });
 
   const plans: PropagationPlan[] = [];
@@ -136,7 +136,7 @@ export async function planPropagation(): Promise<PropagationPlan[]> {
       targets,
     });
   }
-  logger.info({ confirmed: confirmed.length, plans: plans.length, threshold: PROPAGATION_MIN_COMMENT_VIEWS }, 'propagation plan (절대 댓글조회 기준)');
+  logger.info({ confirmed: confirmed.length, plans: plans.length, threshold: PROPAGATION_MIN_POST_VIEWS }, 'propagation plan (절대 본문조회 기준)');
   return plans;
 }
 
