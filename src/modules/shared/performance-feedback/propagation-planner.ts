@@ -1,7 +1,6 @@
 import { PostKind, PostState } from '@prisma/client';
 import { prisma } from '../../../db/prisma.js';
 import { logger } from '../../../config/logger.js';
-import { scoreAllPublished } from './scorer.js';
 
 /**
  * Propagation Planner — 성과 피드백 루프 유닛 ③ (성과 게이팅 확산).
@@ -15,6 +14,14 @@ import { scoreAllPublished } from './scorer.js';
 
 const SHOPPING_DAILY_CAP = 2;
 const DUP_LOOKBACK_DAYS = 14;
+
+/**
+ * 확산 절대 기준: 고정 댓글(쿠팡 링크) 조회 ≥ 이 값이면 확산 후보.
+ * 상대(내 글 중 best) 아님 — 절대 수치로 "실제로 잘된 것"만 타 계정에 확산.
+ * 24h·72h 둘 다 이 기준을 넘어야 함(지속 검증).
+ * TODO: 쿠팡 대시보드 클릭/전환 확보 시 이 값을 실 데이터로 보정.
+ */
+export const PROPAGATION_MIN_COMMENT_VIEWS = 100;
 
 export interface PropagationTarget {
   accountId: string;
@@ -94,30 +101,42 @@ async function evalTargets(
  * side-effect 없음(계획만).
  */
 export async function planPropagation(): Promise<PropagationPlan[]> {
-  const [s24, s72] = await Promise.all([scoreAllPublished(24), scoreAllPublished(72)]);
-  const win24 = new Set(s24.filter((s) => s.kind === PostKind.SHOPPING && s.rank === 'winner').map((s) => s.postId));
-  const confirmed = s72.filter((s) => s.kind === PostKind.SHOPPING && s.rank === 'winner' && win24.has(s.postId));
+  // 절대 기준: 댓글 조회(클릭 게이트)가 24h·72h 둘 다 PROPAGATION_MIN_COMMENT_VIEWS 이상인 SHOPPING 만.
+  const posts = await prisma.post.findMany({
+    where: { state: PostState.PUBLISHED, kind: PostKind.SHOPPING, commerceProductId: { not: null } },
+    select: {
+      id: true,
+      accountId: true,
+      commerceProductId: true,
+      account: { select: { handle: true } },
+      commerceProduct: { select: { productName: true } },
+      insightSnapshots: { select: { hoursAfterPublish: true, replyViews: true } },
+    },
+  });
+  const confirmed = posts.filter((p) => {
+    const cv = (h: number) => p.insightSnapshots.find((s) => s.hoursAfterPublish === h)?.replyViews;
+    const cv24 = cv(24);
+    const cv72 = cv(72);
+    // 댓글 조회 미수집(null)이면 게이트 확인 불가 → 확산 안 함.
+    return cv24 != null && cv72 != null && cv24 >= PROPAGATION_MIN_COMMENT_VIEWS && cv72 >= PROPAGATION_MIN_COMMENT_VIEWS;
+  });
 
   const plans: PropagationPlan[] = [];
-  for (const w of confirmed) {
-    const post = await prisma.post.findUnique({
-      where: { id: w.postId },
-      select: { accountId: true, commerceProductId: true, account: { select: { handle: true } }, commerceProduct: { select: { productName: true } } },
-    });
-    if (!post?.commerceProductId) continue;
-    const productName = post.commerceProduct?.productName ?? '';
+  for (const p of confirmed) {
+    if (!p.commerceProductId) continue;
+    const productName = p.commerceProduct?.productName ?? '';
     const productGender = inferGender(productName);
-    const targets = await evalTargets(post.accountId, post.commerceProductId, productGender);
+    const targets = await evalTargets(p.accountId, p.commerceProductId, productGender);
     plans.push({
-      winnerPostId: w.postId,
-      originHandle: post.account?.handle ?? '?',
-      productId: post.commerceProductId,
+      winnerPostId: p.id,
+      originHandle: p.account?.handle ?? '?',
+      productId: p.commerceProductId,
       productName,
       productGender,
       targets,
     });
   }
-  logger.info({ confirmedWinners: confirmed.length, plans: plans.length }, 'propagation plan computed');
+  logger.info({ confirmed: confirmed.length, plans: plans.length, threshold: PROPAGATION_MIN_COMMENT_VIEWS }, 'propagation plan (절대 댓글조회 기준)');
   return plans;
 }
 
