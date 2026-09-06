@@ -457,3 +457,64 @@ model BenchmarkPost {
   @@index([taggedAt])
   @@index([platform, likesCount])
 }
+
+// ==========================================
+// Pipeline D: 네이버 블로그 쇼핑커넥트
+// ==========================================
+enum NaverPostState {
+  DRAFT      // 생성 직후
+  PLANNED    // 원고 생성 완료, 승인 대기
+  READY      // 승인됨, 발행 페이지 준비
+  PUBLISHED  // 사용자가 수동 발행 완료로 표시
+}
+
+enum NaverPostKind {
+  INFO       // 순수 정보성 (7)
+  AFFILIATE  // 제휴 상품 (3)
+}
+
+model NaverBlogConfig {
+  id             String  @id @default(cuid())
+  topic          String                       // 1블로그 1주제군 (예: "뷰티·생활템")
+  cadencePerWeek Int     @default(4)
+  affiliateRatio Float   @default(0.3)         // 제휴 글 목표 비율 상한
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model NaverProduct {
+  id           String   @id @default(cuid())
+  externalId   String                          // 쇼핑검색 productId
+  productName  String
+  productUrl   String                          // 스마트스토어 canonical URL
+  connectUrl   String                          // 사용자 제공 쇼핑커넥트 제휴 링크
+  thumbnailUrl String?
+  price        Int?
+  specsJson    Json?                           // 스펙·경쟁제품 보강 데이터
+  imageUrls    String[]                        // 공식 상품 이미지(자동 취득)
+  createdAt    DateTime @default(now())
+  naverPosts   NaverPost[]
+
+  @@index([externalId])
+}
+
+model NaverPost {
+  id                 String         @id @default(cuid())
+  state              NaverPostState @default(DRAFT)
+  kind               NaverPostKind  @default(AFFILIATE)
+  topic              String
+  title              String?
+  draftJson          Json?                        // NaverPostDraft 직렬화
+  connectUrl         String?
+  imageUrls          String[]                     // 공식 + Gemini 보조 (순서 = 삽입 순서)
+  productId          String?
+  product            NaverProduct?  @relation(fields: [productId], references: [id])
+  telegramNotifiedAt DateTime?
+  approvedAt         DateTime?
+  publishedAt        DateTime?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  @@index([state])
+  @@index([kind, createdAt])
+}
