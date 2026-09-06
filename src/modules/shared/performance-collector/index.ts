@@ -141,6 +141,19 @@ export async function collectSnapshot(input: {
     'performance snapshot collected',
   );
 
+  // 72h 스냅샷 완료 → 성과 게이팅 확산 sweep (best-effort · confirmed winner 있을 때만 카드 생성).
+  // 스냅샷 수집 자체엔 영향 없음(실패해도 무시).
+  if (input.hoursAfterPublish === 72) {
+    try {
+      const { runPropagationSweep } = await import('../performance-feedback/executor.js');
+      const sweep = await runPropagationSweep();
+      const created = sweep.reduce((a, r) => a + r.created.length, 0);
+      if (created > 0) logger.info({ created }, '성과 게이팅 확산: 카드 생성됨');
+    } catch (err) {
+      logger.warn({ err }, 'propagation sweep 실패 (snapshot 은 정상)');
+    }
+  }
+
   return {
     snapshotId: snapshot.id,
     postId: input.postId,
