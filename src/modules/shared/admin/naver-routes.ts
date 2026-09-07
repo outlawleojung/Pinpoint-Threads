@@ -19,6 +19,20 @@ export function renderPublishPage(
     </div>`
     : '';
   const blocksHtml = pkg.blocks.map((b, i) => {
+    if (b.type === 'CTA') {
+      const note = b.note ? `<div class="note">${esc(b.note)}</div>` : '';
+      const copyBtn = `<button class="copy" data-i="${i}">복사</button>`;
+      return `<div class="block ${b.type}">
+      <div class="btype">${b.type}</div>
+      <div style="background:#03c75a;color:#fff;font-size:1.25em;font-weight:700;text-align:center;padding:18px;border-radius:12px;margin:16px 0">
+        🛒 ${esc(b.text)}
+      </div>
+      <div style="text-align:center;font-size:.85em;color:#555;margin-bottom:6px">
+        <span class="text" id="blk-${i}">${esc(b.url ?? '')}</span> ${copyBtn}
+      </div>
+      ${note}
+    </div>`;
+    }
     if (b.type === 'IMAGE') {
       const img = b.imageUrl ? `<img src="${esc(b.imageUrl)}" style="max-width:220px;border-radius:8px;display:block;margin:0 auto 10px">` : '';
       const label = b.imageUrl ? '📷 여기에 이미지' : '📷 여기에 이미지 넣기';
@@ -99,6 +113,7 @@ export async function registerNaverRoutes(app: AnyFastify): Promise<void> {
     if (!post || !post.draftJson) return reply.code(404).send('not found');
     const pkg = buildPublishPackage(post.draftJson as unknown as NaverPostDraft, post.imageUrls, {
       includeDisclaimer: post.kind !== 'INFO',
+      connectUrl: post.connectUrl ?? undefined,
     });
     return reply.type('text/html').send(renderPublishPage(post, pkg));
   });

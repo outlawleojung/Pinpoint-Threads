@@ -1,11 +1,12 @@
 import type { NaverPostDraft } from '../naver-copywriter/schema.js';
 
-export type PublishBlockType = 'TITLE' | 'HEADING' | 'PARAGRAPH' | 'IMAGE' | 'TAGS' | 'DISCLAIMER';
+export type PublishBlockType = 'TITLE' | 'HEADING' | 'PARAGRAPH' | 'IMAGE' | 'TAGS' | 'DISCLAIMER' | 'CTA';
 export interface PublishBlock {
   type: PublishBlockType;
   text: string;
   note?: string;
   imageUrl?: string;
+  url?: string;
 }
 export interface PublishPackage {
   blocks: PublishBlock[];
@@ -15,9 +16,11 @@ export interface PublishPackage {
 export function buildPublishPackage(
   draft: NaverPostDraft,
   imageUrls: string[],
-  opts?: { includeDisclaimer?: boolean },
+  opts?: { includeDisclaimer?: boolean; connectUrl?: string },
 ): PublishPackage {
   const includeDisclaimer = opts?.includeDisclaimer ?? true;
+  const connectUrl = opts?.connectUrl;
+  const hasCta = typeof connectUrl === 'string' && connectUrl.length > 0;
   const blocks: PublishBlock[] = [];
   const imgQueue = [...imageUrls];
 
@@ -38,7 +41,7 @@ export function buildPublishPackage(
   };
 
   blocks.push({ type: 'PARAGRAPH', text: draft.intro });
-  if (includeDisclaimer) {
+  if (includeDisclaimer && !hasCta) {
     blocks.push({ type: 'DISCLAIMER', text: draft.disclaimer, note: '첫 제휴 링크 전에 위치(공정위 필수)' });
   }
   emitImagesAfter(0);
@@ -55,10 +58,26 @@ export function buildPublishPackage(
     blocks.push({ type: 'IMAGE', text: '추가 이미지', imageUrl: url, note: '적절한 위치에 삽입' });
   }
 
+  if (hasCta) {
+    blocks.push({
+      type: 'CTA',
+      text: '상품 확인하러 가기',
+      url: connectUrl,
+      note: '네이버 에디터에서 이 문구(또는 버튼/이미지)에 위 링크를 거세요',
+    });
+    if (includeDisclaimer) {
+      blocks.push({ type: 'DISCLAIMER', text: draft.disclaimer, note: '첫 제휴 링크 전에 위치(공정위 필수)' });
+    }
+  }
+
   blocks.push({ type: 'TAGS', text: draft.tags.map((t) => `#${t}`).join(' '), note: '태그란에 입력' });
 
   const plainText = blocks
-    .map((b) => (b.type === 'IMAGE' ? `[이미지: ${b.text}]` : b.text))
+    .map((b) => {
+      if (b.type === 'IMAGE') return `[이미지: ${b.text}]`;
+      if (b.type === 'CTA') return `\n👉 상품 확인하러 가기: ${b.url ?? ''}\n`;
+      return b.text;
+    })
     .join('\n\n');
 
   return { blocks, plainText };

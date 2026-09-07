@@ -28,4 +28,20 @@ assert.equal(images.length, 3);
 assert.ok(images.every((i) => i.imageUrl), '이미지 URL 미배정');
 assert.ok(pkg.blocks.some((b) => b.type === 'DISCLAIMER'));
 assert.ok(pkg.plainText.includes('무선 가습기 추천'));
+assert.ok(!pkg.blocks.some((b) => b.type === 'CTA'), 'connectUrl 없을 때 CTA 블록이 있으면 안 됨');
+
+const connectUrl = 'https://shopping.link/connect/abc123';
+const pkgWithCta = buildPublishPackage(
+  draft,
+  ['https://img/1.jpg', 'https://img/2.jpg', 'https://img/3.jpg'],
+  { connectUrl },
+);
+const ctaIdx = pkgWithCta.blocks.findIndex((b) => b.type === 'CTA');
+assert.ok(ctaIdx >= 0, 'connectUrl 있을 때 CTA 블록 누락');
+const cta = pkgWithCta.blocks[ctaIdx]!;
+assert.equal(cta.url, connectUrl, 'CTA url이 connectUrl과 불일치');
+assert.ok(cta.text.includes('상품 확인하러 가기'), 'CTA 문구 누락');
+const disclaimerIdx = pkgWithCta.blocks.findIndex((b) => b.type === 'DISCLAIMER');
+assert.ok(disclaimerIdx >= 0, 'CTA 있을 때 DISCLAIMER 블록 누락');
+assert.ok(ctaIdx < disclaimerIdx, 'CTA는 DISCLAIMER보다 앞에 위치해야 함');
 console.log('OK: publish package renderer');

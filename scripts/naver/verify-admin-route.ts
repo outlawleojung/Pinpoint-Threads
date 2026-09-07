@@ -22,4 +22,11 @@ const pkgNoImages = buildPublishPackage(draft, []);
 const htmlNoImages = renderPublishPage({ id: 'y', title: 'T', state: 'PLANNED' }, pkgNoImages);
 assert.ok(htmlNoImages.includes('여기에 이미지 넣기'), '이미지 미확보 시 자리 표시 누락');
 
+// AFFILIATE 포스트: connectUrl이 있으면 CTA 링크 배너가 렌더되어야 함
+const connectUrl = 'https://shopping.link/connect/abc123';
+const pkgWithCta = buildPublishPackage(draft, ['https://img/1', 'https://img/2', 'https://img/3'], { connectUrl });
+const htmlWithCta = renderPublishPage({ id: 'z', title: 'T', state: 'PLANNED' }, pkgWithCta);
+assert.ok(htmlWithCta.includes('상품 확인하러 가기'), 'CTA 배너 문구 누락');
+assert.ok(htmlWithCta.includes(connectUrl), 'CTA 링크 URL 미표시');
+
 console.log('OK: admin publish page render');
