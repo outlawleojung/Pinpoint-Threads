@@ -64,8 +64,15 @@ export async function runPipelineC(input: RunPipelineCInput): Promise<PipelineCO
 
   // 비디오 구제: Threads/IG 어댑터가 커버 프레임(t51.71878-15 등)만 긁고 mp4를 놓치는 경우가 잦음.
   //   Playwright로 실제 mp4 추출 후 커버 프레임 제거 → 발행에 진짜 영상이 나가게. (Pipeline A와 동일 헬퍼)
+  //   ★ 커버 프레임이 있으면 = 영상이 확실히 존재 → 자동으로 강한 추출(hasVideo=true)로 escalate.
+  //     (추출이 플레이키해서 약한 재시도로는 놓침. 사용자가 "비디오있음" 안 붙여도 잡히게.)
+  const rawMedia = inbound.mediaUrls ?? [];
+  const hasCoverFrame = rawMedia.some(
+    (u) => u.includes('video_default_cover_frame') || /\/t51\.71878-15\//.test(u),
+  );
+  const effectiveHasVideo = input.hasVideo ?? (hasCoverFrame ? true : undefined);
   const { ensureBenchmarkVideo } = await import('../pipeline-a/video-rescue.js');
-  const sourceMedia = await ensureBenchmarkVideo(null, inbound.url, inbound.mediaUrls ?? [], input.hasVideo);
+  const sourceMedia = await ensureBenchmarkVideo(null, inbound.url, rawMedia, effectiveHasVideo);
   if (sourceMedia.length === 0) {
     return { status: 'FAILED', stage: 'media', reason: '소스에 미디어가 없음' };
   }
