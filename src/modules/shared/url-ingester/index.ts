@@ -23,6 +23,8 @@ export interface IngestInput {
   trendSignalId?: string;
   /** 사용자가 같은 텔레그램 메시지에 붙인 Coupang 등 커머스 URL (Pipeline A 매칭 스킵용). */
   manualCommerceUrl?: string;
+  /** true면 벤치마크 자동 승격 스킵 (일상글 Pipeline C — 쇼핑 벤치마크 풀 오염 방지). */
+  skipPromote?: boolean;
 }
 
 export interface IngestResult {
@@ -77,7 +79,7 @@ export async function ingestUrl(input: IngestInput): Promise<IngestResult> {
       { inboundLinkId: existing.id, platform, prevError: existing.errorMessage },
       'URL 재전송 · 이전 FAILED → 재시도',
     );
-    return await fetchAndStore(existing.id, existing.platform, normalized, false);
+    return await fetchAndStore(existing.id, existing.platform, normalized, false, input.skipPromote);
   }
 
   if (platform === InboundPlatform.UNKNOWN) {
@@ -112,7 +114,7 @@ export async function ingestUrl(input: IngestInput): Promise<IngestResult> {
     };
   }
 
-  return await fetchAndStore(link.id, platform, normalized, true);
+  return await fetchAndStore(link.id, platform, normalized, true, input.skipPromote);
 }
 
 /**
@@ -123,6 +125,7 @@ async function fetchAndStore(
   platform: InboundPlatform,
   normalizedUrl: string,
   isNew: boolean,
+  skipPromote = false,
 ): Promise<IngestResult> {
   // Adapter 디스패치 (동기: 짧은 fetch면 즉시 응답 가능, 장시간은 이후 BullMQ 이관)
   const adapter = getAdapter(platform);
@@ -170,9 +173,9 @@ async function fetchAndStore(
       'URL ingested (FETCHED)',
     );
 
-    // 자동 벤치마크 승격 판정 (best effort)
+    // 자동 벤치마크 승격 판정 (best effort). 일상글(skipPromote)은 쇼핑 벤치마크 풀에 넣지 않음.
     let promoteNote = '';
-    try {
+    if (!skipPromote) try {
       const promote = await maybeAutoPromote(updated);
       if (promote.status === 'promoted') {
         promoteNote = ` · 🎯 벤치마크 자동 승격됨`;

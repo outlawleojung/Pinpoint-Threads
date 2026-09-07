@@ -3,7 +3,7 @@ import { env } from '../../../config/env.js';
 import { logger } from '../../../config/logger.js';
 import { handleApprovalCallback, sendApprovalRequest } from './service.js';
 import { prisma } from '../../../db/prisma.js';
-import { PostState } from '@prisma/client';
+import { PostState, PostKind } from '@prisma/client';
 import { classifySourceItem } from '../content-classifier/index.js';
 import { generateCopy } from '../copywriter/index.js';
 import { verifyProductMatch } from '../../pipeline-a/vision-verifier/index.js';
@@ -91,6 +91,68 @@ bot.command('lineb', async (ctx) => {
     await ctx.reply(`❌ Line B 실패: ${(err as Error).message}`);
   }
 });
+
+// /daily <URL> — Pipeline C 일상글 (태그 "일상 {URL}" 과 동일)
+bot.command('daily', async (ctx) => {
+  const arg = (ctx.match ?? '').trim();
+  const url = extractUrls(arg)[0];
+  if (!url) {
+    await ctx.reply('사용법: /daily https://... (또는 "일상 https://...")');
+    return;
+  }
+  await runDailyFromUrl(ctx, url);
+});
+
+/**
+ * 일상글 URL 하나 → 가장 덜 발행한 계정에 Pipeline C 실행 → 승인 카드.
+ */
+async function runDailyFromUrl(ctx: { reply: (t: string) => Promise<unknown> }, url: string): Promise<void> {
+  await ctx.reply(`🌿 일상글 처리 중 (상품·링크 없이 본문만): ${url.slice(0, 60)}...`);
+  try {
+    const acc = await pickLeastUsedDailyAccount();
+    if (!acc) {
+      await ctx.reply('⚠️ 활성 계정이 없어요.');
+      return;
+    }
+    const { runPipelineC } = await import('../../pipeline-c/orchestrator.js');
+    const outcome = await runPipelineC({ accountId: acc.id, sourceUrl: url });
+    if (outcome.status === 'PENDING_APPROVAL') {
+      await ctx.reply(`✅ [${acc.handle}] 일상글 승인 카드 확인 (실발행 아님, 승인해야 나감)`);
+    } else {
+      await ctx.reply(`❌ [${acc.handle}] 일상글 실패: ${outcome.stage} · ${outcome.reason}`);
+    }
+  } catch (err) {
+    logger.error({ err, url }, 'runDailyFromUrl 실패');
+    await ctx.reply(`❌ 일상글 처리 실패: ${(err as Error).message}`);
+  }
+}
+
+/** 오늘 DAILY 발행이 가장 적은 활성 계정 (성별 무관 · 일상글은 페르소나 톤만 반영). */
+async function pickLeastUsedDailyAccount() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const accounts = await prisma.account.findMany({
+    where: { isActive: true },
+    select: { id: true, handle: true },
+    orderBy: { handle: 'asc' },
+  });
+  if (accounts.length === 0) return null;
+  const counts = await Promise.all(
+    accounts.map(async (a) => ({
+      a,
+      c: await prisma.post.count({
+        where: {
+          accountId: a.id,
+          kind: PostKind.DAILY,
+          createdAt: { gte: today },
+          state: { notIn: [PostState.REJECTED, PostState.FAILED] },
+        },
+      }),
+    })),
+  );
+  counts.sort((x, y) => x.c - y.c);
+  return counts[0]!.a;
+}
 
 // Claude 분류 테스트
 bot.command('classify', async (ctx) => {
@@ -424,6 +486,17 @@ bot.on('message:text', async (ctx, next) => {
     return;
   }
   const urls = extractUrls(text);
+
+  // 방식 0: "일상 {URL}" 태그 → Pipeline C 일상글 (쇼핑과 명시적 구분 · 사용자 방침)
+  if (/^\s*일상\b/.test(text)) {
+    const dailyUrl = urls[0];
+    if (!dailyUrl) {
+      await ctx.reply('⚠️ 일상글로 만들 URL이 없어요.\n예: 일상 https://www.threads.net/...');
+      return;
+    }
+    await runDailyFromUrl(ctx, dailyUrl);
+    return;
+  }
 
   // 방식 1: "코드 URL" 또는 "코드 상품명" 일반 메시지 (텔레그램 링크 차단 회피 · 권장)
   //   예: "4UNB https://link.coupang.com/a/..."  또는  "4UNB 팍스홈 쿠션양말 페이크삭스"

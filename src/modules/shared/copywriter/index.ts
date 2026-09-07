@@ -330,7 +330,8 @@ async function factCheckCopy(args: {
   productName?: string;
   productCategory?: string;
 }): Promise<{ ok: boolean; reason?: string }> {
-  if (!args.productName) return { ok: true };
+  // productName 없어도 **개인정보·정책 검사**는 수행 (일상글 Pipeline C 페르소나 누출 방지).
+  // 상품이 없으면 사실오류(§1)는 자연히 해당 없음, 개인정보(§2)만 판정.
 
   const system = `너는 한국 SNS 쇼핑 카피의 **사실·정책 검사기**다.
 
@@ -357,7 +358,7 @@ async function factCheckCopy(args: {
 
 JSON으로만: { "ok": boolean, "reason": "짧게 어떤 오류인지 (ok=true면 빈 문자열)" }`;
 
-  const user = `상품: ${args.productName}${args.productCategory ? ` (카테고리: ${args.productCategory})` : ''}
+  const user = `${args.productName ? `상품: ${args.productName}${args.productCategory ? ` (카테고리: ${args.productCategory})` : ''}` : '상품 없음 (일상글 · 개인정보·정책만 검사)'}
 카피: "${args.body}"
 
 판정 JSON:`;
@@ -503,6 +504,72 @@ ${persona}
     if (check.ok) break;
     logger.warn({ attempt, body, reason: check.reason }, 'curation copy fact-check 실패 → 재생성');
     body = await generateOnce(seedIndex + attempt + 1, check.reason);
+  }
+  return body;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Pipeline C — 일상글 (상품·커머스 없음)
+//   소스 URL(귀여운 동물·공감 콘텐츠 등)의 소재·훅만 참고해 페르소나 톤의 일상 공감 글 1문장.
+//   상품·가격·구매링크 없음. 고정댓글 없음. 개인정보 누출 검사 포함.
+// ─────────────────────────────────────────────────────────────────────────
+
+export interface DailyCopyInput {
+  personaPrompt?: string;
+  accountSeed: string;
+  accountId?: string;
+  sourceText?: string;
+  sourceLanguage?: string | null;
+  sourceImageUrl?: string;
+}
+
+export async function generateDailyBody(input: DailyCopyInput): Promise<string> {
+  const baseSystem = buildSystemPrompt({
+    personaPrompt: input.personaPrompt,
+    accountSeed: input.accountSeed,
+    variantIndex: 0,
+    sourceLanguage: input.sourceLanguage ?? null,
+  });
+  const system = `${baseSystem}
+
+== 이번 글의 특수 규칙 (일상글 · 수익화 아님) ==
+- 상품 홍보 아님. 소스(영상·이미지)의 소재·감정·훅만 참고한 **일상 공감 글**.
+- 공감·발견·감탄·질문 중 하나의 훅. 반응(댓글·리포스트) 유도.
+- 상품명·가격·브랜드·구매처·링크 절대 언급 X (일상글엔 커머스 없음).
+- 소스가 외국어/외국 콘텐츠여도 직역 X · 페르소나 톤으로 재창조.`;
+
+  const buildOnce = async (idx: number, avoid?: string): Promise<string> => {
+    const parts: LlmContentPart[] = [];
+    if (input.sourceImageUrl) parts.push({ type: 'image', url: input.sourceImageUrl });
+    if (input.sourceText) {
+      parts.push({
+        type: 'text',
+        text: `참고 원문 — 소재·훅만, 직역 금지:\n"""\n${input.sourceText.slice(0, 800)}\n"""`,
+      });
+    }
+    if (avoid) parts.push({ type: 'text', text: `⛔ 방금 실패 사유 · 이번엔 반드시 회피: ${avoid}` });
+    parts.push({ type: 'text', text: '일상 공감 글 문장 1개를 JSON으로만 반환.' });
+    if (parts.length === 0) throw new Error('generateDailyBody needs sourceText or sourceImageUrl');
+
+    const response = await llm().complete({
+      tier: 'main',
+      system: system.replace('variant=0', `variant=${idx}`),
+      userParts: parts,
+      maxOutputTokens: 400,
+      temperature: 0.9 + idx * 0.05,
+      jsonMode: true,
+      thinking: 'disabled',
+      jsonSchema: { type: 'object', properties: { body: { type: 'string' } }, required: ['body'] },
+    });
+    return BodyResultSchema.parse(extractJson(response.text)).body;
+  };
+
+  let body = await buildOnce(0);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const check = await factCheckCopy({ body }); // 상품 없음 → 개인정보·정책만 검사
+    if (check.ok) break;
+    logger.warn({ attempt, body, reason: check.reason }, 'daily copy 개인정보/정책 위반 → 재생성');
+    body = await buildOnce(attempt + 1, check.reason);
   }
   return body;
 }
