@@ -10,7 +10,7 @@ type AnyFastify = FastifyInstance<any, any, any, any, any>;
 export async function registerAdminHomeRoutes(app: AnyFastify): Promise<void> {
   app.get('/admin', async (req, reply) => {
     const currentUser = req.session?.n ?? null;
-    const [accounts, activeSignals, decayedSignals, inbound, recentInbound] = await Promise.all([
+    const [accounts, activeSignals, decayedSignals, inbound, recentInbound, naverPending] = await Promise.all([
       prisma.account.count({ where: { isActive: true } }),
       prisma.trendSignal.count({ where: { decayedAt: null } }),
       prisma.trendSignal.count({ where: { decayedAt: { not: null } } }),
@@ -18,10 +18,11 @@ export async function registerAdminHomeRoutes(app: AnyFastify): Promise<void> {
       prisma.inboundLink.count({
         where: { receivedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
       }),
+      prisma.naverPost.count({ where: { state: { in: ['PLANNED', 'READY'] } } }),
     ]);
 
     return reply.type('text/html').send(
-      renderHome({ accounts, activeSignals, decayedSignals, inbound, recentInbound, currentUser }),
+      renderHome({ accounts, activeSignals, decayedSignals, inbound, recentInbound, naverPending, currentUser }),
     );
   });
 }
@@ -32,6 +33,7 @@ function renderHome(stats: {
   decayedSignals: number;
   inbound: number;
   recentInbound: number;
+  naverPending: number;
   currentUser: string | null;
 }): string {
   return `<!doctype html>
@@ -93,6 +95,11 @@ h1{margin-bottom:8px;font-size:1.6em}
     <h2>벤치마크</h2>
     <div class="stat">-<small>수집·태깅</small></div>
     <p>터진 게시글 · viralFactors 분석</p>
+  </a>
+  <a class="card" href="/admin/naver">
+    <h2>네이버 블로그 발행</h2>
+    <div class="stat">${stats.naverPending}<small>발행 대기</small></div>
+    <p>쇼핑커넥트 · 일상글 원고 → 복붙 발행</p>
   </a>
   <a class="card" href="/oauth/threads/accounts">
     <h2>Threads OAuth</h2>
