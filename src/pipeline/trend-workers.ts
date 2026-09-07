@@ -301,7 +301,25 @@ export async function scheduleTrendJobs(): Promise<void> {
  * 활성 계정마다 Line B 발행 잡을 서로 다른 시각(slot)에 등록.
  * jobId = line-b-<accountId> 로 idempotent. 계정 순서(handle)로 slot 배정 → 안정적.
  */
+// ⛔ Line B 자동 발행 **정지** (2026-09-07). 이유: "미니 큐레이션"이 관련성 낮은 상품 3개를
+//   산만하게 광고 → 사용자 불만. 단일 상품 + 이미지 확보 방식으로 재설계 후 true 로 재활성.
+//   수동 /lineb 는 계속 사용 가능. false 면 재시작해도 기존 스케줄러 제거해 자동 발행 안 함.
+const LINE_B_AUTO_ENABLED = false;
+
 async function scheduleLineBPerAccount(): Promise<void> {
+  if (!LINE_B_AUTO_ENABLED) {
+    try {
+      const scheds = await lineBPublishQueue.getJobSchedulers();
+      for (const s of scheds) {
+        const id = (s as { key?: string; id?: string }).key ?? (s as { id?: string }).id;
+        if (id) await lineBPublishQueue.removeJobScheduler(id).catch(() => {});
+      }
+      logger.info({ removed: scheds.length }, 'Line B 자동 크론 정지 (LINE_B_AUTO_ENABLED=false)');
+    } catch (err) {
+      logger.warn({ err }, 'Line B 스케줄러 제거 실패');
+    }
+    return;
+  }
   const accounts = await prisma.account.findMany({
     where: { isActive: true },
     select: { id: true, handle: true },
