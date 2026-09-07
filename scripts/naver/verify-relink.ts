@@ -1,6 +1,10 @@
 import { prisma } from '../../src/db/prisma.js';
 import { relinkNaverPost } from '../../src/modules/pipeline-d/relink/index.js';
 import { NAVER_LEGAL_DISCLAIMER, type NaverPostDraft } from '../../src/modules/pipeline-d/naver-copywriter/schema.js';
+import { fetchProductInfo } from '../../src/infra/naver/smartstore-detail.js';
+
+// 실측 가능한 스마트스토어 상품 URL이 있으면 여기에 넣어 눈으로 확인(없으면 스킵 — graceful fallback이 계약이므로 블로킹하지 않음).
+const REAL_PRODUCT_URL = process.env.NAVER_VERIFY_REAL_PRODUCT_URL ?? '';
 
 const minimalDraft: NaverPostDraft = {
   title: '겨울철 실내 습도 관리하는 법',
@@ -45,11 +49,26 @@ async function main() {
     if (reloaded.kind !== 'AFFILIATE') throw new Error(`kind가 AFFILIATE로 안 바뀜: ${reloaded.kind}`);
     if (reloaded.connectUrl !== 'https://smartstore.naver.com/x/products/123') throw new Error(`connectUrl 반영 안 됨: ${reloaded.connectUrl}`);
     if (!reloaded.draftJson) throw new Error('draftJson 비어있음');
+    // 합성/도달불가 URL이므로 fetchProductInfo는 {null,[]}을 반환해야 하고,
+    // 그래도 productName 폴백 체인(suggestedProduct→title→...)이 살아서 kind/connectUrl/draftJson이 정상 반영됐어야 한다.
+    if (!reloaded.title) throw new Error('title(=newDraft.title) 비어있음 — 폴백 체인 실패');
 
     console.log('OK: relink (실측)');
   } finally {
     await prisma.naverPost.delete({ where: { id: post.id } }).catch(() => {});
     console.log('cleaned up throwaway post', post.id);
+  }
+
+  if (REAL_PRODUCT_URL) {
+    console.log('\n--- 실제 스마트스토어 URL로 fetchProductInfo 육안 확인 ---');
+    const info = await fetchProductInfo(REAL_PRODUCT_URL, { maxImages: 6 });
+    console.log('name:', info.name);
+    console.log('images:', info.images);
+    if (!info.name && info.images.length === 0) {
+      console.log('NOTE: 실제 URL에서도 빈 결과 — 셀렉터 재확인 필요할 수 있음(그래도 폴백 계약은 유지됨)');
+    }
+  } else {
+    console.log('\n(NAVER_VERIFY_REAL_PRODUCT_URL 미설정 — 실 URL 육안 확인 스킵, 폴백 계약 검증은 위에서 완료)');
   }
 }
 

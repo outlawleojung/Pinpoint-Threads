@@ -2,6 +2,7 @@ import { prisma } from '../../../db/prisma.js';
 import { env } from '../../../config/env.js';
 import { generateNaverPost } from '../naver-copywriter/index.js';
 import type { NaverPostDraft } from '../naver-copywriter/schema.js';
+import { resolveConnectUrl, fetchProductInfo } from '../../../infra/naver/smartstore-detail.js';
 
 /**
  * /naverlink — 기존 INFO(일상) 네이버 글을 AFFILIATE(제휴)로 재생성한다.
@@ -15,7 +16,12 @@ export async function relinkNaverPost(
   const post = await prisma.naverPost.findUnique({ where: { id: postId } });
   if (!post) return { error: `글을 찾을 수 없습니다: ${postId}` };
 
-  const productName = post.suggestedProduct ?? post.title ?? post.category ?? post.topic;
+  // 커넥트 링크 → 최종 상품페이지 URL → 상품명·이미지 스크랩(제목 추측 대신 실물 정보 우선).
+  const finalUrl = await resolveConnectUrl(connectUrl);
+  const info = await fetchProductInfo(finalUrl, { maxImages: 6 });
+
+  const productName =
+    info.name ?? post.suggestedProduct ?? post.title ?? post.category ?? post.topic;
 
   const newDraft: NaverPostDraft = await generateNaverPost({
     topic: post.topic,
@@ -35,7 +41,8 @@ export async function relinkNaverPost(
       connectUrl,
       draftJson: newDraft as unknown as object,
       title: newDraft.title,
-      // imageUrls는 기존 값 유지(명시적으로 건드리지 않음)
+      imageUrls: info.images.length > 0 ? info.images : post.imageUrls,
+      suggestedProduct: info.name ?? post.suggestedProduct,
     },
   });
 
