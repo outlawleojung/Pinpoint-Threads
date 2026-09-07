@@ -15,6 +15,7 @@ import { ingestUrlsFromText, ingestUrl } from '../url-ingester/index.js';
 import { isCommerceUrl, splitBenchmarkAndCommerce } from '../url-ingester/platform-detector.js';
 import { InboundSource } from '@prisma/client';
 import { detectPlatform, extractUrls } from '../url-ingester/platform-detector.js';
+import { handleNaverCommand } from './naver-command.js';
 
 export const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
 
@@ -474,6 +475,18 @@ bot.command('ingest', async (ctx) => {
     );
   } catch (err) {
     logger.error(err, '/ingest failed');
+    await ctx.reply(`❌ 실패: ${(err as Error).message}`);
+  }
+});
+
+// /naver — 쇼핑커넥트 링크 → SEO 원고 생성 → Admin 발행 페이지
+bot.command('naver', async (ctx) => {
+  const link = ctx.match?.trim() ?? '';
+  await ctx.reply('🟢 네이버 원고 생성 중... (상품 조회·이미지·원고)');
+  try {
+    const msg = await handleNaverCommand(link);
+    await ctx.reply(msg, { link_preview_options: { is_disabled: true } });
+  } catch (err) {
     await ctx.reply(`❌ 실패: ${(err as Error).message}`);
   }
 });
