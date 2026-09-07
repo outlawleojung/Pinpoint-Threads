@@ -1,0 +1,18 @@
+import assert from 'node:assert';
+import { renderPublishPage } from '../../src/modules/shared/admin/naver-routes.js';
+import { buildPublishPackage } from '../../src/modules/pipeline-d/publish-package/index.js';
+import type { NaverPostDraft } from '../../src/modules/pipeline-d/naver-copywriter/schema.js';
+
+const draft: NaverPostDraft = {
+  title: 'T', intro: '결론 먼저 인트로 문단입니다 어쩌구', sections: [
+    { heading: '소제목1', body: '본문1' }, { heading: '소제목2', body: '본문2' }, { heading: '소제목3', body: '본문3' },
+  ], imageSlots: [
+    { afterSection: 0, caption: 'c0', kind: 'PRODUCT' }, { afterSection: 1, caption: 'c1', kind: 'AI' }, { afterSection: 2, caption: 'c2', kind: 'PRODUCT' },
+  ], tags: ['a', 'b', 'c', 'd', 'e'], disclaimer: '수수료 안내',
+};
+const pkg = buildPublishPackage(draft, ['https://img/1', 'https://img/2', 'https://img/3']);
+const html = renderPublishPage({ id: 'x', title: 'T', state: 'PLANNED' }, pkg);
+assert.ok(html.includes('제목2 스타일'), '소제목 가이드 렌더 누락');
+assert.ok(html.includes('복사'), '복사 버튼 누락');
+assert.ok(html.includes('https://img/1'), '이미지 미표시');
+console.log('OK: admin publish page render');

@@ -16,6 +16,7 @@ import { registerBenchmarksRoutes } from './modules/shared/admin/benchmarks-rout
 import { registerAdminAuth } from './modules/shared/admin/auth-plugin.js';
 import { registerPasswordRoutes } from './modules/shared/admin/password-routes.js';
 import { registerLoginRoutes } from './modules/shared/admin/login-routes.js';
+import { registerNaverRoutes } from './modules/shared/admin/naver-routes.js';
 
 async function bootstrap() {
   const app = Fastify({ loggerInstance: logger });
@@ -35,6 +36,7 @@ async function bootstrap() {
   await registerAdminHomeRoutes(app);
   await registerPasswordRoutes(app);
   await registerBenchmarksRoutes(app);
+  await registerNaverRoutes(app);
 
   await app.listen({ port: env.APP_PORT, host: '0.0.0.0' });
   logger.info(`🚀 API listening on :${env.APP_PORT}`);
