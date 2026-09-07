@@ -77,7 +77,9 @@ export async function registerNaverRoutes(app: AnyFastify): Promise<void> {
     const { id } = req.params as { id: string };
     const post = await prisma.naverPost.findUnique({ where: { id } });
     if (!post || !post.draftJson) return reply.code(404).send('not found');
-    const pkg = buildPublishPackage(post.draftJson as unknown as NaverPostDraft, post.imageUrls);
+    const pkg = buildPublishPackage(post.draftJson as unknown as NaverPostDraft, post.imageUrls, {
+      includeDisclaimer: post.kind !== 'INFO',
+    });
     return reply.type('text/html').send(renderPublishPage(post, pkg));
   });
 

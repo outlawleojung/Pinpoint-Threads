@@ -12,7 +12,12 @@ export interface PublishPackage {
   plainText: string;
 }
 
-export function buildPublishPackage(draft: NaverPostDraft, imageUrls: string[]): PublishPackage {
+export function buildPublishPackage(
+  draft: NaverPostDraft,
+  imageUrls: string[],
+  opts?: { includeDisclaimer?: boolean },
+): PublishPackage {
+  const includeDisclaimer = opts?.includeDisclaimer ?? true;
   const blocks: PublishBlock[] = [];
   const imgQueue = [...imageUrls];
 
@@ -33,7 +38,9 @@ export function buildPublishPackage(draft: NaverPostDraft, imageUrls: string[]):
   };
 
   blocks.push({ type: 'PARAGRAPH', text: draft.intro });
-  blocks.push({ type: 'DISCLAIMER', text: draft.disclaimer, note: '첫 제휴 링크 전에 위치(공정위 필수)' });
+  if (includeDisclaimer) {
+    blocks.push({ type: 'DISCLAIMER', text: draft.disclaimer, note: '첫 제휴 링크 전에 위치(공정위 필수)' });
+  }
   emitImagesAfter(0);
 
   draft.sections.forEach((sec, i) => {
