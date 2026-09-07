@@ -99,3 +99,27 @@ export async function deleteMedia(publicId: string, resourceType: 'image' | 'vid
   ensureConfigured();
   return cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
 }
+
+/**
+ * 메모리상의 버퍼(예: Gemini 생성 이미지)를 Cloudinary에 직접 업로드.
+ * 원격 URL이 없는 AI 생성 이미지용 — data URI(base64)로 업로드.
+ */
+export async function uploadBufferToCloudinary(buffer: Buffer, mimeType: string): Promise<string> {
+  ensureConfigured();
+  const b64 = buffer.toString('base64');
+  const dataUri = `data:${mimeType};base64,${b64}`;
+
+  const result = await new Promise<UploadApiResponse>((resolve, reject) => {
+    cloudinary.uploader.upload(
+      dataUri,
+      { folder: env.CLOUDINARY_UPLOAD_FOLDER, resource_type: 'image' },
+      (err, res) => {
+        if (err || !res) return reject(err ?? new Error('upload returned empty'));
+        resolve(res);
+      },
+    );
+  });
+
+  logger.debug({ publicId: result.public_id, bytes: result.bytes }, 'cloudinary buffer upload done');
+  return result.secure_url;
+}
