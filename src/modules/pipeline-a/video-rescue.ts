@@ -36,12 +36,19 @@ export async function ensureBenchmarkVideo(
     const { extractThreadsVideoUrls, pickBestMp4s, shutdownPlaywrightBrowser } = await import('../../infra/playwright-threads-video.js');
     let bestMp4s: string[] = [];
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const { mp4Urls } = await extractThreadsVideoUrls(permalink);
-      bestMp4s = pickBestMp4s(mp4Urls);
-      if (bestMp4s.length > 0) break;
-      logger.info({ benchmarkId, attempt, maxAttempts, hasVideo }, 'video-rescue: mp4 미발견 · 재시도');
-      // ★ 공유 브라우저가 장시간 프로세스(봇/워커)에서 상태가 나빠지면 계속 실패 →
-      //   실패 시 브라우저를 닫아 다음 시도가 새 브라우저로 재시작하게 (fresh 프로세스는 되는데 봇만 실패하던 원인).
+      // ★ 각 시도를 독립 try 로 감싼다. 장시간 프로세스(봇)에선 공유 브라우저가
+      //   "connected"인데도 newContext/goto 가 **예외**를 던지는 경우가 있음.
+      //   예전 구조는 예외 시 재시도 없이 바로 outer catch → image-only 로 빠졌음(봇만 실패의 진짜 원인).
+      //   이제 예외든 빈결과든 브라우저를 리셋하고 다음 시도로 넘어간다.
+      try {
+        const { mp4Urls } = await extractThreadsVideoUrls(permalink);
+        bestMp4s = pickBestMp4s(mp4Urls);
+        if (bestMp4s.length > 0) break;
+        logger.info({ benchmarkId, attempt, maxAttempts, hasVideo }, 'video-rescue: mp4 미발견 · 재시도');
+      } catch (err) {
+        logger.warn({ err: (err as Error).message, benchmarkId, attempt, maxAttempts }, 'video-rescue: 추출 예외 · 브라우저 리셋 후 재시도');
+      }
+      // 실패(예외/빈결과) 시 브라우저를 닫아 다음 시도가 새 브라우저로 재시작.
       await shutdownPlaywrightBrowser().catch(() => {});
       await new Promise((r) => setTimeout(r, 2000 * attempt));
     }
