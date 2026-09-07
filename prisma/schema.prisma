@@ -520,3 +520,19 @@ model NaverPost {
   @@index([state])
   @@index([kind, createdAt])
 }
+
+model NaverTrendKeyword {
+  id          String   @id @default(cuid())
+  category    String                       // 블로그 카테고리 라벨 (레트로주방/인테리어소품/생활가전/수납정리)
+  keyword     String                       // 트렌드 상품·키워드명
+  source      String   @default("COUPANG_RANKING")
+  rank        Int?
+  value       Float?                       // 신호 강도 (예: 역순위)
+  productHint String?
+  rawPayload  Json?
+  collectedAt DateTime @default(now())
+  usedAt      DateTime?                     // 일상글이 이 키워드를 사용한 시각 (중복 방지)
+
+  @@index([category, collectedAt])
+  @@index([usedAt])
+}
