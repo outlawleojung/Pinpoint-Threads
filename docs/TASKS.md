@@ -107,9 +107,28 @@ Last synced: 2026-09-02 (Pipeline A 자동 발행 · 성별 필터 · 비디오 
 - [x] **R8. TikTok 어댑터 Apify 전환** — R6과 동일 커밋에서 완료
 - [ ] **R9. 전체 데이터 소스 실 동작 재검증** — 부분 완료 (Threads·TikTok·IG·XHS 각각 실 테스트 완료)
 
+## Pipeline D — 네이버 블로그 쇼핑커넥트 (2026-09-07 완료 · e2e 실측)
+
+수동 복붙 발행(자동 발행 API 없음). 텔레그램 `/naver <링크>` 온디맨드 + 매일 09:00 정보글 자동생성 크론 1개.
+
+- [x] **D1. Prisma 스키마** — NaverPost/NaverProduct/NaverBlogConfig + 마이그레이션
+- [x] **D2. 쇼핑커넥트/스마트스토어 링크 파서**
+- [x] **D3. 네이버 쇼핑검색 API 어댑터** (NaverShoppingAdapter) — NAVER 키 미설정 시 degraded(스킵)
+- [x] **D4. 스마트스토어 상세 이미지** — Playwright 폴백
+- [x] **D5. Gemini 보조 이미지 생성 어댑터** — 이미지 quota=0 시 degraded(스킵), 원고는 정상
+- [x] **D6. naver-copywriter** — Sonnet SEO 원고 생성 (제목+섹션+이미지 슬롯)
+- [x] **D7. 복붙 발행 패키지 렌더러** — 블록 + 삽입 가이드
+- [x] **D8. post-builder 오케스트레이터** (buildNaverPost) — 7:3 제휴/정보 비율 판정
+- [x] **D9. Admin 발행 페이지** — `/admin/naver/:id` (블록 복사+삽입 가이드)
+- [x] **D10. 텔레그램 `/naver` 커맨드** — handleNaverCommand → 원고 생성 → 발행 페이지 링크
+- [x] **D11. 카테고리 필드 + config 시드**
+- [x] **D12. 정보글(INFO) 생성 경로** — 앵글 생성기 + buildInfoPost
+- [x] **D13. 일일 정보글 크론** — `naver-daily-info`, 매일 09:00 KST 생성+알림
+- [x] **D14. e2e 실측 스크립트** — `scripts/naver/verify-e2e.ts` · `handleNaverCommand` 실 호출 → "발행 페이지" URL 포함 확인 (2026-09-07 통과)
+
 ## 보류 (Backlog)
 
-- 이미지 교체 기능 · 네이버쇼핑 링크 지원 → [docs/09-backlog/image-replacement-and-naver.md](09-backlog/image-replacement-and-naver.md)
+- 이미지 교체 기능 → [docs/09-backlog/image-replacement-and-naver.md](09-backlog/image-replacement-and-naver.md) (네이버쇼핑 링크 지원은 Pipeline D로 완료됨)
 - Pipeline C (일상글) — 소스 방식 결정 후 착수
 - 강의 학습 이식 (Whisper 전사 · 프롬프트 룰 이식) — 사용자님 녹화 대기
 - 웹 대시보드 강화 (N ≥ 20)
@@ -132,3 +151,6 @@ Last synced: 2026-09-02 (Pipeline A 자동 발행 · 성별 필터 · 비디오 
 - (선택) 네이버 개발자센터 API 신청
 - ✅ 실 계정 발행 시작 (#4c 완료)
 - (Phase 4) 클라우드 배포 (NCloud or 대안 · 사용자 결제 하드캡 이슈로 결정 보류)
+- ✅ Pipeline D 네이버 블로그 쇼핑커넥트 e2e 완료 (2026-09-07, 수동 복붙 발행)
+- (선택) `NAVER_CLIENT_ID`/`SECRET` 발급 — 미설정이어도 degraded로 동작(상품명 보강만 스킵)
+- (선택) Gemini 이미지 API 빌링 활성화 — quota=0, 미설정이어도 원고 생성엔 지장 없음(AI 보조 이미지만 스킵)

@@ -21,6 +21,33 @@ Last commit: `915546f` (계정 간 벤치마크 dedup)
 - **2라인 쇼핑 전략 확정**: Line A(콘텐츠우선·현행) + Line B(상품우선·트렌드→돈되는상품→비교/최저가·신규) · 쿠팡+네이버 병행. → ROADMAP.md
 - **schema**: PostInsightSnapshot.replyViews/replyLikes/replyReplies (댓글 성과).
 
+### 🆕 2026-09-07 Pipeline D 완료 — 네이버 블로그 쇼핑커넥트 (신규 4번째 파이프라인)
+
+**개관**: 쿠팡·무신사(Pipeline A/B)와 별도로, 네이버쇼핑 커넥트 링크 → 블로그 SEO 원고 생성 → **수동 복붙 발행**(자동 발행 없음). 텔레그램 `/naver <링크>` 온디맨드 + 매일 09:00 정보글(INFO) 자동 생성 크론 1개.
+
+빌드 완료 14개 태스크: ① NaverPost/NaverProduct/NaverBlogConfig 스키마 ② 쇼핑커넥트/스마트스토어 링크 파서 ③ 네이버 쇼핑검색 API 어댑터 ④ 스마트스토어 상세 이미지(Playwright 폴백) ⑤ Gemini 보조 이미지 생성 ⑥ naver-copywriter(Sonnet, SEO 원고) ⑦ 복붙 발행 패키지 렌더러(블록+삽입가이드) ⑧ post-builder 오케스트레이터(7:3 제휴/정보 비율 판정) ⑨ Admin 발행 페이지(`/admin/naver/:id`) ⑩ 텔레그램 `/naver` 커맨드 ⑪ 카테고리 필드+config 시드 ⑫ 정보글(INFO) 앵글 생성기+buildInfoPost ⑬ 일일 정보글 크론(`naver-daily-info`, 매일 09:00) ⑭ e2e 실측 스크립트(`scripts/naver/verify-e2e.ts`).
+
+**검증된 것 (Pipeline D)**:
+
+| 컴포넌트 | 상태 | 검증 방법 |
+|---|---|---|
+| 링크 파서 (쇼핑커넥트/스마트스토어) | ✅ | 유닛 verify 스크립트 |
+| 스마트스토어 상세 이미지 추출 | ✅ | Playwright 폴백 실측 |
+| naver-copywriter (SEO 원고, Sonnet) | ✅ | 실 호출 · 제목+5섹션 생성 확인 |
+| post-builder 오케스트레이터 (buildNaverPost) | ✅ | e2e 실 호출로 NaverPost 저장 확인 |
+| Admin 발행 페이지 (블록 복사+삽입 가이드) | ✅ | 라우트 등록 · URL 생성 확인 |
+| 텔레그램 `/naver` 커맨드 → handleNaverCommand | ✅ | **e2e 실측 완료** (2026-09-07, 아래) |
+| 일일 정보글 크론 (naver-daily-info) | ✅ | BullMQ 큐 등록 확인 (매일 09:00) |
+| 7:3 제휴/정보 비율 경고 (affiliateRatioExceeded) | ✅ | e2e 실행 중 경고 문구 실제 출력 확인 |
+
+**BullMQ 큐/크론**: Pipeline D는 `naver-daily-info` (정보글 자동 생성, 매일 09:00) **1개만** 해당. 그 외(온디맨드 `/naver` 제휴 원고 생성)는 크론 없음 — 텔레그램 커맨드로만 트리거. **발행 자체는 완전 수동**(Admin 페이지에서 블록 복사 → 네이버 블로그 에디터에 직접 붙여넣기, 자동 발행 API 없음).
+
+**e2e 실측** (2026-09-07): `pnpm tsx scripts/naver/verify-e2e.ts "https://smartstore.naver.com/main/products/1234567"` → 원고 생성 성공, 발행 페이지 URL(`/admin/naver/:id`) 포함 메시지 출력, `OK: e2e (실측)` 확인. **Degraded 모드**로 실행됨(아래 사용자 액션 항목 참고) — 기능 자체는 정상 동작.
+
+**사용자 액션 대기 (Pipeline D)**:
+- ⚪ `NAVER_CLIENT_ID` / `SECRET` 미설정 → 쇼핑검색 API 보강 스킵, 상품명·가격 없이 "상품"으로 진행(상세페이지 원본 이미지만 사용). NCP 신용카드 요구로 보류 중.
+- ⚪ `GEMINI_API_KEY` 이미지 quota=0 (무료 티어 `generate_content_free_tier_requests` limit 0) → AI 보조 이미지 생성 429로 전량 스킵, 원고 자체는 정상 생성됨. 빌링 활성화 시 자동으로 살아남(코드 변경 불필요).
+
 ### 핵심 흐름 (2026-09-03 후반 확정) — [manual-shopping-flow](08-decisions/manual-shopping-flow.md)
 - **텔레그램은 쿠팡 링크 전송 차단** → 사용자는 **3줄** 로 보냄: 벤치마크 URL + 상품명(텍스트) + "비디오 있음/없음"
 - 상품명 → 쿠팡 검색 → 이름 유사도 best 매칭 → 딥링크·제목 특징 반영 카피 → 승인 카드
@@ -137,7 +164,8 @@ Last commit: `915546f` (계정 간 벤치마크 dedup)
 | `VOYAGE_API_KEY` | 🟡 | rate limit (무료 3 RPM · 유료 upgrade 필요) |
 | `APIFY_API_TOKEN` | ✅ | Threads/IG/TikTok/XHS 어댑터 통합 활성 |
 | `APIFY_ACTOR_*` | ✅ | THREADS_URL(themineworks) · IG_URL(apify) · TIKTOK_URL(clockworks) · XHS(zen-studio) · THREADS_KEYWORD |
-| `NAVER_CLIENT_ID` / `SECRET` | ⚪ | 미설정 (NCP 신용카드 요구로 skip) |
+| `NAVER_CLIENT_ID` / `SECRET` | ⚪ | 미설정 (NCP 신용카드 요구로 skip) — Pipeline D 쇼핑검색 보강 degraded 진행 중 |
+| `GEMINI_API_KEY` | 🟡 | 설정됨이나 이미지 quota=0 (무료티어) → Pipeline D AI 보조 이미지 생성 skip (원고는 정상) |
 
 ## 서비스 상태
 
@@ -175,6 +203,7 @@ Last commit: `915546f` (계정 간 벤치마크 dedup)
 - 쇼핑 자동: `shopping-publish`
 - 계정 sync: `account-metrics-sync`
 - 성과: `performance-collect`
+- Pipeline D (네이버): `naver-daily-info` (정보글 자동 생성, 매일 09:00 — 발행은 수동)
 
 ## Admin UI 라우트
 
@@ -187,6 +216,7 @@ Last commit: `915546f` (계정 간 벤치마크 dedup)
 - `/admin/password` — 비번 변경
 - `/oauth/threads/start`, `/callback` (Meta OAuth)
 - `/oauth/threads/accounts` · `/:id/refresh|delete`
+- `/admin/naver/:id` — 네이버 블로그 발행 페이지 (블록 복사+삽입 가이드, Pipeline D)
 
 ## 인프라 · 배포 상태
 
@@ -208,6 +238,7 @@ Last commit: `915546f` (계정 간 벤치마크 dedup)
 
 - **B4. 팔로우백 액션** — 하드 캡 3~5/일 · 사용자 승인만 (자동 X · 계정 리스크)
 - **Pipeline C 일상글** — 소스 방식 결정 필요
+- ✅ **Pipeline D 네이버 블로그 쇼핑커넥트** — 2026-09-07 e2e 완료(수동 복붙 발행). 남은 것: NAVER API 키·Gemini 이미지 빌링은 사용자 결정 대기(선택 사항, degraded로도 동작함)
 - **강의 학습 이식** — 사용자님 녹화 대기 (Whisper 전사 파이프 골격만 있음)
 - **클라우드 배포** — 사용자 결제 방식 결정 대기
 - **Meta oEmbed 앱 심사** — 링크 프리뷰 카드 억제 목적 (수주 소요)
