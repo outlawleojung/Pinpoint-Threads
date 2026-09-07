@@ -90,10 +90,8 @@ export async function buildNaverPost(input: { connectUrl: string; extraNote?: st
     },
   });
 
-  const ratio = await affiliateRatioExceeded();
-  const ratioWarning = kind === 'AFFILIATE' && ratio.exceeded
-    ? `⚠️ 최근 ${ratio.recent}개 중 제휴 ${ratio.affiliate}개(${Math.round(ratio.ratio * 100)}%) — 목표 상한 초과. 정보성 글 권장.`
-    : null;
+  // 정책 B: 7:3 하드룰 해제 — 품질 우선, 자연스러우면 링크
+  const ratioWarning: string | null = null;
 
   return { naverPostId: post.id, title: draft.title, ratioWarning };
 }

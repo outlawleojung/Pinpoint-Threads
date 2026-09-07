@@ -16,6 +16,7 @@ import { isCommerceUrl, splitBenchmarkAndCommerce } from '../url-ingester/platfo
 import { InboundSource } from '@prisma/client';
 import { detectPlatform, extractUrls } from '../url-ingester/platform-detector.js';
 import { handleNaverCommand } from './naver-command.js';
+import { relinkNaverPost } from '../../pipeline-d/relink/index.js';
 
 export const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
 
@@ -486,6 +487,32 @@ bot.command('naver', async (ctx) => {
   try {
     const msg = await handleNaverCommand(link);
     await ctx.reply(msg, { link_preview_options: { is_disabled: true } });
+  } catch (err) {
+    await ctx.reply(`❌ 실패: ${(err as Error).message}`);
+  }
+});
+
+// /naverlink <글ID> <쇼핑커넥트 링크> — 기존 INFO(일상) 글에 제휴링크를 녹여 AFFILIATE로 재생성
+bot.command('naverlink', async (ctx) => {
+  const raw = ctx.match?.trim() ?? '';
+  const parts = raw.split(/\s+/).filter(Boolean);
+  const postId = parts[0];
+  const connectUrl = parts[1];
+  if (!postId || !connectUrl || !/^https?:\/\//.test(connectUrl)) {
+    await ctx.reply('사용법: /naverlink <글ID> <쇼핑커넥트 링크>\n예: /naverlink cktest123 https://smartstore.naver.com/x/products/123');
+    return;
+  }
+  await ctx.reply('🟢 제휴 링크 반영 중... (원고 재생성)');
+  try {
+    const result = await relinkNaverPost(postId, connectUrl);
+    if ('error' in result) {
+      await ctx.reply(`❌ 실패: ${result.error}`);
+      return;
+    }
+    await ctx.reply(
+      `✅ 제휴 링크 반영 완료\n제목: ${result.title}\n발행 페이지: ${result.pageUrl}`,
+      { link_preview_options: { is_disabled: true } },
+    );
   } catch (err) {
     await ctx.reply(`❌ 실패: ${(err as Error).message}`);
   }
