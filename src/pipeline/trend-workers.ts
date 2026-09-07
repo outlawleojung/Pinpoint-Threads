@@ -10,6 +10,7 @@ import {
   accountMetricsSyncQueue,
   shoppingPublishQueue,
   lineBPublishQueue,
+  naverDailyInfoQueue,
 } from '../queues/queues.js';
 import { prisma } from '../db/prisma.js';
 import { logger } from '../config/logger.js';
@@ -30,6 +31,7 @@ import { runSharingForAllAccounts } from '../modules/pipeline-b/sharing-publishe
 import { syncAllAccountMetrics } from '../modules/pipeline-b/sharing-copywriter/follower-sync.js';
 import { runShoppingForAllAccounts } from '../modules/pipeline-a/shopping-publisher/orchestrator.js';
 import { runLineBForAccount } from '../modules/pipeline-a/line-b/orchestrator.js';
+import { runDailyInfoJob } from '../modules/pipeline-d/daily-info-job/index.js';
 
 /**
  * Lane 2 자율 트렌드 워커 · 스케줄러.
@@ -47,6 +49,7 @@ const SHARING_CRON = '0 8 * * *';  // 매일 08:00 KST (Pipeline B 스하리 벤
 const SHARING_PUBLISH_CRON = '0 9 * * *'; // 매일 09:00 KST (Pipeline B 계정별 스하리 카피 생성 → 승인 카드)
 const ACCOUNT_METRICS_CRON = '30 7 * * *'; // 매일 07:30 KST (계정 팔로워·나이 갱신 · publish 1.5h 전)
 const SHOPPING_PUBLISH_CRON = '0 9 * * *'; // 매일 09:00 KST (쇼핑 카피 생성 · 발행 slot 은 계정별 시차)
+const NAVER_DAILY_INFO_CRON = '0 9 * * *'; // 매일 09:00 KST (Pipeline D 정보글 1건 생성 + 관리자 알림)
 
 function buildAdapters(): TrendSourceAdapter[] {
   return [
@@ -200,8 +203,21 @@ export function startTrendWorkers(): Worker[] {
     ),
   );
 
+  workers.push(
+    new Worker(
+      QUEUE_NAMES.NAVER_DAILY_INFO,
+      async (job) => {
+        logger.info({ jobId: job.id, data: job.data }, 'naver-daily-info start');
+        const result = await runDailyInfoJob();
+        logger.info({ jobId: job.id, result }, 'naver-daily-info done');
+        return result;
+      },
+      { connection: redisConnection, concurrency: 1 },
+    ),
+  );
+
   logger.info(
-    'Started 8 trend workers (trend-poll · trend-digest · trend-search · sharing-collect · sharing-publish · account-metrics-sync · shopping-publish · line-b-publish)',
+    'Started 9 trend workers (trend-poll · trend-digest · trend-search · sharing-collect · sharing-publish · account-metrics-sync · shopping-publish · line-b-publish · naver-daily-info)',
   );
   return workers;
 }
@@ -284,6 +300,16 @@ export async function scheduleTrendJobs(): Promise<void> {
   //   같은 상품 금지(크로스계정 DB dedup) · 동시 발행 금지(계정별 다른 slot).
   await scheduleLineBPerAccount();
 
+  // daily Pipeline D 정보글(INFO) 1건 생성 + 관리자 텔레그램 알림 (수동 발행)
+  await naverDailyInfoQueue.add(
+    'naver-daily-info-daily',
+    { triggeredBy: 'scheduler' },
+    {
+      repeat: { pattern: NAVER_DAILY_INFO_CRON, tz: 'Asia/Seoul' },
+      jobId: 'naver-daily-info-daily',
+    },
+  );
+
   logger.info(
     {
       pollCron: POLL_CRON,
@@ -292,6 +318,7 @@ export async function scheduleTrendJobs(): Promise<void> {
       sharingCron: SHARING_CRON,
       sharingPublishCron: SHARING_PUBLISH_CRON,
       lineBSlots: LINE_B_SLOTS.length,
+      naverDailyInfoCron: NAVER_DAILY_INFO_CRON,
     },
     'trend jobs scheduled (repeat)',
   );

@@ -18,6 +18,7 @@ export const QUEUE_NAMES = {
   SHOPPING_PUBLISH: 'shopping-publish',
   LINE_B_PUBLISH: 'line-b-publish',
   PERFORMANCE_COLLECT: 'performance-collect',
+  NAVER_DAILY_INFO: 'naver-daily-info',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
@@ -46,6 +47,7 @@ export type AccountMetricsSyncJob = { triggeredBy?: string };
 export type ShoppingPublishJob = { triggeredBy?: string };
 export type LineBPublishJob = { accountId: string };
 export type PerformanceCollectJob = { postId: string; hoursAfterPublish: number };
+export type NaverDailyInfoJob = { triggeredBy?: string };
 
 const defaultJobOptions = {
   attempts: 3,
@@ -174,6 +176,15 @@ export const performanceQueue = new Queue<PerformanceCollectJob>(QUEUE_NAMES.PER
   },
 });
 
+export const naverDailyInfoQueue = new Queue<NaverDailyInfoJob>(QUEUE_NAMES.NAVER_DAILY_INFO, {
+  connection: redisConnection,
+  defaultJobOptions: {
+    attempts: 1, // LLM 생성 · 중복 NaverPost 방지 위해 자동 재시도 금지
+    removeOnComplete: { age: 7 * 24 * 3600, count: 30 },
+    removeOnFail: { age: 14 * 24 * 3600 },
+  },
+});
+
 export const queueEvents: Record<QueueName, QueueEvents> = {
   [QUEUE_NAMES.COLLECT]: new QueueEvents(QUEUE_NAMES.COLLECT, { connection: redisConnection }),
   [QUEUE_NAMES.CLASSIFY]: new QueueEvents(QUEUE_NAMES.CLASSIFY, { connection: redisConnection }),
@@ -211,6 +222,9 @@ export const queueEvents: Record<QueueName, QueueEvents> = {
     connection: redisConnection,
   }),
   [QUEUE_NAMES.PERFORMANCE_COLLECT]: new QueueEvents(QUEUE_NAMES.PERFORMANCE_COLLECT, {
+    connection: redisConnection,
+  }),
+  [QUEUE_NAMES.NAVER_DAILY_INFO]: new QueueEvents(QUEUE_NAMES.NAVER_DAILY_INFO, {
     connection: redisConnection,
   }),
 };
