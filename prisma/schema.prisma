@@ -474,10 +474,11 @@ enum NaverPostKind {
 }
 
 model NaverBlogConfig {
-  id             String  @id @default(cuid())
+  id             String   @id @default(cuid())
   topic          String                       // 1블로그 1주제군 (예: "뷰티·생활템")
-  cadencePerWeek Int     @default(4)
-  affiliateRatio Float   @default(0.3)         // 제휴 글 목표 비율 상한
+  cadencePerWeek Int      @default(4)
+  affiliateRatio Float    @default(0.3)         // 제휴 글 목표 비율 상한
+  categories     String[] @default([])
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 }
@@ -503,6 +504,7 @@ model NaverPost {
   state              NaverPostState @default(DRAFT)
   kind               NaverPostKind  @default(AFFILIATE)
   topic              String
+  category           String?
   title              String?
   draftJson          Json?                        // NaverPostDraft 직렬화
   connectUrl         String?
