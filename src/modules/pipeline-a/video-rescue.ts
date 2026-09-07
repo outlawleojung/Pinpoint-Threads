@@ -33,13 +33,16 @@ export async function ensureBenchmarkVideo(
   // "비디오 있음" 이면 확보까지 강하게 (8회), 미지정이면 3회
   const maxAttempts = hasVideo === true ? 8 : 3;
   try {
-    const { extractThreadsVideoUrls, pickBestMp4s } = await import('../../infra/playwright-threads-video.js');
+    const { extractThreadsVideoUrls, pickBestMp4s, shutdownPlaywrightBrowser } = await import('../../infra/playwright-threads-video.js');
     let bestMp4s: string[] = [];
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const { mp4Urls } = await extractThreadsVideoUrls(permalink);
       bestMp4s = pickBestMp4s(mp4Urls);
       if (bestMp4s.length > 0) break;
       logger.info({ benchmarkId, attempt, maxAttempts, hasVideo }, 'video-rescue: mp4 미발견 · 재시도');
+      // ★ 공유 브라우저가 장시간 프로세스(봇/워커)에서 상태가 나빠지면 계속 실패 →
+      //   실패 시 브라우저를 닫아 다음 시도가 새 브라우저로 재시작하게 (fresh 프로세스는 되는데 봇만 실패하던 원인).
+      await shutdownPlaywrightBrowser().catch(() => {});
       await new Promise((r) => setTimeout(r, 2000 * attempt));
     }
     if (bestMp4s.length === 0) {
