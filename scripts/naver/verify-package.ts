@@ -36,12 +36,16 @@ const pkgWithCta = buildPublishPackage(
   ['https://img/1.jpg', 'https://img/2.jpg', 'https://img/3.jpg'],
   { connectUrl },
 );
+const ctaBlocks = pkgWithCta.blocks.filter((b) => b.type === 'CTA');
+const disclaimerBlocks = pkgWithCta.blocks.filter((b) => b.type === 'DISCLAIMER');
+assert.equal(ctaBlocks.length, 1, 'connectUrl 있을 때 CTA 블록은 정확히 1개여야 함');
+assert.equal(disclaimerBlocks.length, 1, 'connectUrl 있을 때 DISCLAIMER 블록은 정확히 1개여야 함');
 const ctaIdx = pkgWithCta.blocks.findIndex((b) => b.type === 'CTA');
-assert.ok(ctaIdx >= 0, 'connectUrl 있을 때 CTA 블록 누락');
 const cta = pkgWithCta.blocks[ctaIdx]!;
 assert.equal(cta.url, connectUrl, 'CTA url이 connectUrl과 불일치');
 assert.ok(cta.text.includes('상품 확인하러 가기'), 'CTA 문구 누락');
 const disclaimerIdx = pkgWithCta.blocks.findIndex((b) => b.type === 'DISCLAIMER');
-assert.ok(disclaimerIdx >= 0, 'CTA 있을 때 DISCLAIMER 블록 누락');
-assert.ok(ctaIdx < disclaimerIdx, 'CTA는 DISCLAIMER보다 앞에 위치해야 함');
+const tagsIdx = pkgWithCta.blocks.findIndex((b) => b.type === 'TAGS');
+assert.ok(disclaimerIdx < ctaIdx, '공정위 규정: DISCLAIMER(공정위 문구)는 첫 제휴 링크(CTA)보다 앞에 위치해야 함');
+assert.ok(ctaIdx < tagsIdx, 'CTA는 TAGS보다 앞에 위치해야 함');
 console.log('OK: publish package renderer');

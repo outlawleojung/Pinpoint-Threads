@@ -41,7 +41,7 @@ export function buildPublishPackage(
   };
 
   blocks.push({ type: 'PARAGRAPH', text: draft.intro });
-  if (includeDisclaimer && !hasCta) {
+  if (includeDisclaimer) {
     blocks.push({ type: 'DISCLAIMER', text: draft.disclaimer, note: '첫 제휴 링크 전에 위치(공정위 필수)' });
   }
   emitImagesAfter(0);
@@ -65,9 +65,6 @@ export function buildPublishPackage(
       url: connectUrl,
       note: '네이버 에디터에서 이 문구(또는 버튼/이미지)에 위 링크를 거세요',
     });
-    if (includeDisclaimer) {
-      blocks.push({ type: 'DISCLAIMER', text: draft.disclaimer, note: '첫 제휴 링크 전에 위치(공정위 필수)' });
-    }
   }
 
   blocks.push({ type: 'TAGS', text: draft.tags.map((t) => `#${t}`).join(' '), note: '태그란에 입력' });
