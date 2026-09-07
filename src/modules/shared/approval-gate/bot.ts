@@ -488,7 +488,8 @@ bot.on('message:text', async (ctx, next) => {
   const urls = extractUrls(text);
 
   // 방식 0: "일상 {URL}" 태그 → Pipeline C 일상글 (쇼핑과 명시적 구분 · 사용자 방침)
-  if (/^\s*일상\b/.test(text)) {
+  //   주의: \b 는 한글에 안 먹음 → "일상" 뒤 공백/콜론/끝 으로 판정 (단, "일상복" 같은 단어는 제외)
+  if (/^\s*일상(?=[\s:：]|$)/.test(text)) {
     const dailyUrl = urls[0];
     if (!dailyUrl) {
       await ctx.reply('⚠️ 일상글로 만들 URL이 없어요.\n예: 일상 https://www.threads.net/...');
