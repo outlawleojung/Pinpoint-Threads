@@ -80,10 +80,21 @@ export async function runPipelineC(input: RunPipelineCInput): Promise<PipelineCO
     if (sourceMedia.length >= 2) {
       publicUrls = (await handleMedia({ postId: post.id, sourceMediaUrls: sourceMedia })).publicUrls;
     } else if (isVideoUrl(sourceMedia[0]!)) {
+      // 단일 영상 → 프레임 캡처 1장 추가로 2장 구성.
       const up = await uploadFromUrl({ sourceUrl: sourceMedia[0]!, postId: post.id, resourceType: 'video' });
-      const thumb = videoToJpgThumb(up.publicUrl);
-      publicUrls = [up.publicUrl, thumb];
-      logger.info({ postId: post.id }, 'Pipeline C: 단일 영상 → 프레임 JPG 추가로 2장 구성');
+      const frameDeliveryUrl = videoToJpgThumb(up.publicUrl); // /video/upload/.../so_0.jpg (전송 URL)
+      // ⚠️ frameDeliveryUrl 은 여전히 경로에 /video/upload/ 가 있어 isVideoUrl 이 '비디오'로 오인.
+      //    → 프레임 JPG 를 **진짜 이미지 에셋으로 재업로드**해 /image/upload/ URL 로 만든다.
+      let framePublic: string;
+      try {
+        const frameAsset = await uploadFromUrl({ sourceUrl: frameDeliveryUrl, postId: post.id, resourceType: 'image' });
+        framePublic = frameAsset.publicUrl;
+      } catch (err) {
+        logger.warn({ err, postId: post.id }, 'Pipeline C: 프레임 이미지 재업로드 실패 · 전송URL fallback');
+        framePublic = frameDeliveryUrl;
+      }
+      publicUrls = [up.publicUrl, framePublic];
+      logger.info({ postId: post.id, frameIsImage: !isVideoUrl(framePublic) }, 'Pipeline C: 단일 영상 → 프레임 이미지 1장 추가');
     } else {
       // 이미지 1장뿐 → 2장 룰 미충족 (사용자에게 알림)
       return await finishFailed(post.id, 'media', '이미지 1장만 있음 · 일상글은 2장 이상 필요 (영상이면 자동 캡처 추가됨)');
