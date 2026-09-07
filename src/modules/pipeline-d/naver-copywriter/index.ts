@@ -49,24 +49,37 @@ disclaimer 문구(그대로 사용): "${NAVER_LEGAL_DISCLAIMER}"
 
 반드시 지켜라: sections는 4~6개, 각 section.body는 400자 이상, 전체(intro+모든 body) 합계 2000~2500자.`;
 
-  const userParts: LlmContentPart[] = [{ type: 'text', text: user }];
+  const MAX_ATTEMPTS = 3;
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const nudge = attempt > 1
+      ? '\n\n반드시 imageSlots의 각 항목에 kind(PRODUCT|AI)를 포함하라. 스키마의 모든 필수 필드를 빠짐없이 채워라.'
+      : '';
+    const userParts: LlmContentPart[] = [{ type: 'text', text: user + nudge }];
 
-  const result = await llm().complete({
-    tier: 'main',
-    system: SYSTEM,
-    userParts,
-    jsonMode: true,
-    temperature: 0.8,
-    maxOutputTokens: 8192,
-    thinking: 'disabled',
-  });
+    try {
+      const result = await llm().complete({
+        tier: 'main',
+        system: SYSTEM,
+        userParts,
+        jsonMode: true,
+        temperature: 0.8,
+        maxOutputTokens: 8192,
+        thinking: 'disabled',
+      });
 
-  const parsed = extractJson(result.text);
-  // disclaimer 강제 주입(모델이 변형해도 상수로 덮어씀)
-  parsed.disclaimer = NAVER_LEGAL_DISCLAIMER;
-  const draft = NaverPostDraftSchema.parse(parsed);
-  logger.info({ title: draft.title, sections: draft.sections.length }, 'naver post generated');
-  return draft;
+      const parsed = extractJson(result.text);
+      // disclaimer 강제 주입(모델이 변형해도 상수로 덮어씀)
+      parsed.disclaimer = NAVER_LEGAL_DISCLAIMER;
+      const draft = NaverPostDraftSchema.parse(parsed);
+      logger.info({ title: draft.title, sections: draft.sections.length }, 'naver post generated');
+      return draft;
+    } catch (err) {
+      lastErr = err;
+      logger.warn({ attempt, err }, 'naver draft parse 실패, 재시도');
+    }
+  }
+  throw lastErr;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
