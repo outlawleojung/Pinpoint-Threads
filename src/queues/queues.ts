@@ -19,6 +19,7 @@ export const QUEUE_NAMES = {
   LINE_B_PUBLISH: 'line-b-publish',
   PERFORMANCE_COLLECT: 'performance-collect',
   NAVER_DAILY_INFO: 'naver-daily-info',
+  NAVER_TREND_COLLECT: 'naver-trend-collect',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
@@ -48,6 +49,7 @@ export type ShoppingPublishJob = { triggeredBy?: string };
 export type LineBPublishJob = { accountId: string };
 export type PerformanceCollectJob = { postId: string; hoursAfterPublish: number };
 export type NaverDailyInfoJob = { triggeredBy?: string };
+export type NaverTrendCollectJob = { triggeredBy?: string };
 
 const defaultJobOptions = {
   attempts: 3,
@@ -185,6 +187,16 @@ export const naverDailyInfoQueue = new Queue<NaverDailyInfoJob>(QUEUE_NAMES.NAVE
   },
 });
 
+export const naverTrendCollectQueue = new Queue<NaverTrendCollectJob>(QUEUE_NAMES.NAVER_TREND_COLLECT, {
+  connection: redisConnection,
+  defaultJobOptions: {
+    attempts: 2,
+    backoff: { type: 'exponential' as const, delay: 60_000 },
+    removeOnComplete: { age: 7 * 24 * 3600, count: 30 },
+    removeOnFail: { age: 14 * 24 * 3600 },
+  },
+});
+
 export const queueEvents: Record<QueueName, QueueEvents> = {
   [QUEUE_NAMES.COLLECT]: new QueueEvents(QUEUE_NAMES.COLLECT, { connection: redisConnection }),
   [QUEUE_NAMES.CLASSIFY]: new QueueEvents(QUEUE_NAMES.CLASSIFY, { connection: redisConnection }),
@@ -225,6 +237,9 @@ export const queueEvents: Record<QueueName, QueueEvents> = {
     connection: redisConnection,
   }),
   [QUEUE_NAMES.NAVER_DAILY_INFO]: new QueueEvents(QUEUE_NAMES.NAVER_DAILY_INFO, {
+    connection: redisConnection,
+  }),
+  [QUEUE_NAMES.NAVER_TREND_COLLECT]: new QueueEvents(QUEUE_NAMES.NAVER_TREND_COLLECT, {
     connection: redisConnection,
   }),
 };
