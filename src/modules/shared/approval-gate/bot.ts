@@ -102,13 +102,17 @@ bot.command('daily', async (ctx) => {
     await ctx.reply('사용법: /daily https://... (또는 "일상 https://...")');
     return;
   }
-  await runDailyFromUrl(ctx, url);
+  await runDailyFromUrl(ctx, url, detectVideoFlag(arg));
 });
 
 /**
  * 일상글 URL 하나 → 가장 덜 발행한 계정에 Pipeline C 실행 → 승인 카드.
  */
-async function runDailyFromUrl(ctx: { reply: (t: string) => Promise<unknown> }, url: string): Promise<void> {
+async function runDailyFromUrl(
+  ctx: { reply: (t: string) => Promise<unknown> },
+  url: string,
+  hasVideo?: boolean,
+): Promise<void> {
   await ctx.reply(`🌿 일상글 처리 중 (상품·링크 없이 본문만): ${url.slice(0, 60)}...`);
   try {
     const acc = await pickLeastUsedDailyAccount();
@@ -117,7 +121,7 @@ async function runDailyFromUrl(ctx: { reply: (t: string) => Promise<unknown> }, 
       return;
     }
     const { runPipelineC } = await import('../../pipeline-c/orchestrator.js');
-    const outcome = await runPipelineC({ accountId: acc.id, sourceUrl: url });
+    const outcome = await runPipelineC({ accountId: acc.id, sourceUrl: url, hasVideo });
     if (outcome.status === 'PENDING_APPROVAL') {
       await ctx.reply(`✅ [${acc.handle}] 일상글 승인 카드 확인 (실발행 아님, 승인해야 나감)`);
     } else {
@@ -535,7 +539,7 @@ bot.on('message:text', async (ctx, next) => {
       await ctx.reply('⚠️ 일상글로 만들 URL이 없어요.\n예: 일상 https://www.threads.net/...');
       return;
     }
-    await runDailyFromUrl(ctx, dailyUrl);
+    await runDailyFromUrl(ctx, dailyUrl, detectVideoFlag(text));
     return;
   }
 

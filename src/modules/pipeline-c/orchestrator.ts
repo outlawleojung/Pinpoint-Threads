@@ -31,6 +31,8 @@ function videoToJpgThumb(u: string): string {
 export interface RunPipelineCInput {
   accountId: string;
   sourceUrl: string;
+  /** 사용자가 "비디오 있음/없음" 명시. true=mp4 확보까지 강하게, false=스킵, undefined=자동. */
+  hasVideo?: boolean;
 }
 
 export type PipelineCOutcome =
@@ -60,7 +62,10 @@ export async function runPipelineC(input: RunPipelineCInput): Promise<PipelineCO
   });
   if (!inbound) return { status: 'FAILED', stage: 'ingest', reason: 'inbound not found' };
 
-  const sourceMedia = inbound.mediaUrls ?? [];
+  // 비디오 구제: Threads/IG 어댑터가 커버 프레임(t51.71878-15 등)만 긁고 mp4를 놓치는 경우가 잦음.
+  //   Playwright로 실제 mp4 추출 후 커버 프레임 제거 → 발행에 진짜 영상이 나가게. (Pipeline A와 동일 헬퍼)
+  const { ensureBenchmarkVideo } = await import('../pipeline-a/video-rescue.js');
+  const sourceMedia = await ensureBenchmarkVideo(null, inbound.url, inbound.mediaUrls ?? [], input.hasVideo);
   if (sourceMedia.length === 0) {
     return { status: 'FAILED', stage: 'media', reason: '소스에 미디어가 없음' };
   }
