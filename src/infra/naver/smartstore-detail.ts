@@ -23,11 +23,12 @@ export async function fetchProductImages(productUrl: string, opts?: { max?: numb
     // 스마트스토어 상품 이미지: pstatic.net 도메인 img src 수집.
     const urls = await page.evaluate(() => {
       const set = new Set<string>();
-      document.querySelectorAll('img').forEach((img) => {
-        const src = (img as HTMLImageElement).src;
+      const doc = (globalThis as unknown as { document: any }).document;
+      doc.querySelectorAll('img').forEach((img: any) => {
+        const src = img.src as string;
         if (src && /pstatic\.net|phinf|shop-phinf/.test(src)) set.add(src.split('?')[0]!);
       });
-      return Array.from(set);
+      return Array.from(set) as string[];
     });
     return urls.slice(0, max);
   } catch (err) {
