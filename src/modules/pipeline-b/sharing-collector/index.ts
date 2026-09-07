@@ -28,8 +28,20 @@ import { ContentType, InboundPlatform } from '@prisma/client';
  *   5) BenchmarkPost 로 저장 (contentType=SHARING) → viralFactors 태깅 · 임베딩
  */
 
-/** 수집 대상 해시태그. 필요 시 추가. */
-const HASHTAGS = ['스하리1000명프로젝트'];
+/**
+ * 수집 대상 해시태그.
+ * 단일 태그(#스하리1000명프로젝트)만 쓰면 인기글이 곧 소진돼(dedup) 새 글이 안 들어옴
+ * → 매일 같은 풀로 벤치마킹 → 스하리 글이 거기서 거기가 됨.
+ * 여러 스하리·맞팔 태그로 우물을 넓혀 원본 다양성 확보. (태그당 Apify 실행 1회 = 비용 비례)
+ * 활성/품질 태그는 발행 결과 보며 조정.
+ */
+const HASHTAGS = [
+  '스하리1000명프로젝트',
+  '스하리',
+  '맞팔',
+  '선팔후맞팔',
+  '스레드친구',
+];
 
 /** 댓글 수 최소 임계값 (사용자 확정: 20). */
 const MIN_REPLIES = 20;
