@@ -101,13 +101,17 @@ export async function runPipelineC(input: RunPipelineCInput): Promise<PipelineCO
       return await finishFailed(post.id, 'media', '이미지 1장만 있음 · 일상글은 2장 이상 필요 (영상이면 자동 캡처 추가됨)');
     }
 
-    // 4) 일상 카피 (상품·링크 없음). Vision용 이미지 = 첫 이미지 or 영상 프레임.
-    const imageForCopy = publicUrls.find((u) => !isVideoUrl(u));
+    // 4) 일상 카피 (상품·링크 없음).
+    //   사용자 방침: **원본 본문 기준**으로 각색. 영상 프레임은 오히려 빗나감(추측 유발).
+    //   → 본문이 충분하면 프레임 vision 생략, 본문 없을 때만 프레임을 fallback 으로.
+    const rawText = (inbound.rawText ?? '').trim();
+    const hasUsableText = rawText.length >= 10;
+    const imageForCopy = hasUsableText ? undefined : publicUrls.find((u) => !isVideoUrl(u));
     const body = await generateDailyBody({
       personaPrompt: account.personaPrompt,
       accountSeed: account.id,
       accountId: account.id,
-      sourceText: inbound.rawText ?? undefined,
+      sourceText: rawText || undefined,
       sourceLanguage: inbound.rawLanguage,
       sourceImageUrl: imageForCopy,
     });
