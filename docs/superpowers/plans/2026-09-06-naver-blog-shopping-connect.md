@@ -52,7 +52,7 @@
 - Test: `scripts/naver/verify-schema.ts`
 
 **Interfaces:**
-- Produces: Prisma 모델 `NaverProduct`, `NaverPost`, `NaverBlogConfig`; enum `NaverPostState { DRAFT PLANNED READY PUBLISHED }`, `NaverPostKind { INFO AFFILIATE }`. `NaverPost` 주요 필드: `id`, `state`, `kind`, `title`, `draftJson Json`(NaverPostDraft 직렬화), `productId String?`, `product NaverProduct?`, `imageUrls String[]`, `connectUrl String?`, `topic String`, `telegramNotifiedAt DateTime?`, `publishedAt DateTime?`, `createdAt`, `updatedAt`. `NaverProduct`: `id`, `channel`(고정 "NAVER_SHOPPING"), `externalId`, `productName`, `productUrl`, `connectUrl`, `thumbnailUrl`, `price Int?`, `specsJson Json?`, `imageUrls String[]`, `createdAt`. `NaverBlogConfig`: `id`, `topic String`, `cadencePerWeek Int @default(4)`, `affiliateRatio Float @default(0.3)`, singleton(하나만 사용).
+- Produces: Prisma 모델 `NaverProduct`, `NaverPost`, `NaverBlogConfig`; enum `NaverPostState { DRAFT PLANNED READY PUBLISHED }`, `NaverPostKind { INFO AFFILIATE }`. `NaverPost` 주요 필드: `id`, `state`, `kind`, `title`, `draftJson Json`(NaverPostDraft 직렬화), `productId String?`, `product NaverProduct?`, `imageUrls String[]`, `connectUrl String?`, `topic String`, `telegramNotifiedAt DateTime?`, `publishedAt DateTime?`, `createdAt`, `updatedAt`. `NaverProduct`: `id`, `externalId`, `productName`, `productUrl`, `connectUrl`, `thumbnailUrl`, `price Int?`, `specsJson Json?`, `imageUrls String[]`, `createdAt`. (channel 필드 없음 — 단일 채널이라 불필요, Task 1 리뷰 ruling.) `NaverBlogConfig`: `id`, `topic String`, `cadencePerWeek Int @default(4)`, `affiliateRatio Float @default(0.3)`, singleton(하나만 사용).
 
 - [ ] **Step 1: 스키마에 모델 추가**
 
@@ -1343,6 +1343,294 @@ Expected: 원고 생성 → 발행 페이지 URL 출력. 브라우저로 URL 열
 ```bash
 git add scripts/naver/verify-e2e.ts docs/STATE.md docs/TASKS.md
 git commit -m "test(naver): e2e 실측 스크립트 + STATE/TASKS 갱신"
+```
+
+---
+
+## Task 12: 카테고리 필드 + config 시드 (INFO 흐름 기반)
+
+**Files:**
+- Modify: `prisma/schema.prisma` (NaverBlogConfig에 `categories String[]`, NaverPost에 `category String?`)
+- Create: `scripts/naver/seed-config.ts`
+- Test: `scripts/naver/verify-config.ts`
+
+**Interfaces:**
+- Produces: `NaverBlogConfig.categories String[] @default([])`; `NaverPost.category String?`. 시드 스크립트가 단일 config 행 생성/갱신(topic=`뉴트로·생활템·생활가전`, categories=`["레트로주방","인테리어소품","생활가전","수납정리"]`).
+
+- [ ] **Step 1: 스키마 수정**
+
+`prisma/schema.prisma` — `NaverBlogConfig`에 필드 추가:
+```prisma
+  categories     String[] @default([])
+```
+`NaverPost`에 필드 추가(`topic` 아래):
+```prisma
+  category           String?
+```
+
+- [ ] **Step 2: 마이그레이션**
+
+Run: `pnpm prisma migrate dev --name naver-categories`
+Expected: additive 마이그레이션 성공. (drift/interactive 프롬프트면 STOP·BLOCKED 보고, reset 금지.)
+주의(Windows): `prisma generate`가 실행 중 `pnpm dev`/`dev:worker`/`dev:bot`의 파일락에 걸리면 해당 tsx-watch 프로세스 정지 후 generate, 재기동.
+
+- [ ] **Step 3: 시드 스크립트**
+
+`scripts/naver/seed-config.ts`:
+```ts
+import { prisma } from '../../src/db/prisma.js';
+
+async function main() {
+  const existing = await prisma.naverBlogConfig.findFirst();
+  const data = {
+    topic: '뉴트로·생활템·생활가전',
+    categories: ['레트로주방', '인테리어소품', '생활가전', '수납정리'],
+  };
+  const row = existing
+    ? await prisma.naverBlogConfig.update({ where: { id: existing.id }, data })
+    : await prisma.naverBlogConfig.create({ data });
+  console.log('config', { id: row.id, topic: row.topic, categories: row.categories });
+  console.log('OK: config seeded');
+}
+main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });
+```
+
+- [ ] **Step 4: 검증 스크립트**
+
+`scripts/naver/verify-config.ts`:
+```ts
+import assert from 'node:assert';
+import { prisma } from '../../src/db/prisma.js';
+
+async function main() {
+  const cfg = await prisma.naverBlogConfig.findFirst();
+  assert.ok(cfg, 'config 없음 — seed-config 먼저 실행');
+  assert.ok(cfg.categories.length >= 1, 'categories 비어있음');
+  console.log('OK: config', cfg.topic, cfg.categories);
+}
+main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });
+```
+
+- [ ] **Step 5: 실행 (시드 → 검증)**
+
+Run: `pnpm tsx scripts/naver/seed-config.ts` → `OK: config seeded`
+Run: `pnpm tsx scripts/naver/verify-config.ts` → `OK: config ...`
+
+- [ ] **Step 6: 커밋**
+
+```bash
+git add prisma/schema.prisma prisma/migrations scripts/naver/seed-config.ts scripts/naver/verify-config.ts
+git commit -m "feat(naver): 카테고리 필드 + config 시드"
+```
+
+---
+
+## Task 13: 정보글(INFO) 생성 경로 — 앵글 생성기 + buildInfoPost
+
+**Files:**
+- Create: `src/modules/pipeline-d/info-post/index.ts`
+- Test: `scripts/naver/verify-info-post.ts`
+
+**Interfaces:**
+- Consumes: `llm`, `generateNaverPost`(T6, kind='INFO'), `generateImage`(T5), `uploadBufferToCloudinary`(T8), `prisma`, `NaverBlogConfig.categories`.
+- Produces:
+  - `generateInfoAngle(category: string, recentTitles: string[]): Promise<string>` — 카테고리 내 정보성 글 주제(앵글) 한 줄 생성, `recentTitles`와 중복 회피.
+  - `pickNextCategory(): Promise<string>` — 최근 INFO 글의 category 사용 빈도가 가장 낮은 카테고리 반환(순환).
+  - `buildInfoPost(opts?: { category?: string; angleHint?: string }): Promise<{ naverPostId: string; title: string; category: string }>` — 상품 없이 INFO NaverPost(state=PLANNED, kind=INFO) 생성.
+
+- [ ] **Step 1: 검증 스크립트 먼저 작성**
+
+`scripts/naver/verify-info-post.ts`:
+```ts
+import { prisma } from '../../src/db/prisma.js';
+import { buildInfoPost, pickNextCategory } from '../../src/modules/pipeline-d/info-post/index.js';
+
+async function main() {
+  const cfg = await prisma.naverBlogConfig.findFirst();
+  if (!cfg || cfg.categories.length === 0) { console.error('SKIP: config/categories 없음 — seed-config 먼저'); process.exit(2); }
+  const cat = await pickNextCategory();
+  console.log('picked category', cat);
+  const out = await buildInfoPost();
+  console.log('built', out);
+  const post = await prisma.naverPost.findUnique({ where: { id: out.naverPostId } });
+  if (!post || post.state !== 'PLANNED' || post.kind !== 'INFO') throw new Error('INFO PLANNED 저장 실패');
+  if (post.productId) throw new Error('INFO 글에 상품 연결됨(있으면 안 됨)');
+  console.log('OK: info post (실측)');
+}
+main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });
+```
+
+- [ ] **Step 2: 실행해 실패 확인**
+
+Run: `pnpm tsx scripts/naver/verify-info-post.ts`
+Expected: FAIL — 모듈 미존재.
+
+- [ ] **Step 3: 구현**
+
+`src/modules/pipeline-d/info-post/index.ts`:
+```ts
+import { prisma } from '../../../db/prisma.js';
+import { logger } from '../../../config/logger.js';
+import { llm } from '../../../infra/llm/index.js';
+import { generateImage } from '../../../infra/llm/gemini-image.js';
+import { uploadBufferToCloudinary } from '../../../infra/cloudinary-client.js';
+import { generateNaverPost } from '../naver-copywriter/index.js';
+
+const MAX_AI_IMAGES = 3;
+
+export async function pickNextCategory(): Promise<string> {
+  const cfg = await prisma.naverBlogConfig.findFirst();
+  if (!cfg || cfg.categories.length === 0) throw new Error('NaverBlogConfig.categories 비어있음 — seed-config 실행');
+  const recent = await prisma.naverPost.findMany({
+    where: { kind: 'INFO', category: { not: null } },
+    orderBy: { createdAt: 'desc' }, take: cfg.categories.length * 2, select: { category: true },
+  });
+  const counts = new Map<string, number>(cfg.categories.map((c) => [c, 0]));
+  for (const r of recent) if (r.category && counts.has(r.category)) counts.set(r.category, counts.get(r.category)! + 1);
+  // 사용 빈도 최소 카테고리(동률이면 categories 순서 우선)
+  return cfg.categories.reduce((best, c) => (counts.get(c)! < counts.get(best)! ? c : best), cfg.categories[0]!);
+}
+
+export async function generateInfoAngle(category: string, recentTitles: string[]): Promise<string> {
+  const avoid = recentTitles.length ? `다음 최근 주제와 겹치지 말 것:\n- ${recentTitles.join('\n- ')}` : '';
+  const result = await llm.complete({
+    system: '너는 한국 네이버 블로그 정보성 글의 주제(앵글)를 딱 한 줄로 제안하는 도구다. 상품 판매가 아니라 독자에게 유용한 정보 주제. 출력은 주제 한 줄만.',
+    userParts: [{ type: 'text', text: `블로그 주제 카테고리: ${category}\n검색 수요 있을 법한 정보성 글 주제 한 줄을 제안해라(제목 아님, 주제).\n${avoid}` }],
+    temperature: 0.9, maxOutputTokens: 200,
+  });
+  return result.text.trim().replace(/^["'\-\s]+|["'\s]+$/g, '').split('\n')[0]!;
+}
+
+export async function buildInfoPost(opts?: { category?: string; angleHint?: string }): Promise<{ naverPostId: string; title: string; category: string }> {
+  const cfg = await prisma.naverBlogConfig.findFirst();
+  if (!cfg) throw new Error('NaverBlogConfig 없음');
+  const category = opts?.category ?? (await pickNextCategory());
+
+  const recentTitles = (await prisma.naverPost.findMany({
+    where: { kind: 'INFO', category }, orderBy: { createdAt: 'desc' }, take: 8, select: { title: true },
+  })).map((p) => p.title).filter((t): t is string => !!t);
+
+  const angle = opts?.angleHint ?? (await generateInfoAngle(category, recentTitles));
+
+  const draft = await generateNaverPost({
+    topic: cfg.topic,
+    product: { name: angle },           // INFO: 상품 대신 앵글을 소재로 전달
+    connectUrl: '',
+    kind: 'INFO',
+    extraNote: `카테고리: ${category}. 정보성 글. 특정 상품 판매 목적이 아니라 "${angle}" 주제를 유용하게 다룬다. 제휴 링크·상품 추천 없음.`,
+  });
+
+  // INFO 보조 이미지 (AI 슬롯만, 상한). 상품 실물 없음.
+  const aiSlots = draft.imageSlots.filter((s) => s.kind === 'AI').slice(0, MAX_AI_IMAGES);
+  const imageUrls: string[] = [];
+  for (const slot of aiSlots) {
+    try {
+      const { data, mimeType } = await generateImage(`네이버 블로그 정보성 글 보조 이미지(일러스트/그래픽, 실물 사진 아님). 주제: ${cfg.topic} · ${category}. 내용: ${slot.caption}`);
+      imageUrls.push(await uploadBufferToCloudinary(data, mimeType));
+    } catch (err) {
+      logger.warn({ err: (err as Error).message, caption: slot.caption }, 'INFO AI 이미지 실패, 스킵');
+    }
+  }
+
+  const post = await prisma.naverPost.create({
+    data: {
+      state: 'PLANNED', kind: 'INFO', topic: cfg.topic, category, title: draft.title,
+      draftJson: draft as unknown as object, imageUrls,
+    },
+  });
+  return { naverPostId: post.id, title: draft.title, category };
+}
+```
+
+주의: INFO 원고엔 disclaimer가 필요 없다. `NaverPostDraftSchema.disclaimer`는 필수 문자열이므로 `generateNaverPost`가 INFO에도 상수를 주입한다 — INFO 글의 발행 페이지에서는 disclaimer 블록을 렌더하지 않도록 T9 렌더러가 `kind`에 따라 생략해야 한다(아래 Step 5 확인). 만약 T9가 이미 완료됐다면 이 조정은 T13의 일부로 반영한다.
+
+- [ ] **Step 4: 실행해 통과 확인 (실측)**
+
+Run: `pnpm tsx scripts/naver/verify-info-post.ts`
+Expected: `OK: info post (실측)` + INFO PLANNED 저장, productId 없음.
+
+- [ ] **Step 5: 발행 페이지 disclaimer 조건부 렌더 (T9 연계)**
+
+`src/modules/shared/admin/naver-routes.ts`의 `GET /admin/naver/:id`에서 `post.kind === 'INFO'`면 `buildPublishPackage` 결과에서 DISCLAIMER 블록을 제외하고 렌더(또는 `buildPublishPackage`에 `includeDisclaimer` 옵션 추가). INFO 글엔 제휴 문구가 붙으면 안 됨. 변경 후 `scripts/naver/verify-package.ts`가 여전히 통과하는지 확인.
+
+- [ ] **Step 6: 커밋**
+
+```bash
+git add src/modules/pipeline-d/info-post src/modules/shared/admin/naver-routes.ts scripts/naver/verify-info-post.ts
+git commit -m "feat(naver): 정보글(INFO) 생성 경로 — 앵글 생성기 + buildInfoPost"
+```
+
+---
+
+## Task 14: 일일 정보글 크론 (naver-daily-info)
+
+**Files:**
+- Create: `src/modules/pipeline-d/daily-info-job/index.ts`
+- Modify: 기존 큐/워커/스케줄 등록부 (`src/queues/queues.ts`, `src/pipeline/workers.ts`, 크론 등록 위치 — `sharing-publish-daily` 패턴을 그대로 따른다)
+- Test: `scripts/naver/verify-daily-job.ts`
+
+**Interfaces:**
+- Consumes: `buildInfoPost`(T13), 텔레그램 알림(기존 `notifier`/봇 sendMessage 패턴), `env.APP_PORT`.
+- Produces: `runDailyInfoJob(): Promise<{ naverPostId: string; title: string; category: string }>` — 하루 1회 INFO 글 생성 + 관리자에게 텔레그램 알림(제목·카테고리·발행 페이지 URL). BullMQ repeatable job `naver-daily-info`로 매일 KST 09:00 등록(기존 `sharing-publish-daily`와 동일 방식·시간대).
+
+- [ ] **Step 1: 기존 크론 패턴 확인**
+
+`sharing-publish-daily` 잡의 정의·등록(큐 생성, repeatable 옵션 cron, worker 핸들러, 텔레그램 알림)을 읽고 동일 구조로 `naver-daily-info`를 만든다. 새 패턴을 발명하지 말 것.
+
+- [ ] **Step 2: 검증 스크립트 먼저 작성 (핸들러 직접 호출)**
+
+`scripts/naver/verify-daily-job.ts`:
+```ts
+import { prisma } from '../../src/db/prisma.js';
+import { runDailyInfoJob } from '../../src/modules/pipeline-d/daily-info-job/index.js';
+
+async function main() {
+  const cfg = await prisma.naverBlogConfig.findFirst();
+  if (!cfg || cfg.categories.length === 0) { console.error('SKIP: config 없음'); process.exit(2); }
+  const out = await runDailyInfoJob();
+  console.log('daily info', out);
+  const post = await prisma.naverPost.findUnique({ where: { id: out.naverPostId } });
+  if (!post || post.kind !== 'INFO') throw new Error('일일 INFO 생성 실패');
+  console.log('OK: daily info job (실측)');
+}
+main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });
+```
+
+- [ ] **Step 3: 핸들러 구현**
+
+`src/modules/pipeline-d/daily-info-job/index.ts`:
+```ts
+import { env } from '../../../config/env.js';
+import { logger } from '../../../config/logger.js';
+import { buildInfoPost } from '../info-post/index.js';
+// 텔레그램 알림: 기존 approval-gate/notifier의 sendMessage 헬퍼를 재사용(정확한 export명은 파일 확인 후 import).
+import { notifyAdmin } from '../../shared/approval-gate/notifier.js';
+
+export async function runDailyInfoJob(): Promise<{ naverPostId: string; title: string; category: string }> {
+  const out = await buildInfoPost();
+  const pageUrl = `http://localhost:${env.APP_PORT}/admin/naver/${out.naverPostId}`;
+  await notifyAdmin(`🟢 오늘의 일상글 초안 준비됨\n[${out.category}] ${out.title}\n발행 페이지: ${pageUrl}\n(복붙 발행하세요)`).catch((e) => logger.warn({ e }, '텔레그램 알림 실패'));
+  logger.info({ naverPostId: out.naverPostId, category: out.category }, 'daily info job done');
+  return out;
+}
+```
+(`notifier.js`의 실제 export가 `notifyAdmin`가 아니면 그 파일의 헬퍼명으로 교체. 없으면 봇 인스턴스로 `sendMessage(env.TELEGRAM_ADMIN_CHAT_ID, ...)` 직접 호출.)
+
+- [ ] **Step 4: 크론 등록 (sharing-publish-daily 패턴 복제)**
+
+`naver-daily-info` repeatable job을 매일 KST 09:00로 등록하고, worker에서 `runDailyInfoJob` 호출하도록 배선. 등록·핸들러 위치는 `sharing-publish-daily`와 동일 파일들.
+
+- [ ] **Step 5: 실행해 통과 확인**
+
+Run: `pnpm tsx scripts/naver/verify-daily-job.ts`
+Expected: `OK: daily info job (실측)` + 텔레그램 알림 수신(관리자 챗) 또는 알림 실패 warn(핵심 생성은 성공).
+Run: `pnpm typecheck` → 에러 없음. worker 기동 로그에 `naver-daily-info` 등록 확인.
+
+- [ ] **Step 6: 커밋**
+
+```bash
+git add src/modules/pipeline-d/daily-info-job src/queues/queues.ts src/pipeline/workers.ts scripts/naver/verify-daily-job.ts
+git commit -m "feat(naver): 일일 정보글 크론 naver-daily-info (매일 09:00 생성+알림)"
 ```
 
 ---
