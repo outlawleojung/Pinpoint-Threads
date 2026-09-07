@@ -21,7 +21,8 @@ const isVideoUrl = (u: string) => /\.mp4(?:\?|$)/i.test(u) || u.includes('/video
 /** Cloudinary 영상 URL → 첫 프레임 JPG 변환 URL (미디어 2장 충족용 캡처). */
 function videoToJpgThumb(u: string): string {
   if (!(u.includes('res.cloudinary.com') && u.includes('/video/upload/'))) return u;
-  let out = u.replace('/video/upload/', '/video/upload/w_720,q_auto,so_0/');
+  // so_auto = Cloudinary가 가장 대표적인 프레임 자동 선택 (so_0 은 인트로·블랙 화면이 잦음)
+  let out = u.replace('/video/upload/', '/video/upload/w_720,q_auto,so_auto/');
   out = out.replace(/\.(mp4|mov|webm)(\?|$)/i, '.jpg$2');
   if (!/\.jpg(?:\?|$)/i.test(out)) out += '.jpg';
   return out;
