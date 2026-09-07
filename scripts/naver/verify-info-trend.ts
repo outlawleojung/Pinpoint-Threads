@@ -41,6 +41,8 @@ async function main() {
 
     const post = await prisma.naverPost.findUnique({ where: { id: out.naverPostId } });
     if (!post || post.state !== 'PLANNED' || post.kind !== 'INFO') throw new Error('INFO PLANNED 저장 실패');
+    if (post.suggestedProduct !== seeded.keyword) throw new Error(`suggestedProduct가 시드 키워드와 다름: ${post.suggestedProduct}`);
+    if (out.suggestedProduct !== seeded.keyword) throw new Error(`buildInfoPost 반환값 suggestedProduct 불일치: ${out.suggestedProduct}`);
 
     const updated = await prisma.naverTrendKeyword.findUnique({ where: { id: seeded.id } });
     if (!updated?.usedAt) throw new Error('트렌드 키워드 usedAt이 마킹되지 않음 (트렌드 경로 미사용)');
@@ -58,6 +60,8 @@ async function main() {
   const fallbackOut = await withRetry('buildInfoPost(fallback)', () => buildInfoPost({ category: fallbackCategory }));
   const fallbackPost = await prisma.naverPost.findUnique({ where: { id: fallbackOut.naverPostId } });
   if (!fallbackPost || fallbackPost.state !== 'PLANNED' || fallbackPost.kind !== 'INFO') throw new Error('폴백 경로 INFO PLANNED 저장 실패');
+  if (fallbackPost.suggestedProduct !== null) throw new Error(`트렌드 없는 폴백인데 suggestedProduct가 설정됨: ${fallbackPost.suggestedProduct}`);
+  if (fallbackOut.suggestedProduct !== null) throw new Error(`buildInfoPost 반환값 suggestedProduct가 null이 아님(폴백): ${fallbackOut.suggestedProduct}`);
   console.log('OK: info trend fallback (실측)');
 }
 

@@ -8,13 +8,17 @@ import { sendDigestMessage } from '../../shared/approval-gate/notifier.js';
  * 하루 1회 INFO 포스트 생성 + 관리자에게 텔레그램 알림(발행 페이지 URL).
  * 텔레그램 알림 실패는 잡 실패로 취급하지 않는다(글 생성이 핵심).
  */
-export async function runDailyInfoJob(): Promise<{ naverPostId: string; title: string; category: string }> {
+export async function runDailyInfoJob(): Promise<{ naverPostId: string; title: string; category: string; suggestedProduct: string | null }> {
   const out = await buildInfoPost();
   const pageUrl = `http://localhost:${env.APP_PORT}/admin/naver/${out.naverPostId}`;
 
+  const suggestedProductLine = out.suggestedProduct
+    ? `\n🛒 연결 가능: ${out.suggestedProduct} — 링크 붙이려면: /naverlink ${out.naverPostId} <쇼핑커넥트링크>`
+    : '';
+
   try {
     await sendDigestMessage(
-      `🟢 오늘의 정보글 초안 준비됨\n[${out.category}] ${out.title}\n발행 페이지: ${pageUrl}\n(복붙 발행하세요)`,
+      `🟢 오늘의 정보글 초안 준비됨\n[${out.category}] ${out.title}\n발행 페이지: ${pageUrl}\n(복붙 발행하세요)${suggestedProductLine}`,
     );
   } catch (err) {
     logger.warn({ err, naverPostId: out.naverPostId }, '텔레그램 알림 실패 (글 생성은 성공)');

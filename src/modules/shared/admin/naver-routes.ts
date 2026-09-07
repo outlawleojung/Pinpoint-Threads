@@ -10,9 +10,14 @@ function esc(s: string): string {
 }
 
 export function renderPublishPage(
-  post: { id: string; title: string | null; state: string },
+  post: { id: string; title: string | null; state: string; kind?: string; suggestedProduct?: string | null },
   pkg: PublishPackage,
 ): string {
+  const suggestedProductBanner = post.kind === 'INFO' && post.suggestedProduct
+    ? `<div style="background:#e8f4ff;border-left:4px solid #0969da;padding:10px 14px;border-radius:6px;margin-bottom:16px;font-size:.95em">
+      🛒 이 글에 상품 링크를 넣을 수 있어요: [${esc(post.suggestedProduct)}] — 텔레그램에서 <code>/naverlink ${esc(post.id)} &lt;쇼핑커넥트 링크&gt;</code>
+    </div>`
+    : '';
   const blocksHtml = pkg.blocks.map((b, i) => {
     if (b.type === 'IMAGE') {
       const img = b.imageUrl ? `<img src="${esc(b.imageUrl)}" style="max-width:220px;border-radius:8px;display:block;margin:0 auto 10px">` : '';
@@ -56,6 +61,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-widt
 </style></head><body>
 <h1>${esc(post.title ?? '(제목 미정)')}</h1>
 <p style="color:#888">state: ${post.state} · 블록별 복사 → 네이버 에디터 붙여넣기. 소제목은 에디터에서 "제목2" 스타일 지정, 이미지는 표시 순서대로 삽입.</p>
+${suggestedProductBanner}
 ${blocksHtml}
 <form class="done" method="POST" action="/admin/naver/${post.id}/published">
   <button type="submit">✅ 발행 완료로 표시</button>

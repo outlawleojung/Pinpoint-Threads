@@ -509,6 +509,7 @@ model NaverPost {
   draftJson          Json?                        // NaverPostDraft 직렬화
   connectUrl         String?
   imageUrls          String[]                     // 공식 + Gemini 보조 (순서 = 삽입 순서)
+  suggestedProduct   String?                      // INFO 글 생성 시 트렌드 키워드 기반 "연결 가능 상품" 제안 (링크 연결은 별도 태스크)
   productId          String?
   product            NaverProduct?  @relation(fields: [productId], references: [id])
   telegramNotifiedAt DateTime?

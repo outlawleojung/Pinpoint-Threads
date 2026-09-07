@@ -52,7 +52,7 @@ export async function pickTrendKeyword(category: string): Promise<{ id: string; 
   return row ? { id: row.id, keyword: row.keyword } : null;
 }
 
-export async function buildInfoPost(opts?: { category?: string; angleHint?: string }): Promise<{ naverPostId: string; title: string; category: string }> {
+export async function buildInfoPost(opts?: { category?: string; angleHint?: string }): Promise<{ naverPostId: string; title: string; category: string; suggestedProduct: string | null }> {
   const cfg = await prisma.naverBlogConfig.findFirst();
   if (!cfg) throw new Error('NaverBlogConfig 없음');
   const category = opts?.category ?? (await pickNextCategory());
@@ -90,10 +90,12 @@ export async function buildInfoPost(opts?: { category?: string; angleHint?: stri
     }
   }
 
+  const suggestedProduct = trend?.keyword ?? null;
+
   const post = await prisma.naverPost.create({
     data: {
       state: 'PLANNED', kind: 'INFO', topic: cfg.topic, category, title: draft.title,
-      draftJson: draft as unknown as object, imageUrls,
+      draftJson: draft as unknown as object, imageUrls, suggestedProduct,
     },
   });
 
@@ -101,5 +103,5 @@ export async function buildInfoPost(opts?: { category?: string; angleHint?: stri
     await prisma.naverTrendKeyword.update({ where: { id: trend.id }, data: { usedAt: new Date() } });
   }
 
-  return { naverPostId: post.id, title: draft.title, category };
+  return { naverPostId: post.id, title: draft.title, category, suggestedProduct };
 }
