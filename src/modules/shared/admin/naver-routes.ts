@@ -14,9 +14,23 @@ export function renderPublishPage(
   pkg: PublishPackage,
 ): string {
   const blocksHtml = pkg.blocks.map((b, i) => {
+    if (b.type === 'IMAGE') {
+      const img = b.imageUrl ? `<img src="${esc(b.imageUrl)}" style="max-width:220px;border-radius:8px;display:block;margin:0 auto 10px">` : '';
+      const label = b.imageUrl ? '📷 여기에 이미지' : '📷 여기에 이미지 넣기';
+      const note = b.note ? `<div class="note">${esc(b.note)}</div>` : '';
+      return `<div class="block ${b.type}">
+      <div class="btype">${b.type}</div>
+      <div style="border:2px dashed #bbb;border-radius:10px;padding:16px;background:#fbfbfb;text-align:center;color:#555;margin:12px 0">
+        ${img}
+        <div style="font-weight:700">${label}</div>
+        <div class="text" id="blk-${i}" style="margin-top:6px">${esc(b.text)}</div>
+      </div>
+      ${note}
+    </div>`;
+    }
     const img = b.imageUrl ? `<img src="${esc(b.imageUrl)}" style="max-width:220px;border-radius:8px;display:block;margin:8px 0">` : '';
     const note = b.note ? `<div class="note">${esc(b.note)}</div>` : '';
-    const copyBtn = b.type === 'IMAGE' ? '' : `<button class="copy" data-i="${i}">복사</button>`;
+    const copyBtn = `<button class="copy" data-i="${i}">복사</button>`;
     return `<div class="block ${b.type}">
       <div class="btype">${b.type}${copyBtn}</div>
       ${note}

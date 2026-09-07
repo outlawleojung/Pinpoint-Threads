@@ -15,4 +15,11 @@ const html = renderPublishPage({ id: 'x', title: 'T', state: 'PLANNED' }, pkg);
 assert.ok(html.includes('제목2 스타일'), '소제목 가이드 렌더 누락');
 assert.ok(html.includes('복사'), '복사 버튼 누락');
 assert.ok(html.includes('https://img/1'), '이미지 미표시');
+assert.ok(html.includes('여기에 이미지'), '이미지 자리 강조 문구 누락');
+
+// 이미지 URL이 없는 경우(INFO 포스트 등)에도 자리 표시가 나와야 함
+const pkgNoImages = buildPublishPackage(draft, []);
+const htmlNoImages = renderPublishPage({ id: 'y', title: 'T', state: 'PLANNED' }, pkgNoImages);
+assert.ok(htmlNoImages.includes('여기에 이미지 넣기'), '이미지 미확보 시 자리 표시 누락');
+
 console.log('OK: admin publish page render');
