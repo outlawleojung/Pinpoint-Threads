@@ -52,6 +52,41 @@ async function main() {
     await prisma.naverTrendKeyword.delete({ where: { id: seeded.id } }).catch(() => {});
   }
 
+  // --- 1b) 잡음 섞인 SKU 스타일 트렌드 키워드: 주제가 상품 자체로 흘러가지 않는지(콘텐츠 품질) ---
+  const noisyCategory = '수납정리';
+  const noisyKeyword = '매직캔 매직롤 280 화이트 로고 인쇄 리필';
+  const noisySeeded = await prisma.naverTrendKeyword.create({
+    data: { category: noisyCategory, keyword: noisyKeyword, source: 'VERIFY_SCRIPT', value: 1e9 },
+  });
+
+  const NOISE_TOKENS = ['매직캔', '매직롤', '280', '로고 인쇄'];
+  let noisyPostId: string | null = null;
+  try {
+    const noisyOut = await withRetry('buildInfoPost(noisy trend)', () => buildInfoPost({ category: noisyCategory }));
+    noisyPostId = noisyOut.naverPostId;
+    console.log('built (noisy trend path) — title:', noisyOut.title);
+
+    const noisyPost = await prisma.naverPost.findUnique({ where: { id: noisyOut.naverPostId } });
+    if (!noisyPost || noisyPost.state !== 'PLANNED' || noisyPost.kind !== 'INFO') throw new Error('잡음 트렌드 경로 INFO PLANNED 저장 실패');
+    if (noisyPost.suggestedProduct !== noisyKeyword) throw new Error(`잡음 트렌드: suggestedProduct가 시드 키워드와 다름: ${noisyPost.suggestedProduct}`);
+    if (noisyOut.suggestedProduct !== noisyKeyword) throw new Error(`잡음 트렌드: buildInfoPost 반환값 suggestedProduct 불일치: ${noisyOut.suggestedProduct}`);
+
+    const title = noisyOut.title ?? '';
+    if (!title.trim()) throw new Error('잡음 트렌드: 생성된 제목이 비어있음');
+    const titleLower = title.toLowerCase();
+    for (const token of NOISE_TOKENS) {
+      if (titleLower.includes(token.toLowerCase())) {
+        throw new Error(`잡음 트렌드: 제목에 SKU 잡음 토큰("${token}")이 남아있음 — 상품 홍보글화됨: "${title}"`);
+      }
+    }
+    if (noisyPost.title !== title) throw new Error(`잡음 트렌드: draft.title과 buildInfoPost 반환 title 불일치: "${noisyPost.title}" vs "${title}"`);
+
+    console.log(`OK: 잡음 SKU 트렌드 → 일반 정보 주제로 추상화됨. title="${title}"`);
+  } finally {
+    await prisma.naverTrendKeyword.delete({ where: { id: noisySeeded.id } }).catch(() => {});
+    if (noisyPostId) await prisma.naverPost.delete({ where: { id: noisyPostId } }).catch(() => {});
+  }
+
   // --- 2) 트렌드 키워드 없는 카테고리: 기존 폴백(LLM 앵글 생성) 동작 유지 확인 ---
   const fallbackCategory = '__verify_no_trend_category__';
   const noTrend = await pickTrendKeyword(fallbackCategory);

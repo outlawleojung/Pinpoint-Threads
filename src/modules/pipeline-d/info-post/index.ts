@@ -23,9 +23,19 @@ export async function pickNextCategory(): Promise<string> {
 
 export async function generateInfoAngle(category: string, recentTitles: string[], trendKeyword?: string): Promise<string> {
   const avoid = recentTitles.length ? `다음 최근 주제와 겹치지 말 것:\n- ${recentTitles.join('\n- ')}` : '';
-  const system = '너는 한국 네이버 블로그 정보성 글의 주제(앵글)를 딱 한 줄로 제안하는 도구다. 상품 판매가 아니라 독자에게 유용한 정보 주제. 출력은 주제 한 줄만.';
+  const system = '너는 한국 네이버 블로그 정보성 글의 주제(앵글)를 딱 한 줄로 제안하는 도구다. 상품 판매가 아니라 독자에게 유용한 정보 주제. 특정 상품명·브랜드명·모델번호·규격은 주제에 절대 포함시키지 않는다. 출력은 주제 한 줄만.';
   const trendInstruction = trendKeyword
-    ? `지금 뜨고 있는 상품·키워드는 "${trendKeyword}"다. 이 키워드를 직접적인 판매·홍보 없이, 이 키워드와 자연스럽게 연결되는 유용한 정보성 주제로 녹여내라(예: 활용법·비교·고르는 기준·관리법 등). 주제 문장에 이 키워드 또는 그 상품군이 드러나야 한다.`
+    ? `아래 "트렌드 신호"는 상품명이 아니라 "이런 영역에 대한 사람들의 관심이 커지고 있다"는 관심 신호일 뿐이다. 이 신호 자체(상품·브랜드·모델)를 글의 소재로 직접 쓰지 마라.
+
+트렌드 신호: "${trendKeyword}"
+
+절차:
+1) 이 문자열에서 모델명·규격(예: 숫자 코드), 색상, "로고 인쇄" 같은 커스텀 옵션, 브랜드명·제품 라인명 등 특정 상품(SKU)을 특정하는 잡음을 모두 걷어내라.
+2) 남는 것에서 사람들이 실제로 궁금해하는 "일반적인 필요·관심사"가 무엇인지 추론하라.
+3) 그 관심사를 다루는, 사람들이 검색할 법한 "정보 주제" 한 줄을 제안하라(예: 활용법·고르는 기준·관리법·비교 등). 주제에는 특정 상품명·브랜드명·모델명·규격이 절대 등장하면 안 되며, 상품 리뷰·홍보 글 주제가 아니라 순수 정보글 주제여야 한다.
+
+예시: 트렌드 신호 "매직캔 매직롤 280 화이트 로고 인쇄 리필" → (모델명 280·색상 화이트·로고 인쇄 등 잡음 제거) → 관심사: 쓰레기통 위생·냄새·리필 관리 → 주제: "쓰레기통 냄새 없이 관리하는 법"
+(❌ 절대 금지 예: "매직캔 매직롤 280 리필 교체 주기"처럼 특정 상품명·모델명이 주제에 남는 것)`
     : '';
   const userParts: LlmContentPart[] = [
     { type: 'text', text: `블로그 주제 카테고리: ${category}\n검색 수요 있을 법한 정보성 글 주제 한 줄을 제안해라(제목 아님, 주제).\n${trendInstruction}\n${avoid}` },
@@ -75,7 +85,7 @@ export async function buildInfoPost(opts?: { category?: string; angleHint?: stri
     product: { name: angle },           // INFO: 상품 대신 앵글을 소재로 전달
     connectUrl: '',
     kind: 'INFO',
-    extraNote: `카테고리: ${category}. 정보성 글. 특정 상품 판매 목적이 아니라 "${angle}" 주제를 유용하게 다룬다. 제휴 링크·상품 추천 없음.`,
+    extraNote: `카테고리: ${category}. 정보성 글. 특정 상품 판매 목적이 아니라 "${angle}" 주제를 유용하게 다룬다. 제휴 링크·상품 추천 없음. 제목과 본문에 특정 상품명·브랜드명·모델번호를 절대 언급하지 마라.`,
   });
 
   // INFO 보조 이미지 (AI 슬롯만, 상한). 상품 실물 없음.
