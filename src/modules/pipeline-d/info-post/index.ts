@@ -71,13 +71,16 @@ export async function buildInfoPost(opts?: { category?: string; angleHint?: stri
     where: { kind: 'INFO', category }, orderBy: { createdAt: 'desc' }, take: 8, select: { title: true },
   })).map((p) => p.title).filter((t): t is string => !!t);
 
+  // 역할 분리(정책): 주제는 쿠팡 트렌드와 무관하게 LLM 에버그린으로 뽑는다
+  // (쿠팡 = "뭐가 팔리나"지 "사람들이 뭘 찾아 읽나"가 아니므로 주제 신호로 부적합).
+  // 쿠팡 상품(trend)은 오직 선택적 링크 후보(suggestedProduct)로만 남긴다.
   let trend: { id: string; keyword: string } | null = null;
   let angle: string;
   if (opts?.angleHint) {
     angle = opts.angleHint;
   } else {
-    trend = await pickTrendKeyword(category);
-    angle = await generateInfoAngle(category, recentTitles, trend?.keyword);
+    trend = await pickTrendKeyword(category); // 링크 후보용 (주제엔 사용하지 않음)
+    angle = await generateInfoAngle(category, recentTitles);
   }
 
   const draft = await generateNaverPost({
