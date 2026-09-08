@@ -202,6 +202,8 @@ bot.command('copy', async (ctx) => {
 
     const reply = await composeReply({
       body: copyResult.body,
+      sourceBrief: copyResult.sourceBrief,
+      sourceText: 'USB 충전 미니 무선 가습기. 조용하고 세척 편함.',
       productName,
       productCategory: '생활용품',
       deeplinkUrl,

@@ -165,11 +165,13 @@ async function regenerateCopyAndResend(postId: string): Promise<void> {
     ragEnabled: true,
     factCheckEnabled: true,
     regenAvoid: post.generatedBody
-      ? `이전 카피와 확실히 다른 문장·다른 각도로 (그대로 반복 금지): "${post.generatedBody}"`
+      ? `원본 사건·관찰·반응 포인트는 유지하고 한국어 표현·호흡만 바꾼다. 이전 문구 반복 금지: "${post.generatedBody}"`
       : undefined,
   });
   const reply = await composeReply({
     body: copy.body,
+    sourceBrief: copy.sourceBrief,
+    sourceText: post.sourceItem?.rawText ?? '',
     productName: post.commerceProduct.productName,
     productCategory: category,
     deeplinkUrl,

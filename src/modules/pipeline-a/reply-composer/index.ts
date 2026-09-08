@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { llm } from '../../../infra/llm/index.js';
 import { logger } from '../../../config/logger.js';
+import { factCheckCopy } from '../../shared/copywriter/index.js';
+import { renderSourceBrief, type SourceBrief } from '../../shared/copywriter/source-brief.js';
 
 /**
  * Reply Composer (고정 댓글).
@@ -39,6 +41,8 @@ export interface ReplyComposeInput {
   accountId: string;         // 페르소나 다변화 seed
   personaPrompt?: string;
   channel?: 'COUPANG' | 'MUSINSA' | 'NAVER';
+  sourceBrief?: SourceBrief;
+  sourceText?: string;
 }
 
 export interface ReplyComposeResult {
@@ -52,6 +56,8 @@ const SYSTEM_PROMPT = `너는 한국 Threads 고정 댓글의 첫 리드 문장�
 핵심 원칙:
 - 광고 카피 아님. 친구가 무심코 툭 던진 감초 같은 한 마디.
 - 상품·본문 맥락에 가볍게 연결되지만 상품 자랑 아님.
+- 원본 보존 기준이 있으면 본문과 같은 포인트를 유지. 원본에 없는 체험·효능·지속시간·비교를 추가하지 않는다.
+- 본문에서 만든 관심을 연결 상품으로 자연스럽게 이어준다. 새 감탄이나 상품 장점 설명을 억지로 추가하지 않는다.
 - 1문장, 최대 2줄, 대략 15~50자.
 - 이모지는 안 쓰거나 최대 1개.
 
@@ -82,15 +88,11 @@ const SYSTEM_PROMPT = `너는 한국 Threads 고정 댓글의 첫 리드 문장�
 자연 어투 강제:
 - **실제 한국인이 SNS에 쓰는 표현만.** 요즘 Threads 유행어 OK (실화냐·미쳤음·진심).
 - LLM 창작 은유·억지 비유 절대 금지 (예: "발바닥이 안 울어", "잠이 마중 옴").
-- 축약 어미 (~됨/~옴/~함) 사용 시 목적어·주어 명확: 나쁨 "좀 됨" / 좋음 "발이 좀 편해짐".
-- **처음 본 사람도 즉시 이해 가능해야.** 해석·추론 필요한 문장 X.
+- 본문·미디어와 함께 바로 이해되면 주어·목적어·결론 생략 가능. 억지 비유는 금지.
 
-권장 스타일 예:
-- "책상 위에 하나 놓았을 뿐인데 은근 별세계임"
-- "이거 없이 어떻게 살았는지 모르겠음"
-- "무심코 산 건데 요즘 제일 잘한 일임"
-- "이거 하나로 아침 준비 시간 반 줄었음"
-- "생각 없이 켰다가 이제 매일 씀"
+원작자의 체험을 게시 계정의 체험으로 쓰지 않는다.
+"직접 써봤는데", "아침 준비 시간 반 줄었음", "향수보다 오래감" 같은 근거 없는 체험·효능은 금지.
+사진/영상 속 제품과 연결 상품이 동일하다는 확인이 없으면 동일 제품이라고 단정하지 않는다.
 
 JSON으로만 반환. 다른 텍스트 절대 금지.
 { "lead": "여기에 한 문장" }`;
@@ -108,24 +110,40 @@ export async function composeReply(input: ReplyComposeInput): Promise<ReplyCompo
     `"""${input.body}"""`,
     '',
     '위 본문 톤과 자연스럽게 이어지는 리드 한 문장을 JSON으로만 반환.',
+    input.sourceBrief ? renderSourceBrief(input.sourceBrief) : '',
+    input.sourceText ? `원문 자료: ${JSON.stringify(input.sourceText)}` : '',
   ].join('\n');
 
-  const response = await llm().complete({
-    tier: 'fast', // 비용 절감: 짧은 리드 한 줄 · Haiku 충분
-    system,
-    userParts: [{ type: 'text', text: userPrompt }],
-    maxOutputTokens: 200,
-    temperature: 0.85,
-    jsonMode: true,
-    jsonSchema: {
-      type: 'object',
-      properties: { lead: { type: 'string' } },
-      required: ['lead'],
-    },
-  });
+  let lead = '';
+  let avoid = '';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await llm().complete({
+      tier: 'fast',
+      system,
+      userParts: [{ type: 'text', text: userPrompt + (avoid ? `\n이전 오류 수정: ${avoid}` : '') }],
+      maxOutputTokens: 200,
+      temperature: 0.85,
+      jsonMode: true,
+      thinking: 'disabled',
+      jsonSchema: {
+        type: 'object',
+        properties: { lead: { type: 'string' } },
+        required: ['lead'],
+      },
+    });
 
-  const parsed = extractJson(response.text);
-  const { lead } = LeadResultSchema.parse(parsed);
+    const parsed = extractJson(response.text);
+    lead = LeadResultSchema.parse(parsed).lead;
+    if (!input.sourceBrief) break;
+    const check = await factCheckCopy({
+      body: `본문: ${input.body}\n댓글 리드: ${lead}`,
+      productName: input.productName, productCategory: input.productCategory,
+      sourceBrief: input.sourceBrief, sourceText: input.sourceText,
+    });
+    if (check.ok) break;
+    if (attempt === 1) throw new Error(`댓글 원본 보존 검사 실패: ${check.reason}`);
+    avoid = check.reason ?? '원본에 없는 주장을 제거한다';
+  }
 
   // [광고] prefix 는 공정위·플랫폼 안전 표기용 — 링크 바로 옆에 반드시 존재해야 함
   const labeledLead = lead.startsWith('[광고]') ? lead : `[광고] ${lead}`;

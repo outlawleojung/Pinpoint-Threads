@@ -71,6 +71,8 @@ async function executeOne(plan: PropagationPlan, dryRun: boolean): Promise<Propa
         factCheckEnabled: true,
       });
       const reply = await composeReply({
+        sourceBrief: copy.sourceBrief,
+        sourceText: winner.sourceItem?.rawText ?? '',
         body: copy.body, productName: cp.productName, productCategory: category,
         deeplinkUrl, accountId: acc.id, personaPrompt: acc.personaPrompt, channel,
       });

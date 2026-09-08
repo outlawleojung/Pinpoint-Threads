@@ -222,6 +222,8 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
   // 11. Reply Composer (AI 기반 감초 톤 리드 생성)
   const reply = await composeReply({
     body: copy.body,
+    sourceBrief: copy.sourceBrief,
+    sourceText: input.sourceText,
     productName: matched.result.product.productName,
     productCategory: matched.result.product.category ?? classified.category,
     deeplinkUrl: matched.result.deeplinkUrl,
