@@ -21,6 +21,7 @@ export function buildPublishPackage(
   const includeDisclaimer = opts?.includeDisclaimer ?? true;
   const connectUrl = opts?.connectUrl;
   const hasCta = typeof connectUrl === 'string' && connectUrl.length > 0;
+  const sectionLinks = draft.sectionLinks ?? [];
   const blocks: PublishBlock[] = [];
   const imgQueue = [...imageUrls];
 
@@ -40,16 +41,30 @@ export function buildPublishPackage(
     }
   };
 
+  // 문단별 제휴 링크 CTA (해당 소제목/도입 뒤에 배치)
+  const emitSectionCtasAfter = (sectionIndex: number) => {
+    for (const link of sectionLinks.filter((l) => l.section === sectionIndex)) {
+      blocks.push({
+        type: 'CTA',
+        text: link.label ? `${link.label} 보러가기` : '상품 확인하러 가기',
+        url: link.url,
+        note: '네이버 에디터에서 이 문구(또는 버튼/이미지)에 위 링크를 거세요',
+      });
+    }
+  };
+
   blocks.push({ type: 'PARAGRAPH', text: draft.intro });
   if (includeDisclaimer) {
     blocks.push({ type: 'DISCLAIMER', text: draft.disclaimer, note: '첫 제휴 링크 전에 위치(공정위 필수)' });
   }
   emitImagesAfter(0);
+  emitSectionCtasAfter(0);
 
   draft.sections.forEach((sec, i) => {
     blocks.push({ type: 'HEADING', text: sec.heading, note: '에디터에서 제목2 스타일 지정' });
     blocks.push({ type: 'PARAGRAPH', text: sec.body });
     emitImagesAfter(i + 1);
+    emitSectionCtasAfter(i + 1);
   });
 
   // 남은 이미지가 있으면 말미에 배치

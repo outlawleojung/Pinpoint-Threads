@@ -16,7 +16,7 @@ import { isCommerceUrl, splitBenchmarkAndCommerce } from '../url-ingester/platfo
 import { InboundSource } from '@prisma/client';
 import { detectPlatform, extractUrls } from '../url-ingester/platform-detector.js';
 import { handleNaverCommand } from './naver-command.js';
-import { relinkNaverPost } from '../../pipeline-d/relink/index.js';
+import { addSectionLink } from '../../pipeline-d/relink/index.js';
 
 export const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
 
@@ -499,22 +499,28 @@ bot.command('naver', async (ctx) => {
 // /naverlink <글ID> <쇼핑커넥트 링크> — 기존 INFO(일상) 글에 제휴링크를 녹여 AFFILIATE로 재생성
 bot.command('naverlink', async (ctx) => {
   const raw = ctx.match?.trim() ?? '';
-  const parts = raw.split(/\s+/).filter(Boolean);
+  // "<글ID> <소제목번호> <링크> [| 상품명]" — 소제목번호 0=도입 뒤, 1..N=해당 소제목 뒤
+  const [mainPart, labelPart] = raw.split('|');
+  const parts = (mainPart ?? '').trim().split(/\s+/).filter(Boolean);
   const postId = parts[0];
-  const connectUrl = parts[1];
-  if (!postId || !connectUrl || !/^https?:\/\//.test(connectUrl)) {
-    await ctx.reply('사용법: /naverlink <글ID> <쇼핑커넥트 링크>\n예: /naverlink cktest123 https://smartstore.naver.com/x/products/123');
+  const section = Number(parts[1]);
+  const url = parts[2];
+  const label = labelPart?.trim() || undefined;
+  if (!postId || !Number.isInteger(section) || !url || !/^https?:\/\//.test(url)) {
+    await ctx.reply(
+      '사용법: /naverlink <글ID> <소제목번호> <쇼핑커넥트 링크> [| 상품명]\n예: /naverlink cktest123 2 https://naver.me/xxxx | 원목 도마\n(소제목번호는 발행 페이지에서 확인, 도입 뒤는 0. 여러 번 = 여러 상품)',
+    );
     return;
   }
-  await ctx.reply('🟢 제휴 링크 반영 중... (원고 재생성)');
+  await ctx.reply(`🟢 소제목 ${section}에 상품 링크 부착 중...`);
   try {
-    const result = await relinkNaverPost(postId, connectUrl);
+    const result = await addSectionLink(postId, section, url, label);
     if ('error' in result) {
       await ctx.reply(`❌ 실패: ${result.error}`);
       return;
     }
     await ctx.reply(
-      `✅ 제휴 링크 반영 완료\n제목: ${result.title}\n발행 페이지: ${result.pageUrl}`,
+      `✅ 링크 부착 완료 (소제목 ${section})\n제목: ${result.title}\n현재 붙은 링크: ${result.linkCount}개\n발행 페이지: ${result.pageUrl}`,
       { link_preview_options: { is_disabled: true } },
     );
   } catch (err) {

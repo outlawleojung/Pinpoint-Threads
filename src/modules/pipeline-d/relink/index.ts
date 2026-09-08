@@ -51,3 +51,46 @@ export async function relinkNaverPost(
     pageUrl: `http://localhost:${env.APP_PORT}/admin/naver/${postId}`,
   };
 }
+
+/**
+ * 문단별 제휴 링크 부착 — 글은 재생성하지 않고, 지정한 소제목(section) 뒤에 상품 CTA만 추가한다.
+ * section: 0 = 도입(intro) 뒤, 1..N = N번째 소제목 뒤. 같은 section에 다시 걸면 교체.
+ * 여러 번 호출하면 여러 소제목에 각각 링크가 붙는다.
+ */
+export async function addSectionLink(
+  postId: string,
+  section: number,
+  connectUrl: string,
+  label?: string,
+): Promise<{ title: string; pageUrl: string; linkCount: number; sectionCount: number } | { error: string }> {
+  const post = await prisma.naverPost.findUnique({ where: { id: postId } });
+  if (!post) return { error: `글을 찾을 수 없습니다: ${postId}` };
+  if (!post.draftJson) return { error: '이 글은 아직 본문이 없습니다.' };
+
+  const draft = post.draftJson as unknown as NaverPostDraft;
+  const sectionCount = draft.sections?.length ?? 0;
+  if (section < 0 || section > sectionCount) {
+    return { error: `소제목 번호는 0(도입)~${sectionCount} 사이여야 합니다. 받은 값: ${section}` };
+  }
+
+  const links = (draft.sectionLinks ?? []).filter((l) => l.section !== section);
+  links.push({ section, url: connectUrl, ...(label ? { label } : {}) });
+  links.sort((a, b) => a.section - b.section);
+  const nextDraft = { ...draft, sectionLinks: links };
+
+  await prisma.naverPost.update({
+    where: { id: postId },
+    data: {
+      kind: 'AFFILIATE',
+      draftJson: nextDraft as unknown as object,
+      connectUrl: post.connectUrl ?? connectUrl, // 대표 링크(최초 1개) 기록용
+    },
+  });
+
+  return {
+    title: post.title ?? '(제목 미정)',
+    pageUrl: `http://localhost:${env.APP_PORT}/admin/naver/${postId}`,
+    linkCount: links.length,
+    sectionCount,
+  };
+}

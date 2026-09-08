@@ -17,6 +17,10 @@ export const NaverPostDraftSchema = z.object({
   })).min(3),
   tags: z.array(z.string()).min(5).max(10),
   disclaimer: z.string(),
+  // 문단별 제휴 링크 (LLM이 생성하는 게 아니라 /naverlink로 사후 부착. section=0은 intro 뒤, 1..N은 해당 소제목 뒤).
+  sectionLinks: z
+    .array(z.object({ section: z.number().int().min(0), url: z.string(), label: z.string().optional() }))
+    .optional(),
 });
 
 export type NaverPostDraft = z.infer<typeof NaverPostDraftSchema>;

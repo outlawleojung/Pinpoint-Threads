@@ -13,12 +13,24 @@ export function renderPublishPage(
   post: { id: string; title: string | null; state: string; kind?: string; suggestedProduct?: string | null },
   pkg: PublishPackage,
 ): string {
-  const suggestedProductBanner = post.kind === 'INFO' && post.suggestedProduct
-    ? `<div style="background:#e8f4ff;border-left:4px solid #0969da;padding:10px 14px;border-radius:6px;margin-bottom:16px;font-size:.95em">
-      🛒 이 글에 상품 링크를 넣을 수 있어요: [${esc(post.suggestedProduct)}] — 텔레그램에서 <code>/naverlink ${esc(post.id)} &lt;쇼핑커넥트 링크&gt;</code>
-    </div>`
-    : '';
+  const suggestedProductBanner = `<div style="background:#e8f4ff;border-left:4px solid #0969da;padding:10px 14px;border-radius:6px;margin-bottom:16px;font-size:.95em">
+      🛒 <b>상품 링크는 소제목마다 붙일 수 있어요.</b> 아래 각 소제목의 번호를 보고, 텔레그램에서
+      <code>/naverlink ${esc(post.id)} &lt;소제목번호&gt; &lt;쇼핑커넥트 링크&gt;</code> (도입 뒤는 0). 여러 번 = 여러 상품.
+    </div>`;
+  let headingNo = 0;
   const blocksHtml = pkg.blocks.map((b, i) => {
+    if (b.type === 'HEADING') {
+      headingNo += 1;
+      const n = headingNo;
+      const note = b.note ? `<div class="note">${esc(b.note)}</div>` : '';
+      const copyBtn = `<button class="copy" data-i="${i}">복사</button>`;
+      return `<div class="block HEADING">
+      <div class="btype">HEADING · 소제목 ${n}${copyBtn}</div>
+      ${note}
+      <div class="text" id="blk-${i}">${esc(b.text)}</div>
+      <div class="note" style="background:#eef2ff;border-left-color:#8899cc;color:#445">이 소제목 뒤에 상품 링크: <code>/naverlink ${esc(post.id)} ${n} &lt;쇼핑커넥트 링크&gt;</code></div>
+    </div>`;
+    }
     if (b.type === 'CTA') {
       const note = b.note ? `<div class="note">${esc(b.note)}</div>` : '';
       const copyBtn = `<button class="copy" data-i="${i}">복사</button>`;
