@@ -114,11 +114,10 @@ export async function runPipelineC(input: RunPipelineCInput): Promise<PipelineCO
     }
 
     // 4) 일상 카피 (상품·링크 없음).
-    //   사용자 방침: **원본 본문 기준**으로 각색. 영상 프레임은 오히려 빗나감(추측 유발).
-    //   → 본문이 충분하면 프레임 vision 생략, 본문 없을 때만 프레임을 fallback 으로.
+    //   화면(프레임) + 캡션 **둘 다** 넘긴다. 캡션이 "웃겨" 한마디면 내용 정보가 없어 지어내므로
+    //   화면으로 정확히 보게 하되, 프롬프트에서 "보이는 것만·안 지어내기"를 강제한다.
     const rawText = (inbound.rawText ?? '').trim();
-    const hasUsableText = rawText.length >= 10;
-    const imageForCopy = hasUsableText ? undefined : publicUrls.find((u) => !isVideoUrl(u));
+    const imageForCopy = publicUrls.find((u) => !isVideoUrl(u));
     const body = await generateDailyBody({
       personaPrompt: account.personaPrompt,
       accountSeed: account.id,
