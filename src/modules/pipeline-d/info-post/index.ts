@@ -5,9 +5,21 @@ import type { LlmContentPart } from '../../../infra/llm/index.js';
 import { generateImage } from '../../../infra/llm/gemini-image.js';
 import { uploadBufferToCloudinary } from '../../../infra/cloudinary-client.js';
 import { generateNaverPost } from '../naver-copywriter/index.js';
-import { buildSearchTermPool } from '../../../infra/naver/autocomplete.js';
+import { fetchAutocomplete } from '../../../infra/naver/autocomplete.js';
 
 const MAX_AI_IMAGES = 3;
+
+/**
+ * 카테고리 라벨 → 사람들이 실제로 검색하는 "자연스러운 씨앗 검색어" 목록.
+ * 라벨 그대로("레트로주방")는 자동완성이 얇아서, 실제 검색 표현으로 넓게 씨앗을 준다.
+ * 매핑 없는 라벨은 라벨 자체를 씨앗으로 폴백.
+ */
+const CATEGORY_SEEDS: Record<string, string[]> = {
+  레트로주방: ['레트로 주방', '주방 인테리어', '주방용품 추천', '주방 꾸미기'],
+  인테리어소품: ['인테리어 소품', '방 꾸미기', '셀프 인테리어', '자취방 꾸미기'],
+  생활가전: ['생활가전 추천', '주방가전 추천', '소형가전', '자취 필수 가전'],
+  수납정리: ['수납정리', '정리수납', '집 정리', '작은방 수납'],
+};
 
 export async function pickNextCategory(): Promise<string> {
   const cfg = await prisma.naverBlogConfig.findFirst();
@@ -79,8 +91,11 @@ export async function buildInfoPost(opts?: { category?: string; angleHint?: stri
     angle = opts.angleHint;
   } else {
     trend = await pickTrendKeyword(category); // 링크 후보용 (주제엔 사용하지 않음)
-    // 주제 = 사람들이 실제 검색하는 것에서 (네이버 자동완성/연관검색어). 실패 시 빈 배열 → 에버그린 폴백.
-    const searchTerms = await buildSearchTermPool(category, { drill: 3, max: 25 });
+    // 주제 = 사람들이 실제 검색하는 것에서. 카테고리별 자연스러운 씨앗어들로 자동완성을 넓게 긁는다.
+    // 전부 실패하면 빈 배열 → generateInfoAngle 에버그린 폴백.
+    const seeds = CATEGORY_SEEDS[category] ?? [category];
+    const pools = await Promise.all(seeds.map((s) => fetchAutocomplete(s, { max: 8 })));
+    const searchTerms = [...new Set(pools.flat())].slice(0, 30);
     angle = await generateInfoAngle(category, recentTitles, searchTerms);
   }
 
