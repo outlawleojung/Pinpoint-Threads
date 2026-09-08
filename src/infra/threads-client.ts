@@ -44,6 +44,11 @@ export interface ThreadsPublishInput {
   accessToken: string;
   text: string;
   mediaUrls?: string[]; // 0 = text-only, 1 = single image, 2+ = carousel
+  /**
+   * 토픽 태그 (# 없이, ≤50자, 마침표·& 금지, 글당 1개).
+   * 본문 텍스트엔 안 들어가고 게시물에 태그로만 붙음 (사용자에겐 #표시로 보임).
+   */
+  topicTag?: string;
 }
 
 export interface ThreadsPublishResult {
@@ -81,6 +86,7 @@ interface CreateContainerParams {
   children?: string[]; // container ids for carousel
   replyToId?: string;
   linkAttachment?: string;
+  topicTag?: string;
 }
 
 const CONTAINER_POLL_INTERVAL_MS = 2000;
@@ -288,6 +294,7 @@ export class ThreadsClient {
     if (params.children?.length) body.set('children', params.children.join(','));
     if (params.replyToId) body.set('reply_to_id', params.replyToId);
     if (params.linkAttachment) body.set('link_attachment', params.linkAttachment);
+    if (params.topicTag) body.set('topic_tag', params.topicTag);
 
     const res = await request(`${GRAPH_BASE}/v1.0/me/threads`, {
       method: 'POST',
@@ -350,20 +357,22 @@ export class ThreadsClient {
   }
 
   async publish(input: ThreadsPublishInput): Promise<ThreadsPublishResult> {
-    const { accessToken, text, mediaUrls = [] } = input;
+    const { accessToken, text, mediaUrls = [], topicTag } = input;
     let containerId: string;
 
     // URL 패턴으로 image/video 자동 판정 (.mp4 · Cloudinary /video/upload/)
     const kindOf = (u: string): 'IMAGE' | 'VIDEO' =>
       /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/') ? 'VIDEO' : 'IMAGE';
 
+    // 토픽 태그는 **최종(발행되는) 컨테이너**에만 붙임. 캐러셀 자식엔 X.
     if (mediaUrls.length === 0) {
-      containerId = await this.createContainer(accessToken, { mediaType: 'TEXT', text });
+      containerId = await this.createContainer(accessToken, { mediaType: 'TEXT', text, topicTag });
     } else if (mediaUrls.length === 1) {
       const kind = kindOf(mediaUrls[0]!);
       containerId = await this.createContainer(accessToken, {
         mediaType: kind,
         text,
+        topicTag,
         ...(kind === 'VIDEO' ? { videoUrl: mediaUrls[0] } : { imageUrl: mediaUrls[0] }),
       });
       await this.waitForContainerReady(accessToken, containerId);
@@ -384,6 +393,7 @@ export class ThreadsClient {
       containerId = await this.createContainer(accessToken, {
         mediaType: 'CAROUSEL',
         text,
+        topicTag,
         children: childIds,
       });
       await this.waitForContainerReady(accessToken, containerId);

@@ -4,6 +4,7 @@ import { logger } from '../../../config/logger.js';
 import { refreshAccountToken } from './oauth/token-service.js';
 import { extractUrls, isCommerceUrl } from '../url-ingester/platform-detector.js';
 import { env } from '../../../config/env.js';
+import { SHARING_TOPIC_TAG } from '../../pipeline-b/sharing-copywriter/index.js';
 
 /** 발행 사고를 관리자 텔레그램으로 즉시 알림 (best-effort · 실패해도 발행 흐름엔 영향 X). */
 async function notifyAdmin(message: string): Promise<void> {
@@ -159,6 +160,8 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
           accessToken,
           text: post.generatedBody,
           mediaUrls: post.mediaUrls ?? [],
+          // 스하리 글: "스하리1000명프로젝트"를 본문 텍스트가 아니라 topic_tag 로만 부착 (본문엔 안 보임).
+          topicTag: post.kind === 'SHARING' ? SHARING_TOPIC_TAG : undefined,
         });
         mainErr = null;
         break;

@@ -20,7 +20,12 @@ const NO_LEARNINGS: SharingLearnings = { factors: [], avoidOpeners: [] };
  *   - **본문에 "팔로워" 단어 직접 노출 X** (스레드 문화 어휘: "스친", "1000까지", "100 넘음" 등)
  */
 
-const HASHTAG = '#스하리1000명프로젝트';
+/**
+ * 스하리 토픽 태그 — **본문 텍스트 금지**.
+ * Threads `topic_tag` 파라미터로만 부착 → 게시물엔 태그로 붙지만 본문 글자엔 안 들어감 (사용자 방침).
+ * (# 없이, ≤50자, 마침표·& 금지)
+ */
+export const SHARING_TOPIC_TAG = '스하리1000명프로젝트';
 
 /**
  * 훅 유형 · 각 훅은 어떤 계정 나이 구간에서 자연스러운지 지정.
@@ -116,7 +121,8 @@ const SYSTEM_PROMPT = `너는 한국 Threads "스하리1000명프로젝트" 해�
 역할: **각색가**. 아래 실제 스하리 벤치마크의 훅·리듬·정서를 재활용해 새 스하리 글 하나를 만들어라.
 
 ⚠️ 절대 규칙 (하나라도 어기면 실패):
-- **본문 마지막 줄에 반드시 ${HASHTAG} 를 넣는다.**
+- **본문 문장 안에 "스하리1000명프로젝트"(# 유무·띄어쓰기 변형 포함)를 절대 쓰지 마라.**
+  해시태그는 코드가 맨 끝 줄에 자동으로 1회 붙인다. 너는 문장에도, 끝에도, 어디에도 이 문구를 넣지 마라.
 - 다른 계정 handle(@…) 언급 절대 금지 (CIB 위반).
 - 딥링크·쇼핑 광고·상품 언급 절대 금지.
 - **"팔로워", "팔로워수", "팔로워 늘리는" 같은 단어 절대 사용 금지.**
@@ -213,7 +219,7 @@ async function generateOne(
       : []),
     '',
     `variant=${variantIndex}. 위 훅 유형·벤치마크 개성 + 실 계정 상황(팔로워 구간·나이)에 맞는 표현만 사용해 스하리 글 하나 각색.`,
-    `마지막 줄 ${HASHTAG} 포함. JSON 만 반환.`,
+    `본문 문장 안에 "스하리1000명프로젝트" 문구·해시태그를 넣지 마라 (코드가 끝에 자동 부착). JSON 만 반환.`,
   ].join('\n');
 
   const response = await llm().complete({
@@ -233,9 +239,9 @@ async function generateOne(
 
   const parsed = extractJson(response.text);
   const { body } = BodyResultSchema.parse(parsed);
-  // "스하리1000명프로젝트"는 **해시태그 전용** — 본문 문장에 섞이면 안 됨 (사용자 방침).
-  //   LLM이 # 없이 프로세이 안에 넣는 경우가 있어, 본문에서 문구(해시태그 형태 포함)를 모두 제거하고
-  //   맨 끝에 정규 해시태그 1회만 부착한다. (단독 "스하리" 단어는 정상 어휘라 건드리지 않음)
+  // "스하리1000명프로젝트"는 **본문 텍스트 금지** — 발행 시 topic_tag 로만 붙는다 (사용자 방침).
+  //   LLM이 문장/해시태그로 넣는 경우가 있어 본문에서 문구(# 유무·띄어쓰기 변형)를 전부 제거.
+  //   (단독 "스하리" 단어는 정상 어휘라 건드리지 않음)
   const cleaned = body
     .replace(/#?\s*스하리\s*1000\s*명\s*프로젝트/g, '') // "#스하리1000명프로젝트" / "스하리 1000명 프로젝트" 등 변형 포함
     .replace(/[ \t]{2,}/g, ' ') // 제거 후 남은 이중 공백
@@ -243,14 +249,13 @@ async function generateOne(
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
-  const withHash = `${cleaned}\n\n${HASHTAG}`;
 
-  const hit = FORBIDDEN_TERMS.find((t) => withHash.includes(t));
-  if (hit) throw new SharingBlacklistError(hit, withHash, false); // 금지어 = 하드
-  const patHit = FORBIDDEN_PATTERNS.find((p) => p.re.test(withHash));
-  if (patHit) throw new SharingBlacklistError(patHit.label, withHash, true); // 템플릿 패턴 = 소프트
+  const hit = FORBIDDEN_TERMS.find((t) => cleaned.includes(t));
+  if (hit) throw new SharingBlacklistError(hit, cleaned, false); // 금지어 = 하드
+  const patHit = FORBIDDEN_PATTERNS.find((p) => p.re.test(cleaned));
+  if (patHit) throw new SharingBlacklistError(patHit.label, cleaned, true); // 템플릿 패턴 = 소프트
 
-  return withHash;
+  return cleaned;
 }
 
 export class SharingBlacklistError extends Error {
