@@ -5,6 +5,7 @@ import type { LlmContentPart } from '../../../infra/llm/index.js';
 import { generateImage } from '../../../infra/llm/gemini-image.js';
 import { uploadBufferToCloudinary } from '../../../infra/cloudinary-client.js';
 import { generateNaverPost } from '../naver-copywriter/index.js';
+import { buildSearchTermPool } from '../../../infra/naver/autocomplete.js';
 
 const MAX_AI_IMAGES = 3;
 
@@ -21,24 +22,22 @@ export async function pickNextCategory(): Promise<string> {
   return cfg.categories.reduce((best, c) => (counts.get(c)! < counts.get(best)! ? c : best), cfg.categories[0]!);
 }
 
-export async function generateInfoAngle(category: string, recentTitles: string[], trendKeyword?: string): Promise<string> {
+export async function generateInfoAngle(category: string, recentTitles: string[], searchTerms?: string[]): Promise<string> {
   const avoid = recentTitles.length ? `다음 최근 주제와 겹치지 말 것:\n- ${recentTitles.join('\n- ')}` : '';
   const system = '너는 한국 네이버 블로그 정보성 글의 주제(앵글)를 딱 한 줄로 제안하는 도구다. 상품 판매가 아니라 독자에게 유용한 정보 주제. 특정 상품명·브랜드명·모델번호·규격은 주제에 절대 포함시키지 않는다. 출력은 주제 한 줄만.';
-  const trendInstruction = trendKeyword
-    ? `아래 "트렌드 신호"는 상품명이 아니라 "이런 영역에 대한 사람들의 관심이 커지고 있다"는 관심 신호일 뿐이다. 이 신호 자체(상품·브랜드·모델)를 글의 소재로 직접 쓰지 마라.
+  const searchInstruction = searchTerms && searchTerms.length
+    ? `아래는 사람들이 네이버에 "${category}" 관련으로 실제로 검색하는 키워드들이다(자동완성/연관검색어 = 실제 검색 수요). 이 목록이 보여주는 "사람들의 실제 관심사"를 근거로, 사람들이 정보(방법·팁·비교·고르는 법·관리법 등)를 궁금해할 만한 주제를 골라 유용한 정보글 주제 한 줄로 만들어라.
 
-트렌드 신호: "${trendKeyword}"
+실제 검색 키워드:
+- ${searchTerms.join('\n- ')}
 
-절차:
-1) 이 문자열에서 모델명·규격(예: 숫자 코드), 색상, "로고 인쇄" 같은 커스텀 옵션, 브랜드명·제품 라인명 등 특정 상품(SKU)을 특정하는 잡음을 모두 걷어내라.
-2) 남는 것에서 사람들이 실제로 궁금해하는 "일반적인 필요·관심사"가 무엇인지 추론하라.
-3) 그 관심사를 다루는, 사람들이 검색할 법한 "정보 주제" 한 줄을 제안하라(예: 활용법·고르는 기준·관리법·비교 등). 주제에는 특정 상품명·브랜드명·모델명·규격이 절대 등장하면 안 되며, 상품 리뷰·홍보 글 주제가 아니라 순수 정보글 주제여야 한다.
-
-예시: 트렌드 신호 "매직캔 매직롤 280 화이트 로고 인쇄 리필" → (모델명 280·색상 화이트·로고 인쇄 등 잡음 제거) → 관심사: 쓰레기통 위생·냄새·리필 관리 → 주제: "쓰레기통 냄새 없이 관리하는 법"
-(❌ 절대 금지 예: "매직캔 매직롤 280 리필 교체 주기"처럼 특정 상품명·모델명이 주제에 남는 것)`
+규칙:
+- 이 키워드들이 반영하는 실제 관심사에서 출발하되, 특정 상품명·브랜드·모델명·규격은 주제에 넣지 마라.
+- 상품명 나열이 아니라 "검색해서 읽고 싶은 정보 주제"로 만들어라.
+- 예: 검색어 "옷 수납정리함", "좁은방 수납" → 주제 "좁은 방 옷 수납, 공간 두 배로 쓰는 정리법".`
     : '';
   const userParts: LlmContentPart[] = [
-    { type: 'text', text: `블로그 주제 카테고리: ${category}\n검색 수요 있을 법한 정보성 글 주제 한 줄을 제안해라(제목 아님, 주제).\n${trendInstruction}\n${avoid}` },
+    { type: 'text', text: `블로그 주제 카테고리: ${category}\n검색 수요 있을 법한 정보성 글 주제 한 줄을 제안해라(제목 아님, 주제).\n${searchInstruction}\n${avoid}` },
   ];
 
   const result = await llm().complete({
@@ -80,7 +79,9 @@ export async function buildInfoPost(opts?: { category?: string; angleHint?: stri
     angle = opts.angleHint;
   } else {
     trend = await pickTrendKeyword(category); // 링크 후보용 (주제엔 사용하지 않음)
-    angle = await generateInfoAngle(category, recentTitles);
+    // 주제 = 사람들이 실제 검색하는 것에서 (네이버 자동완성/연관검색어). 실패 시 빈 배열 → 에버그린 폴백.
+    const searchTerms = await buildSearchTermPool(category, { drill: 3, max: 25 });
+    angle = await generateInfoAngle(category, recentTitles, searchTerms);
   }
 
   const draft = await generateNaverPost({
