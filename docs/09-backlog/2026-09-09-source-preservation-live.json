@@ -1,0 +1,46 @@
+{
+  "checkedAt": "2026-09-08T21:39:56.842Z",
+  "elapsedMs": 15206,
+  "scope": "text-only live generation; no images inspected, no publication, no revenue validation",
+  "sourceText": "スタバで仲良し美女2人がお揃いで履いてたコレ\nめっちゃ可愛くてガン見しちゃった…\nオールブラックでこんなかわいいの初めてで",
+  "sourceBrief": {
+    "situation": "원작자가 스타벅스에서 사이좋아 보이는 두 여성이 같은 신발을 신고 있는 것을 목격하고, 그 모습을 시선을 끌 만큼 인상 깊게 봤다는 원작자의 전언.",
+    "points": [
+      {
+        "fact": "스타벅스에서 사이좋은 두 미녀가 같은 것을 맞춰 신고 있었다",
+        "evidenceType": "source_text",
+        "evidence": "スタバで仲良し美女2人がお揃いで履いてたコレ"
+      },
+      {
+        "fact": "너무 귀여워서 뚫어지게 쳐다봤다",
+        "evidenceType": "source_text",
+        "evidence": "めっちゃ可愛くてガン見しちゃった…"
+      },
+      {
+        "fact": "올블랙인데 이렇게 귀여운 것은 처음이라고 느꼈다",
+        "evidenceType": "source_text",
+        "evidence": "オールブラックでこんなかわいいの初めてで"
+      }
+    ],
+    "focusIndex": 2,
+    "allowedChanges": [
+      "문장 순서 조정",
+      "호흡·줄바꿈 조정",
+      "구어체를 한국어 자연스러운 문체로 변환",
+      "군더더기 생략"
+    ],
+    "unknowns": [
+      "신발의 실제 브랜드·제품명",
+      "두 사람의 실제 관계",
+      "신발의 착화감이나 소재",
+      "이 장면 외 다른 상황 전개",
+      "원작자와 게시 계정의 관계"
+    ]
+  },
+  "body": "올블랙인데 이렇게 귀여운 건 또 처음 봄",
+  "replyLead": "올블랙인데 왜 이렇게 귀엽냐 진짜",
+  "knownBadReview": {
+    "ok": false,
+    "reason": "원작자의 목격담(스타벅스에서 보고 계속 쳐다봄)을 게시 계정의 체험으로 전환함 - 금지된 패턴"
+  }
+}
