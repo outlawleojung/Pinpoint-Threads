@@ -47,6 +47,13 @@ const SYSTEM = `너는 해외 쇼핑 콘텐츠를 한국어로 재구성하기 �
 이미지나 상품과 관계없이 쓸 수 있는 '좋음/편함'보다 원본의 구체적인 관찰·사건을 고른다.
 JSON만 반환: {"situation":"...","points":[{"fact":"...","evidenceType":"source_text","evidence":"원어 인용"}],"focusIndex":0,"allowedChanges":["..."],"unknowns":["..."]}`;
 
+/**
+ * 근거 인용 검증용 정규화 — 공백·줄바꿈만 접는다.
+ * 조작 차단(원문에 실제로 존재하는 구절인지)은 유지하고, 지저분한 해외 캡션에서
+ * 줄바꿈·연속공백 차이로만 나던 하드 실패를 제거한다. 문자 자체는 손대지 않는다.
+ */
+const normalizeQuote = (s: string): string => s.replace(/\s+/g, ' ').trim();
+
 export function validateSourceBrief(value: unknown, input: SourceBriefInput): SourceBrief {
   const brief = SourceBriefSchema.parse(value);
   for (const point of brief.points) {
@@ -54,7 +61,7 @@ export function validateSourceBrief(value: unknown, input: SourceBriefInput): So
       if (!input.sourceImageUrl) throw new Error('Source brief cites an image that was not provided');
     } else {
       const source = point.evidenceType === 'source_text' ? input.sourceText : input.sourceMediaDescription;
-      if (!source?.includes(point.evidence)) {
+      if (!source || !normalizeQuote(source).includes(normalizeQuote(point.evidence))) {
         throw new Error('Source brief evidence is not an exact excerpt of the supplied source');
       }
     }
