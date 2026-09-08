@@ -544,6 +544,8 @@ export async function generateDailyBody(input: DailyCopyInput): Promise<string> 
 - **검증 불가한 규정 금지**: 장르·출처·제작방식(AI·광고·드라마)·브랜드·인물을 확실치 않은데 단정 X.
   단 주제로 **완곡** 언급은 OK (예: "요즘 이런 영상 많던데" O · "이 AI 영상은~" X).
 - 공감·발견·감탄·웃음 톤 OK. 외국어 캡션은 자연스러운 한국어로. 억지 과장·시적 은유 X.
+- **★ 짧고 진짜 반응 한 조각만.** 억지 부연·지어낸 가정("자다가 이거 당하면~", "~하면 빡침")·설명충 금지.
+  화면 보고 진짜 나올 법한 한마디 ("이거 거꾸로 보니까 왜 이렇게 웃기냐ㅋㅋ", "아 뭔데 계속 보게 됨").
 - 상품명·가격·브랜드·구매처·링크 절대 언급 X (일상글엔 커머스 없음).`;
 
   const buildOnce = async (idx: number, avoid?: string): Promise<string> => {
