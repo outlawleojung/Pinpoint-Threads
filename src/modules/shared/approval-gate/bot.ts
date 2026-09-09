@@ -713,9 +713,12 @@ bot.on('message:text', async (ctx, next) => {
         if (sourceText && sourceText.trim()) texts.push(sourceText.trim());
         if (!primaryUrl) primaryUrl = permalink ?? burl;
       }
-      // 영상(mp4) 앞으로 · 중복 제거 · 최대 10.
+      // 중복 제거 · 영상은 **1개만**(여러 링크 영상 겹치면 어색) 앞으로 · 나머지 이미지 · 최대 10.
       const isVid = (u: string) => /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/');
-      const mergedMedia = [...new Set(allMedia)].sort((a, b) => Number(isVid(b)) - Number(isVid(a))).slice(0, 10);
+      const uniq = [...new Set(allMedia)];
+      const vids = uniq.filter(isVid).slice(0, 1);
+      const imgs = uniq.filter((u) => !isVid(u));
+      const mergedMedia = [...vids, ...imgs].slice(0, 10);
       if (mergedMedia.length === 0) { await ctx.reply('⚠️ 조합할 미디어가 없어요 · 발행 중단'); return; }
       const combinedText = texts.join('\n\n');
       const gender = inferGender(productName);
