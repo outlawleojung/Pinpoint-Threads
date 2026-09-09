@@ -39,16 +39,18 @@ const page = await browser.newPage({ deviceScaleFactor: 2 }); // 레티나급 2�
 for (const v of variants) {
   const html = `<!doctype html><meta charset="utf-8">
   <div id="btn" style="
-    display:inline-flex;align-items:center;gap:12px;
+    display:inline-flex;flex-direction:column;align-items:center;gap:6px;
     font-family:'Malgun Gothic','맑은 고딕',sans-serif;
     font-size:32px;font-weight:800;letter-spacing:-0.5px;
-    padding:22px 44px;border-radius:16px;
+    padding:20px 48px 14px;border-radius:16px;
     box-shadow:0 4px 14px rgba(0,0,0,.12);
     ${v.css}
   ">
-    <span style="font-size:34px">${v.icon}</span>
-    <span>${label}</span>
-    <span style="font-size:30px">›</span>
+    <span style="display:inline-flex;align-items:center;gap:12px">
+      <span style="font-size:34px">${v.icon}</span>
+      <span>${label}</span>
+    </span>
+    <span style="font-size:30px;line-height:.7;transform:scaleX(1.6)">⌄</span>
   </div>`;
   await page.setContent(html);
   const el = await page.$('#btn');
