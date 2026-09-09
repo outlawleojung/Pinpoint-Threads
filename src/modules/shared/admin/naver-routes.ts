@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../../../db/prisma.js';
 import { buildPublishPackage, type PublishPackage } from '../../pipeline-d/publish-package/index.js';
@@ -8,6 +10,17 @@ type AnyFastify = FastifyInstance<any, any, any, any, any>;
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+
+// CTA 버튼 미리보기 이미지(assets/naver/cta-green.png)를 base64로 인라인.
+// 없으면 빈 문자열 → 초록 텍스트 배너로 폴백.
+const CTA_BUTTON_DATA_URI: string = (() => {
+  try {
+    const p = resolve(process.cwd(), 'assets/naver/cta-green.png');
+    return `data:image/png;base64,${readFileSync(p).toString('base64')}`;
+  } catch {
+    return '';
+  }
+})();
 
 export function renderPublishPage(
   post: { id: string; title: string | null; state: string; kind?: string; suggestedProduct?: string | null },
@@ -32,17 +45,19 @@ export function renderPublishPage(
     </div>`;
     }
     if (b.type === 'CTA') {
-      const note = b.note ? `<div class="note">${esc(b.note)}</div>` : '';
-      const copyBtn = `<button class="copy" data-i="${i}">복사</button>`;
+      const copyBtn = `<button class="copy" data-i="${i}">링크 복사</button>`;
+      const preview = CTA_BUTTON_DATA_URI
+        ? `<img src="${CTA_BUTTON_DATA_URI}" alt="상품 확인하러 가기 버튼" style="display:block;margin:12px auto;max-width:340px;width:100%">`
+        : `<div style="background:#03c75a;color:#fff;font-size:1.25em;font-weight:700;text-align:center;padding:18px;border-radius:12px;margin:16px 0">🛒 ${esc(b.text)}</div>`;
       return `<div class="block ${b.type}">
-      <div class="btype">${b.type}</div>
-      <div style="background:#03c75a;color:#fff;font-size:1.25em;font-weight:700;text-align:center;padding:18px;border-radius:12px;margin:16px 0">
-        🛒 ${esc(b.text)}
+      <div class="btype">CTA · 상품 링크 자리</div>
+      <div class="note" style="background:#eafff2;border-left-color:#03c75a;color:#0a6b3b">
+        👇 네이버 에디터에서 <b>사진 삽입</b>으로 이 버튼 이미지를 넣고, 삽입한 이미지에 아래 링크를 거세요. (버튼 파일: <code>assets/naver/cta-green.png</code>)
       </div>
-      <div style="text-align:center;font-size:.85em;color:#555;margin-bottom:6px">
+      ${preview}
+      <div style="text-align:center;font-size:.9em;color:#333;margin-bottom:6px">
         <span class="text" id="blk-${i}">${esc(b.url ?? '')}</span> ${copyBtn}
       </div>
-      ${note}
     </div>`;
     }
     if (b.type === 'IMAGE') {
