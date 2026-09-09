@@ -38,6 +38,8 @@ export const NaverPostDraftSchema = z.object({
   sections: z.array(z.object({
     heading: z.string().min(2).max(30),      // 소제목(제목2/3용)
     body: z.string().min(30),
+    // 이 소제목 내용에 자연스럽게 어울리는 상품 제안(유형+선택 포인트 한 줄). 억지면 생략/빈값.
+    productHint: z.string().optional(),
   })).min(3),
   imageSlots: z.array(z.object({
     afterSection: z.number().int().min(0),   // 0 = intro 뒤

@@ -44,10 +44,14 @@ export function renderPublishPage(
       const n = headingNo;
       const note = b.note ? `<div class="note">${esc(b.note)}</div>` : '';
       const copyBtn = `<button class="copy" data-i="${i}">복사</button>`;
+      const hint = b.productHint && b.productHint.trim()
+        ? `<div class="note" style="background:#fff3e0;border-left-color:#e8912d;color:#8a5a12">💡 이 소제목에 어울리는 상품: <b>${esc(b.productHint)}</b> — 이런 상품의 쇼핑커넥트 링크를 찾아 넣으세요.</div>`
+        : `<div class="note" style="background:#f3f3f3;border-left-color:#ccc;color:#888">이 소제목은 상품이 꼭 필요하진 않아요(넣고 싶으면 자유롭게).</div>`;
       return `<div class="block HEADING">
       <div class="btype">HEADING · 소제목 ${n}${copyBtn}</div>
       ${note}
       <div class="text" id="blk-${i}">${esc(b.text)}</div>
+      ${hint}
       <div class="note" style="background:#eef2ff;border-left-color:#8899cc;color:#445">이 소제목 뒤에 상품 링크: <code>/naverlink ${esc(post.id)} ${n} &lt;쇼핑커넥트 링크&gt;</code></div>
     </div>`;
     }

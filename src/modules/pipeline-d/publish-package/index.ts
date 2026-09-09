@@ -7,6 +7,7 @@ export interface PublishBlock {
   note?: string;
   imageUrl?: string;
   url?: string;
+  productHint?: string; // HEADING 블록: 이 소제목에 어울리는 상품 제안
 }
 export interface PublishPackage {
   blocks: PublishBlock[];
@@ -61,7 +62,7 @@ export function buildPublishPackage(
   emitSectionCtasAfter(0);
 
   draft.sections.forEach((sec, i) => {
-    blocks.push({ type: 'HEADING', text: sec.heading, note: '에디터에서 제목2 스타일 지정' });
+    blocks.push({ type: 'HEADING', text: sec.heading, note: '에디터에서 제목2 스타일 지정', productHint: sec.productHint });
     blocks.push({ type: 'PARAGRAPH', text: sec.body });
     emitImagesAfter(i + 1);
     emitSectionCtasAfter(i + 1);

@@ -46,6 +46,7 @@ const SYSTEM = `너는 네이버 블로그에서 저장·공감·댓글이 터�
 ## SEO·형식 (지키되, 위 원칙을 절대 해치지 않게)
 - 제목 80자 이내.
 - sections는 반드시 4~6개. 각 heading은 2~30자.
+- 각 section의 productHint: 그 소제목을 읽은 독자가 자연스럽게 "이런 거 하나 있으면 좋겠다" 싶을 상품을 딱 집어 한 줄로(구체적 상품 유형 + 고를 때 포인트). 예: "신발장용 제습·탈취제(숯/실리카겔 타입)", "저소음 미니 가습기(책상용 소형)". 상품이 안 어울리는 소제목(개념 설명·계획 등)은 productHint를 빈 문자열로. 억지로 끼워넣지 말 것. 특정 브랜드·모델명은 쓰지 말고 상품 "유형"으로.
 - 각 section body는 400자 이상. 단 길이는 "필러"가 아니라 구체적 경험·비교·예시로 채운다. 할 말 없으면 억지로 늘리지 말고 다른 각도의 실질 정보를 더해라.
 - intro와 모든 section.body 합계 2000~2500자.
 - imageSlots: 최소 3개 이상, section 개수만큼 배치(각 section 뒤 최소 1개). 상품 실물이 필요한 곳은 kind="PRODUCT", 보조 그래픽/썸네일은 kind="AI".
@@ -59,7 +60,7 @@ const SYSTEM = `너는 네이버 블로그에서 저장·공감·댓글이 터�
 {
   "title": "string (4~80자)",
   "intro": "string (40자 이상)",
-  "sections": [ { "heading": "string (2~30자)", "body": "string (400자 이상)" } ],
+  "sections": [ { "heading": "string (2~30자)", "body": "string (400자 이상)", "productHint": "이 소제목에 어울리는 상품 유형 한 줄(없으면 \\"\\")" } ],
   "imageSlots": [ { "afterSection": 0, "caption": "string", "kind": "PRODUCT" | "AI" } ],
   "tags": ["string", "..."],
   "disclaimer": "string",
