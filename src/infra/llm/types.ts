@@ -32,6 +32,11 @@ export interface LlmCompletionInput {
    * 긴 구조화 출력엔 'disabled' 권장. 미지정 시 모델/서버 기본값.
    */
   thinking?: 'disabled';
+  /**
+   * Anthropic 서버 사이드 웹 검색 도구 활성화. 설정 시 모델이 실제 웹을 검색해
+   * 근거 기반으로 답한다(리서치 단계용). jsonMode와 함께 쓰지 말 것.
+   */
+  webSearch?: { maxUses?: number };
 }
 
 export interface LlmCompletionResult {

@@ -37,6 +37,11 @@ export class AnthropicProvider implements LlmProvider {
       }
     }
 
+    // 웹 검색 도구(서버 사이드). 리서치 단계에서 실제 근거 확보용.
+    const tools = input.webSearch
+      ? [{ type: 'web_search_20250305', name: 'web_search', max_uses: input.webSearch.maxUses ?? 5 }]
+      : undefined;
+
     const response = await anthropic.messages.create({
       model,
       max_tokens: input.maxOutputTokens ?? 1024,
@@ -44,25 +49,28 @@ export class AnthropicProvider implements LlmProvider {
       // claude-sonnet-5는 thinking 기본 ON → 긴 JSON 출력이 잘리는 문제. 호출부가 요청 시 비활성화.
       ...(input.thinking === 'disabled' ? { thinking: { type: 'disabled' as const } } : {}),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...(tools ? { tools: tools as any } : {}),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       messages: [{ role: 'user', content: content as any }],
     });
 
-    const block = response.content.find((b) => b.type === 'text');
-    if (!block || block.type !== 'text') {
-      // thinking 블록이 max_tokens를 소진해 text가 없을 때 원인을 명확히 남긴다.
+    // 웹 검색 시 text 블록이 여러 개(검색 전후)일 수 있어 모두 합친다.
+    const textBlocks = response.content.filter((b) => b.type === 'text') as Array<{ type: 'text'; text: string }>;
+    if (textBlocks.length === 0) {
       const types = response.content.map((b) => b.type).join(',');
       throw new Error(
         `no text block in anthropic response (stop=${response.stop_reason}, blocks=[${types}])`,
       );
     }
+    const text = textBlocks.map((b) => b.text).join('\n').trim();
 
     logger.debug(
-      { model, inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens },
+      { model, inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens, webSearch: !!tools },
       'anthropic complete',
     );
 
     return {
-      text: block.text,
+      text,
       inputTokens: response.usage.input_tokens,
       outputTokens: response.usage.output_tokens,
       model,

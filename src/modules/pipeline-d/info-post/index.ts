@@ -6,6 +6,7 @@ import { generateImage } from '../../../infra/llm/gemini-image.js';
 import { uploadBufferToCloudinary } from '../../../infra/cloudinary-client.js';
 import { generateNaverPost } from '../naver-copywriter/index.js';
 import { selectDemandTopic, harvestDemand } from '../demand/index.js';
+import { researchTopic } from '../research/index.js';
 
 const MAX_AI_IMAGES = 3;
 
@@ -104,12 +105,16 @@ export async function buildInfoPost(opts?: { category?: string; angleHint?: stri
     }
   }
 
+  // 웹 그라운딩: 본문이 뇌피셜이 아니라 실제 근거에 기반하도록 사실을 먼저 수집.
+  const sourceNotes = await researchTopic(angle);
+
   const draft = await generateNaverPost({
     topic: cfg.topic,
     product: { name: angle },           // INFO: 상품 대신 앵글을 소재로 전달
     connectUrl: '',
     kind: 'INFO',
     category,
+    sourceNotes,
     extraNote: `카테고리: ${category}. 정보성 글. 특정 상품 판매 목적이 아니라 "${angle}" 주제를 유용하게 다룬다. 제휴 링크·상품 추천 없음. 제목과 본문에 특정 상품명·브랜드명·모델번호를 절대 언급하지 마라.`,
   });
 

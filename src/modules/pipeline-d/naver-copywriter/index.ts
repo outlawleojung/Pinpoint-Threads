@@ -17,6 +17,8 @@ export interface NaverCopywriteInput {
   extraNote?: string;
   /** INFO처럼 카테고리가 이미 정해진 경우 그대로 강제. 없으면 모델이 고른 뒤 정규화. */
   category?: string;
+  /** 웹 리서치로 확보한 검증된 근거 자료(불릿). 있으면 본문은 이 사실에 기반해 작성. */
+  sourceNotes?: string;
 }
 
 const SYSTEM = `너는 네이버 블로그에서 저장·공감·댓글이 터지는 글을 쓰는 사람이다. 검색 상위노출(C-Rank·D.I.A.)도 알지만, 그보다 먼저 "사람이 끝까지 읽고 싶은 글"을 쓴다.
@@ -86,7 +88,7 @@ export async function generateNaverPost(input: NaverCopywriteInput): Promise<Nav
 스펙: ${input.product.specs ?? '(없음)'}
 ${affiliateLine}
 ${input.extraNote ? `추가 지시: ${input.extraNote}` : ''}
-
+${input.sourceNotes ? `\n[검증된 근거 자료 — 본문의 구체 사실은 반드시 이 자료에 기반하라. 자료에 없는 구체 수치·연도·고유명·규격은 지어내지 마라. 자료가 다루지 않은 부분은 일반적 표현으로.]\n${input.sourceNotes}\n` : ''}
 disclaimer 문구(그대로 사용): "${NAVER_LEGAL_DISCLAIMER}"
 
 반드시 지켜라: sections는 4~6개, 각 section.body는 400자 이상, 전체(intro+모든 body) 합계 2000~2500자.`;
