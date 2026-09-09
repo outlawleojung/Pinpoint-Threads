@@ -92,6 +92,14 @@ disclaimer 문구(그대로 사용): "${NAVER_LEGAL_DISCLAIMER}"
       const parsed = extractJson(result.text);
       // disclaimer 강제 주입(모델이 변형해도 상수로 덮어씀)
       parsed.disclaimer = NAVER_LEGAL_DISCLAIMER;
+      // imageSlots 정규화 — 모델이 kind/afterSection을 자주 빠뜨려 파싱 실패하므로 방어적으로 보정.
+      if (Array.isArray(parsed.imageSlots)) {
+        parsed.imageSlots = parsed.imageSlots.map((s: Record<string, unknown>) => ({
+          afterSection: typeof s?.afterSection === 'number' ? s.afterSection : 0,
+          caption: typeof s?.caption === 'string' ? s.caption : '',
+          kind: s?.kind === 'PRODUCT' ? 'PRODUCT' : 'AI',
+        }));
+      }
       const draft = NaverPostDraftSchema.parse(parsed);
       logger.info({ title: draft.title, sections: draft.sections.length }, 'naver post generated');
       return draft;

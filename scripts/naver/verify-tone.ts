@@ -2,7 +2,7 @@ import { generateNaverPost } from '../../src/modules/pipeline-d/naver-copywriter
 
 async function main() {
 const draft = await generateNaverPost({
-  topic: '겨울철 실내 건조, 가습기 없이 습도 올리는 법',
+  topic: process.argv[2] ?? '겨울철 실내 건조, 가습기 없이 습도 올리는 법',
   product: { name: '미니 가습기', category: '생활가전' },
   connectUrl: 'https://example.com',
   kind: 'INFO',
