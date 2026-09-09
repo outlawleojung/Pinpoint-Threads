@@ -681,8 +681,11 @@ bot.on('message:text', async (ctx, next) => {
     .map((l) => stripVideoFlag(l))                    // 비디오 플래그 제거 (위치·구두점 무관)
     .filter((l) => l.length > 0)
     .join(' ').trim();
-  if (commerceUrls.length === 0 && productName.length >= 2) {
-    await ctx.reply(`🔍 "${productName}" · 링크 ${supported.length}개 조합 → 카드 1개 생성 중 (실발행 아님, 승인해야 나감)...`);
+  if (commerceUrls.length > 0 || productName.length >= 2) {
+    // 커머스 URL(쿠팡 딥링크·무신사/네이버 큐레이터 링크)을 직접 주면 → Matcher 스킵, 그 링크 그대로 발행.
+    // 상품명만 주면 → 쿠팡 검색 매칭. (커머스 URL 있으면 그게 우선)
+    const mode = commerceUrls.length > 0 ? `커머스 링크(${commerceUrls[0]!.slice(0, 32)}…)` : `"${productName}"`;
+    await ctx.reply(`🔍 ${mode} · 링크 ${supported.length}개 조합 → 카드 1개 생성 중 (실발행 아님, 승인해야 나감)...`);
     try {
       const { ingestUrl } = await import('../url-ingester/index.js');
       const { ensureBenchmarkVideo } = await import('../../pipeline-a/video-rescue.js');
@@ -695,9 +698,12 @@ bot.on('message:text', async (ctx, next) => {
       let primaryUrl: string | null = null;
       for (const burl of supported) {
         const ing = await ingestUrl({ url: burl, source: InboundSource.MANUAL_TELEGRAM });
-        // 상품명을 InboundLink 에 저장 (자동 크론도 재사용)
+        // 상품명·커머스URL 을 InboundLink 에 저장 (자동 크론도 재사용)
         if (ing.inboundLinkId) {
-          await prisma.inboundLink.update({ where: { id: ing.inboundLinkId }, data: { manualProductName: productName } }).catch(() => {});
+          await prisma.inboundLink.update({ where: { id: ing.inboundLinkId }, data: {
+            ...(productName.length >= 2 ? { manualProductName: productName } : {}),
+            ...(commerceUrls.length > 0 ? { manualCommerceUrl: commerceUrls[0]! } : {}),
+          } }).catch(() => {});
         }
         const bench = ing.inboundLinkId
           ? await prisma.benchmarkPost.findFirst({ where: { inboundLinkId: ing.inboundLinkId }, select: { id: true, text: true, mediaUrls: true, permalink: true } })
@@ -729,7 +735,10 @@ bot.on('message:text', async (ctx, next) => {
         sourceMediaUrls: mergedMedia,
         sourceText: combinedText,
         sourceUrl: primaryUrl ?? supported[0]!,
-        productNameHint: productName,
+        // 커머스 URL 직접 제공 → 그 링크로 발행(매처 스킵). 없으면 상품명으로 검색.
+        ...(commerceUrls.length > 0
+          ? { explicitCommerceUrl: commerceUrls[0]! }
+          : { productNameHint: productName }),
       });
       if (outcome.status === 'PENDING_APPROVAL') {
         await ctx.reply(`✅ [${acc.handle}] ${outcome.matchedProductName?.slice(0,40)} · 링크 ${texts.length}개 조합 · 승인 카드 확인 (틀리면 리젝)`);
@@ -743,10 +752,8 @@ bot.on('message:text', async (ctx, next) => {
       return;
     }
   }
-  const commerceNote = commerceUrls.length > 0
-    ? ` (+ 커머스 URL ${commerceUrls.length}개 자동 페어링 · Product Matcher 스킵)`
-    : '';
-  await ctx.reply(`🔍 URL ${supported.length}개 자동 인제스트 시작...${commerceNote}`);
+  // 여기 도달 = 벤치마크 URL만 있고 상품명·커머스URL 둘 다 없음 → 벤치마크 저장(인제스트)만.
+  await ctx.reply(`🔍 URL ${supported.length}개 벤치마크 저장(인제스트) 중… (글 생성하려면 상품명 또는 커머스 링크를 같이 보내세요)`);
   try {
     const { results } = await ingestUrlsFromText(text, InboundSource.MANUAL_TELEGRAM);
     const summary = results
@@ -755,7 +762,7 @@ bot.on('message:text', async (ctx, next) => {
           `${i + 1}. ${r.isNew ? '✅' : 'ℹ️'} [${r.platform}] ${r.status}\n   ${r.message}`,
       )
       .join('\n\n');
-    await ctx.reply(`📥 인제스트 결과 (${results.length}건)${commerceNote}\n\n${summary}`);
+    await ctx.reply(`📥 인제스트 결과 (${results.length}건)\n\n${summary}`);
   } catch (err) {
     logger.error({ err }, 'ingestUrlsFromText 실패');
     await ctx.reply(`❌ 인제스트 실패: ${(err as Error).message}`);
