@@ -84,7 +84,7 @@ export async function buildNaverPost(input: { connectUrl: string; extraNote?: st
   }
   const post = await prisma.naverPost.create({
     data: {
-      state: 'PLANNED', kind, topic: cfg.topic, title: draft.title,
+      state: 'PLANNED', kind, topic: cfg.topic, title: draft.title, category: draft.category ?? null,
       draftJson: draft as unknown as object, connectUrl: input.connectUrl,
       imageUrls, productId: productRow?.id ?? null,
     },

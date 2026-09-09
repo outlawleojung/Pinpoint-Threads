@@ -23,13 +23,20 @@ const CTA_BUTTON_DATA_URI: string = (() => {
 })();
 
 export function renderPublishPage(
-  post: { id: string; title: string | null; state: string; kind?: string; suggestedProduct?: string | null },
+  post: { id: string; title: string | null; state: string; kind?: string; category?: string | null; suggestedProduct?: string | null },
   pkg: PublishPackage,
 ): string {
+  const productHint = post.suggestedProduct
+    ? `추천 상품 키워드: <b>${esc(post.suggestedProduct)}</b> — 이 키워드에 맞는 상품의 쇼핑커넥트 링크를 넣으세요.`
+    : `이 글 주제에 어울리는 상품을 직접 골라 링크를 넣으세요(정보글이라 상품은 선택).`;
   const suggestedProductBanner = `<div style="background:#e8f4ff;border-left:4px solid #0969da;padding:10px 14px;border-radius:6px;margin-bottom:16px;font-size:.95em">
-      🛒 <b>상품 링크는 소제목마다 붙일 수 있어요.</b> 아래 각 소제목의 번호를 보고, 텔레그램에서
+      🛒 <b>상품 링크는 소제목마다 붙일 수 있어요.</b> ${productHint}<br>
+      각 소제목 번호를 보고 텔레그램에서
       <code>/naverlink ${esc(post.id)} &lt;소제목번호&gt; &lt;쇼핑커넥트 링크&gt;</code> (도입 뒤는 0). 여러 번 = 여러 상품.
     </div>`;
+  const categoryBadge = post.category
+    ? `<span style="display:inline-block;background:#2c2823;color:#fff;font-size:.8em;font-weight:700;padding:3px 12px;border-radius:20px;margin-left:8px">📁 ${esc(post.category)}</span>`
+    : '';
   let headingNo = 0;
   const blocksHtml = pkg.blocks.map((b, i) => {
     if (b.type === 'HEADING') {
@@ -100,8 +107,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-widt
 .done{margin-top:24px}
 .done button{padding:10px 18px;background:#1a7f37;color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:.95em}
 </style></head><body>
-<h1>${esc(post.title ?? '(제목 미정)')}</h1>
-<p style="color:#888">state: ${post.state} · 블록별 복사 → 네이버 에디터 붙여넣기. 소제목은 에디터에서 "제목2" 스타일 지정, 이미지는 표시 순서대로 삽입.</p>
+<h1>${esc(post.title ?? '(제목 미정)')}${categoryBadge}</h1>
+<p style="color:#888">state: ${post.state}${post.category ? ` · 네이버에서 <b>${esc(post.category)}</b> 카테고리에 발행` : ''} · 블록별 복사 → 네이버 에디터 붙여넣기. 소제목은 에디터에서 "제목2" 스타일 지정, 이미지는 표시 순서대로 삽입.</p>
 ${suggestedProductBanner}
 ${blocksHtml}
 <form class="done" method="POST" action="/admin/naver/${post.id}/published">
@@ -118,8 +125,8 @@ document.querySelectorAll('.copy').forEach((btn) => {
 </script></body></html>`;
 }
 
-function renderList(rows: Array<{ id: string; title: string | null; state: string; kind: string; createdAt: Date }>): string {
-  const items = rows.map((r) => `<li><a href="/admin/naver/${r.id}">${esc(r.title ?? r.id)}</a> <span style="color:#999">· ${r.kind} · ${r.state}</span></li>`).join('\n');
+function renderList(rows: Array<{ id: string; title: string | null; state: string; kind: string; category: string | null; createdAt: Date }>): string {
+  const items = rows.map((r) => `<li><a href="/admin/naver/${r.id}">${esc(r.title ?? r.id)}</a> <span style="color:#999">· ${r.category ? `📁 ${esc(r.category)} · ` : ''}${r.kind} · ${r.state}</span></li>`).join('\n');
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>네이버 발행 대기</title>
 <style>body{font-family:-apple-system,sans-serif;max-width:720px;margin:32px auto;padding:0 16px}li{margin:8px 0}</style></head>
 <body><h1>네이버 블로그 · 발행 대기</h1><ul>${items || '<p>대기 중인 원고 없음</p>'}</ul></body></html>`;
@@ -129,7 +136,7 @@ export async function registerNaverRoutes(app: AnyFastify): Promise<void> {
   app.get('/admin/naver', async (_req, reply) => {
     const rows = await prisma.naverPost.findMany({
       where: { state: { in: ['PLANNED', 'READY'] } }, orderBy: { createdAt: 'desc' },
-      select: { id: true, title: true, state: true, kind: true, createdAt: true },
+      select: { id: true, title: true, state: true, kind: true, category: true, createdAt: true },
     });
     return reply.type('text/html').send(renderList(rows));
   });

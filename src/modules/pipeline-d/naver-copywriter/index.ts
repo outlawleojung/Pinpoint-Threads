@@ -1,7 +1,13 @@
 import { llm } from '../../../infra/llm/index.js';
 import type { LlmContentPart } from '../../../infra/llm/index.js';
 import { logger } from '../../../config/logger.js';
-import { NaverPostDraftSchema, NAVER_LEGAL_DISCLAIMER, type NaverPostDraft } from './schema.js';
+import {
+  NaverPostDraftSchema,
+  NAVER_LEGAL_DISCLAIMER,
+  NAVER_CATEGORIES,
+  normalizeNaverCategory,
+  type NaverPostDraft,
+} from './schema.js';
 
 export interface NaverCopywriteInput {
   topic: string;
@@ -9,6 +15,8 @@ export interface NaverCopywriteInput {
   connectUrl: string;
   kind: 'INFO' | 'AFFILIATE';
   extraNote?: string;
+  /** INFO처럼 카테고리가 이미 정해진 경우 그대로 강제. 없으면 모델이 고른 뒤 정규화. */
+  category?: string;
 }
 
 const SYSTEM = `너는 네이버 블로그에서 저장·공감·댓글이 터지는 글을 쓰는 사람이다. 검색 상위노출(C-Rank·D.I.A.)도 알지만, 그보다 먼저 "사람이 끝까지 읽고 싶은 글"을 쓴다.
@@ -45,6 +53,8 @@ const SYSTEM = `너는 네이버 블로그에서 저장·공감·댓글이 터�
   caption 예: "밝은 자연광 아래 흰 원목 책상 위 미니 가습기를 위에서 비스듬히 찍은 사진" (❌ "가습기").
 - tags 5~10개(연관검색어·롱테일).
 - disclaimer 필드에는 반드시 주어진 문구를 그대로 넣어라(어차피 서버가 덮어쓰지만 그대로 채워라).
+- category: 이 글이 들어갈 블로그 카테고리를 아래 5개 중 정확히 하나로 고른다(문자열 그대로).
+  ${NAVER_CATEGORIES.map((c) => `"${c}"`).join(' / ')}
 - 출력은 아래 JSON 스키마 형태의 순수 JSON 하나만. 마크다운 코드펜스나 다른 텍스트 절대 금지.
 {
   "title": "string (4~80자)",
@@ -52,7 +62,8 @@ const SYSTEM = `너는 네이버 블로그에서 저장·공감·댓글이 터�
   "sections": [ { "heading": "string (2~30자)", "body": "string (400자 이상)" } ],
   "imageSlots": [ { "afterSection": 0, "caption": "string", "kind": "PRODUCT" | "AI" } ],
   "tags": ["string", "..."],
-  "disclaimer": "string"
+  "disclaimer": "string",
+  "category": "위 5개 중 하나"
 }`;
 
 export async function generateNaverPost(input: NaverCopywriteInput): Promise<NaverPostDraft> {
@@ -92,6 +103,8 @@ disclaimer 문구(그대로 사용): "${NAVER_LEGAL_DISCLAIMER}"
       const parsed = extractJson(result.text);
       // disclaimer 강제 주입(모델이 변형해도 상수로 덮어씀)
       parsed.disclaimer = NAVER_LEGAL_DISCLAIMER;
+      // 카테고리 강제 정규화 — INFO처럼 지정값이 있으면 그대로, 없으면 모델 출력을 5개 중 하나로 매핑.
+      parsed.category = normalizeNaverCategory(input.category ?? parsed.category ?? input.topic);
       // imageSlots 정규화 — 모델이 kind/afterSection을 자주 빠뜨려 파싱 실패하므로 방어적으로 보정.
       if (Array.isArray(parsed.imageSlots)) {
         parsed.imageSlots = parsed.imageSlots.map((s: Record<string, unknown>) => ({
