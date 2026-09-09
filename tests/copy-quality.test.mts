@@ -12,6 +12,8 @@ process.env.LOG_LEVEL = 'error';
 
 const copyModule = await import('../src/modules/shared/copywriter/index.ts');
 const { factCheckCopy, generateCopy } = copyModule.default ?? copyModule;
+const replyModule = await import('../src/modules/pipeline-a/reply-composer/index.ts');
+const { composeReply, pickConnector } = replyModule.default ?? replyModule;
 const llmModule = await import('../src/infra/llm/index.ts');
 const { llm } = llmModule.default ?? llmModule;
 
@@ -58,4 +60,26 @@ test('본문 품질 실패 시 generateCopy가 재생성한다', async () => {
   } finally {
     provider.complete = original;
   }
+});
+
+test('reply-composer 프롬프트에 댓글 품질 검사가 포함된다', async () => {
+  const provider = llm();
+  const original = provider.complete;
+  let seen: any = null;
+  provider.complete = async (req: any) => { seen = req; return asJson({ lead: '좌표 남겨둠' }); };
+  try {
+    await composeReply({ body: '본문', productName: '신발', deeplinkUrl: 'https://link.coupang.com/a/x', accountId: 't' } as any);
+    assert.ok(seen);
+    assert.match(seen.system, /본문[\s\S]*?(되풀이|반복)/); // 본문 되풀이 금지
+    assert.match(seen.system, /상품[\s\S]*?(확인|연결)/); // 상품 확인 연결
+    assert.match(seen.system, /인기|품절|효능/); // 없는 효능/인기/품절 금지
+  } finally {
+    provider.complete = original;
+  }
+});
+
+test('연결 멘트는 시드로 결정적으로 회전한다', async () => {
+  assert.equal(pickConnector('acctA'), pickConnector('acctA')); // 동일 시드 = 동일
+  const set = new Set(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map(pickConnector));
+  assert.ok(set.size >= 2, '시드별로 여러 멘트가 선택됨');
 });

@@ -29,6 +29,20 @@ function disclaimerFor(channel?: 'COUPANG' | 'MUSINSA' | 'NAVER'): string {
   return LEGAL_DISCLAIMER; // COUPANG 기본
 }
 
+/** 연결 멘트 풀 — 상품 확인(좌표)으로 잇는 리드. 계정 시드로 회전(같은 멘트 연속 방지). */
+export const REPLY_CONNECTORS = [
+  '문의 많아서 좌표 남겨둠',
+  '궁금한 사람 있을까봐 여기 둠',
+  '정보 물어보는 분들 많아서 댓글에',
+  '혹시 몰라 좌표 남겨놓음',
+  '어디서 사냐는 댓글 많아서',
+];
+export function pickConnector(seed: string): string {
+  let h = 0;
+  for (const c of seed) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return REPLY_CONNECTORS[h % REPLY_CONNECTORS.length]!;
+}
+
 const LeadResultSchema = z.object({
   lead: z.string().min(4).max(80),
 });
@@ -56,6 +70,9 @@ const SYSTEM_PROMPT = `너는 한국 Threads 고정 댓글의 첫 리드 문장�
 핵심 원칙:
 - 광고 카피 아님. 친구가 무심코 툭 던진 감초 같은 한 마디.
 - 상품·본문 맥락에 가볍게 연결되지만 상품 자랑 아님.
+- **본문을 되풀이하지 마라.** 본문에서 이미 한 말·감탄을 반복하면 안 됨 — 새 각도로 상품 확인을 연결한다.
+- **상품 확인으로 자연스럽게 연결.** "좌표 남겨둠", "궁금한 사람 있을까봐" 처럼 어디서 보는지로 잇는 명분 한 줄.
+- **없는 효능·인기·품절을 덧붙이지 마라.** "다들 산다 / 품절대란 / 효과 검증" 금지.
 - 원본 보존 기준이 있으면 본문과 같은 포인트를 유지. 원본에 없는 체험·효능·지속시간·비교를 추가하지 않는다.
 - 본문에서 만든 관심을 연결 상품으로 자연스럽게 이어준다. 새 감탄이나 상품 장점 설명을 억지로 추가하지 않는다.
 - 1문장, 최대 2줄, 대략 15~50자.
@@ -110,6 +127,7 @@ export async function composeReply(input: ReplyComposeInput): Promise<ReplyCompo
     `"""${input.body}"""`,
     '',
     '위 본문 톤과 자연스럽게 이어지는 리드 한 문장을 JSON으로만 반환.',
+    `이번 연결 톤 참고 (그대로 복붙 X · 톤·각도만): "${pickConnector(input.accountId)}"`,
     input.sourceBrief ? renderSourceBrief(input.sourceBrief) : '',
     input.sourceText ? `원문 자료: ${JSON.stringify(input.sourceText)}` : '',
   ].join('\n');
