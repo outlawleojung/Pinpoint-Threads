@@ -16,6 +16,8 @@
     "lint": "eslint \"src/**/*.ts\"",
     "typecheck": "prisma generate && tsc --noEmit",
     "test:copy": "node --import tsx --test tests/source-preservation.test.mts",
+    "test:quality": "node --import tsx --test tests/copy-quality.test.mts",
+    "eval:copy": "node --import tsx scripts/eval-copy-quality.mts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
