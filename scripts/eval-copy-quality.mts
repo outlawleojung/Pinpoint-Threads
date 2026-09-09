@@ -17,9 +17,9 @@ async function judge(body: string, productName: string): Promise<{ weakEnd: bool
     system: '너는 한국 쇼핑 카피 심사관이다. 아래 카피에 대해 JSON만 반환.',
     userParts: [{ type: 'text', text:
 `상품:${productName}\n카피:"""${body}"""\n판정(각 true=문제 있음):\n` +
-`weakEnd: 끝 문장이 앞말을 반복하거나 힘이 빠졌는가\n` +
-`generic: 다른 상품에도 그대로 붙는 범용 감탄으로만 끝났는가\n` +
-`unverified: 없는 체험·인기·품절·효능·비교를 사실처럼 넣었는가\n` +
+`weakEnd: 끝 문장이 앞 문장을 그대로 반복하는가(같은 말 두 번). 하입 마무리("이거 하나로 끝")·담백한 끝은 문제 아님\n` +
+`generic: 상품 고유 특징이 하나도 없이 아무 상품에나 붙는 문장뿐인가. 구체 디테일(그물망·모공·거품 등) 하나라도 있으면 문제 아님\n` +
+`unverified: 지어낸 사회적 증거(다들 산다·품절대란·없어서 못 삼) 또는 원본에 없는 타제품 비교를 넣었는가. 제품 종류에 맞는 기능 반응·주관적 기대는 문제 아님\n` +
 `{"weakEnd":bool,"generic":bool,"unverified":bool}` }],
     jsonSchema: { type: 'object', properties: { weakEnd: { type: 'boolean' }, generic: { type: 'boolean' }, unverified: { type: 'boolean' } }, required: ['weakEnd', 'generic', 'unverified'] },
   });
