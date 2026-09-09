@@ -682,50 +682,57 @@ bot.on('message:text', async (ctx, next) => {
     .filter((l) => l.length > 0)
     .join(' ').trim();
   if (commerceUrls.length === 0 && productName.length >= 2) {
-    await ctx.reply(`🔍 "${productName}" 저장 + 상품 검색 → 승인 카드 생성 중 (${supported.length}개 벤치마크 · 실발행 아님, 승인해야 나감)...`);
+    await ctx.reply(`🔍 "${productName}" · 링크 ${supported.length}개 조합 → 카드 1개 생성 중 (실발행 아님, 승인해야 나감)...`);
     try {
       const { ingestUrl } = await import('../url-ingester/index.js');
-      let handled = 0;
+      const { ensureBenchmarkVideo } = await import('../../pipeline-a/video-rescue.js');
+      // 같은 제품의 여러 링크(일본·한국 버전 등)를 **하나의 소스로 조합 → 포스트 1개** (사용자 방침).
+      //   미디어: 각 링크 것 합침(같은 제품 여러 각도 · 영상 있으면 앞으로 · 중복제거 · 최대 10).
+      //   텍스트: 원문 전부 카피 참고에 넣음(한국 버전이 자연스러운 표현 제공).
+      //   첫 지원 링크를 sourceUrl(대표)로.
+      const texts: string[] = [];
+      const allMedia: string[] = [];
+      let primaryUrl: string | null = null;
       for (const burl of supported) {
         const ing = await ingestUrl({ url: burl, source: InboundSource.MANUAL_TELEGRAM });
         // 상품명을 InboundLink 에 저장 (자동 크론도 재사용)
         if (ing.inboundLinkId) {
           await prisma.inboundLink.update({ where: { id: ing.inboundLinkId }, data: { manualProductName: productName } }).catch(() => {});
         }
-        // 벤치마크 확보 (승격됐으면 BenchmarkPost)
         const bench = ing.inboundLinkId
           ? await prisma.benchmarkPost.findFirst({ where: { inboundLinkId: ing.inboundLinkId }, select: { id: true, text: true, mediaUrls: true, permalink: true } })
           : null;
         const src = bench ?? (ing.inboundLinkId ? await prisma.inboundLink.findUnique({ where: { id: ing.inboundLinkId }, select: { rawText: true, mediaUrls: true, url: true } }) : null);
-        if (!src) { await ctx.reply(`⚠️ ${burl.slice(0,50)} 소스 확보 실패`); continue; }
+        if (!src) { await ctx.reply(`⚠️ ${burl.slice(0,50)} 소스 확보 실패 · 이 링크 제외`); continue; }
         const mediaUrls = 'mediaUrls' in src ? src.mediaUrls : [];
         const sourceText = 'text' in src ? src.text : (src as any).rawText;
         const permalink = 'permalink' in src ? src.permalink : (src as any).url;
-        // 비디오 구제: 사용자가 "비디오 있음" 명시하면 mp4 확보까지 강하게 재시도.
-        // "비디오 없음" 이면 Playwright 스킵 (헛돎 방지). 미지정이면 자동 판단.
-        const { ensureBenchmarkVideo } = await import('../../pipeline-a/video-rescue.js');
+        // 비디오 구제: "비디오 있음"이면 mp4 확보까지 강하게, "없음"이면 스킵, 미지정 자동.
         const media = await ensureBenchmarkVideo(bench?.id ?? null, permalink, mediaUrls, hasVideoFlag);
-        // 발행 대상 = 1계정. 상품명에서 성별 추론 → 맞는 계정 중 오늘 덜 발행한 계정 선택.
-        const gender = inferGender(productName);
-        const acc = await pickLeastUsedAccount(gender);
-        if (!acc) { await ctx.reply(`⚠️ ${gender ?? ''} 발행 가능한 계정 없음`); continue; }
-        const outcome = await runPipelineA({
-          accountId: acc.id,
-          sourceMediaUrls: media,
-          sourceText: sourceText ?? '',
-          sourceUrl: permalink,
-          productNameHint: productName,
-        });
-        if (outcome.status === 'PENDING_APPROVAL') {
-          await ctx.reply(`✅ [${acc.handle}] ${outcome.matchedProductName?.slice(0,40)} · 승인 카드 확인 (틀리면 리젝)`);
-          handled += 1;
-        } else {
-          await ctx.reply(`❌ [${acc.handle}] 실패: ${outcome.stage} · ${outcome.reason}`);
-        }
+        allMedia.push(...media);
+        if (sourceText && sourceText.trim()) texts.push(sourceText.trim());
+        if (!primaryUrl) primaryUrl = permalink ?? burl;
       }
-      // 상품명 경로로 처리했으면(성공·실패 무관) 여기서 종료 — 아래 일반 인제스트로 떨어져
-      // 이중 "인제스트 결과" 가 나오지 않게. (전건 실패해도 계정별 실패 메시지는 이미 보냄)
-      void handled;
+      // 영상(mp4) 앞으로 · 중복 제거 · 최대 10.
+      const isVid = (u: string) => /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/');
+      const mergedMedia = [...new Set(allMedia)].sort((a, b) => Number(isVid(b)) - Number(isVid(a))).slice(0, 10);
+      if (mergedMedia.length === 0) { await ctx.reply('⚠️ 조합할 미디어가 없어요 · 발행 중단'); return; }
+      const combinedText = texts.join('\n\n');
+      const gender = inferGender(productName);
+      const acc = await pickLeastUsedAccount(gender);
+      if (!acc) { await ctx.reply(`⚠️ ${gender ?? ''} 발행 가능한 계정 없음 (쇼핑은 팔로워 100명 초과만)`); return; }
+      const outcome = await runPipelineA({
+        accountId: acc.id,
+        sourceMediaUrls: mergedMedia,
+        sourceText: combinedText,
+        sourceUrl: primaryUrl ?? supported[0]!,
+        productNameHint: productName,
+      });
+      if (outcome.status === 'PENDING_APPROVAL') {
+        await ctx.reply(`✅ [${acc.handle}] ${outcome.matchedProductName?.slice(0,40)} · 링크 ${texts.length}개 조합 · 승인 카드 확인 (틀리면 리젝)`);
+      } else {
+        await ctx.reply(`❌ [${acc.handle}] 실패: ${outcome.stage} · ${outcome.reason}`);
+      }
       return;
     } catch (err) {
       logger.error({ err }, 'URL+상품명 처리 실패');
