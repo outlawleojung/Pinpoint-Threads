@@ -7,7 +7,6 @@ import { isVoyageConfigured } from '../../../infra/voyage-client.js';
 import { prisma } from '../../../db/prisma.js';
 import { analyzeSource, renderSourceBrief, type SourceBrief } from './source-brief.js';
 import { renderWinningStyle } from './winning-style.js';
-import { SHOPPING_PRINCIPLES } from './shopping-style.js';
 
 /**
  * Copywriter — 원본을 참고해 계정별 페르소나로 완전 재창조하는 카피 노드.
@@ -160,7 +159,7 @@ function buildSystemPrompt(input: {
     ? `\n\n원본 감지 언어: ${input.sourceLanguage} (직역 금지, 아래 페르소나로 재창조)`
     : '';
 
-  return `${input.shopping ? SHOPPING_PRINCIPLES : UNIVERSAL_PRINCIPLES}
+  return `${UNIVERSAL_PRINCIPLES}
 
 == 이 계정의 페르소나 (seed=${input.accountSeed}, variant=${input.variantIndex}) ==
 ${persona}
