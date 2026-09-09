@@ -21,6 +21,9 @@ import { assertTransition } from '../../state/post-state-machine.js';
  *          → Copywriter → Reply Composer → Post 저장 → Approval Gate
  */
 
+/** 쇼핑 발행 최소 팔로워 (이 값 이하 계정은 쇼핑 차단 · 사용자 방침). */
+const SHOPPING_MIN_FOLLOWERS = 100;
+
 export interface RunPipelineAInput {
   accountId: string;
   sourceMediaUrls: string[];   // 2개 이상 필수 (docs/01-pipelines/A-shopping.md § 5)
@@ -60,6 +63,16 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
   // 1. Account fetch
   const account = await prisma.account.findUnique({ where: { id: input.accountId } });
   if (!account) return { status: 'REJECTED', stage: 'account', reason: 'account not found' };
+
+  // 쇼핑 콘텐츠는 팔로워 100명 이하 계정에서 발행 금지 (사용자 방침).
+  //   저팔로워 계정에 커머스 노출 → 신뢰·전환 낮고 계정 색깔만 흐림. 팔로워 키운 뒤 쇼핑 투입.
+  if ((account.followersCount ?? 0) <= SHOPPING_MIN_FOLLOWERS) {
+    return {
+      status: 'REJECTED',
+      stage: 'account',
+      reason: `쇼핑 발행 차단: @${account.handle} 팔로워 ${account.followersCount}명 (${SHOPPING_MIN_FOLLOWERS}명 이하) · 100명 초과 계정에서 발행하세요`,
+    };
+  }
 
   // 2. SourceItem 생성/재사용 (dedup: sourceUrl 우선 · 없으면 contentHash)
   //    sourceUrl 이 있으면 그 URL 당 SourceItem 1개 유지 (mediaUrls 는 후속 재추출로 바뀔 수 있어

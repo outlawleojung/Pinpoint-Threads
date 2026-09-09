@@ -817,9 +817,12 @@ async function pickLeastUsedAccount(gender?: 'male' | 'female' | null) {
   today.setHours(0, 0, 0, 0);
   let accounts = await prisma.account.findMany({
     where: { isActive: true },
-    select: { id: true, handle: true, audienceGender: true },
+    select: { id: true, handle: true, audienceGender: true, followersCount: true },
     orderBy: { handle: 'asc' },
   });
+  // 쇼핑은 팔로워 100명 이하 계정 제외 (사용자 방침 · orchestrator 가드와 동일 기준).
+  //   여기서 미리 걸러 애초에 안 뽑히게 → "발행 차단 실패" 카드 안 뜨게.
+  accounts = accounts.filter((a) => (a.followersCount ?? 0) > 100);
   if (gender === 'male') {
     accounts = accounts.filter((a) => a.audienceGender === 'male' || a.audienceGender === 'unisex');
   } else if (gender === 'female') {
