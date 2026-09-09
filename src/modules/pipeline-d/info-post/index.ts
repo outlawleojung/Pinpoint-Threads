@@ -5,7 +5,7 @@ import type { LlmContentPart } from '../../../infra/llm/index.js';
 import { generateImage } from '../../../infra/llm/gemini-image.js';
 import { uploadBufferToCloudinary } from '../../../infra/cloudinary-client.js';
 import { generateNaverPost } from '../naver-copywriter/index.js';
-import { fetchAutocomplete } from '../../../infra/naver/autocomplete.js';
+import { selectDemandTopic, harvestDemand } from '../demand/index.js';
 
 const MAX_AI_IMAGES = 3;
 
@@ -92,12 +92,16 @@ export async function buildInfoPost(opts?: { category?: string; angleHint?: stri
     angle = opts.angleHint;
   } else {
     trend = await pickTrendKeyword(category); // 링크 후보용 (주제엔 사용하지 않음)
-    // 주제 = 사람들이 실제 검색하는 것에서. 카테고리별 자연스러운 씨앗어들로 자동완성을 넓게 긁는다.
-    // 전부 실패하면 빈 배열 → generateInfoAngle 에버그린 폴백.
+    // 주제 = 실수요. 자동완성 2-hop 풀에서 정보 니즈 강한 실제 검색어 하나를 골라 그 의도에 답하는 앵글로.
     const seeds = CATEGORY_SEEDS[category] ?? [category];
-    const pools = await Promise.all(seeds.map((s) => fetchAutocomplete(s, { max: 8 })));
-    const searchTerms = [...new Set(pools.flat())].slice(0, 30);
-    angle = await generateInfoAngle(category, recentTitles, searchTerms);
+    const demand = await selectDemandTopic({ category, seeds, recentTitles });
+    if (demand) {
+      angle = demand.angle;
+      logger.info({ category, query: demand.query, angle }, 'info-post 실수요 주제 선정');
+    } else {
+      // 폴백: 실수요 선정 실패 시 자동완성 풀로 에버그린 앵글.
+      angle = await generateInfoAngle(category, recentTitles, await harvestDemand(seeds));
+    }
   }
 
   const draft = await generateNaverPost({

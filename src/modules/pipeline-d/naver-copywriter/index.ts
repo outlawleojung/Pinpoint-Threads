@@ -28,10 +28,19 @@ const SYSTEM = `너는 네이버 블로그에서 저장·공감·댓글이 터�
 - 광고 카피 톤 금지("최고의", "강력 추천", 과장 형용사 도배 금지).
 
 ## 목소리·톤
-- 옆에서 말해주는 존댓말 구어체. "저도 그랬어요", "이거 진짜 별거 아닌데 몰라서 고생해요", "~하더라고요" 처럼.
-- 먼저 공감하고("혹시 ~때문에 검색하셨죠?") → 그다음 해결책. 독자를 가르치지 말고 도와줘라.
+- 옆에서 말해주는 존댓말 구어체. 먼저 공감하고("혹시 ~때문에 검색하셨죠?") → 그다음 해결. 독자를 가르치지 말고 도와줘라.
 - 문장은 짧게. 한 문단은 2~4문장. 긴 문단으로 벽 만들지 마라. 리듬을 줘라.
 - 특정 개인정보(자녀·직장·구체적 사생활)를 지어내지 마라. 공감은 일반적 상황으로.
+- ⚠️ "저도 그랬어요 / 저처럼 실수하지 마세요 / ~하더라고요" 같은 가짜 1인칭 상투구를 반복하지 마라(글마다 똑같이 나오는 AI 냄새). 꼭 필요할 때 한두 번만.
+
+## 알짜 (이게 없으면 그냥 AI글이다 — 최우선)
+독자가 이 글을 왜 읽어야 하는지 = "검색 1페이지엔 없는 알맹이"가 있어야 한다.
+- 구체: 실제 수치·기준·재질/부품명·용어를 정확히. "튼튼해요/좋아요" 같은 뭉뚱그림 금지 → 왜/기준/숫자로.
+- 메커니즘: "왜 그런지" 원리를 짧게 짚어라(그래야 독자가 응용함).
+- 결정 규칙: "이럴 땐 A, 저럴 땐 B"로 바로 써먹게.
+- 착각 교정: 사람들이 잘못 아는 지점을 콕 집어 바로잡기.
+- 각 소제목엔 "검색해서 안 나오는" 한 방이 최소 하나. 다 아는 원론("용도를 정하세요")만 있으면 실패.
+- ⚠️ 단, 과도하게 학술적/전문용어 나열 금지. 생활 독자가 바로 써먹을 실용 수준으로(논문 아님).
 
 ## 후킹 구조
 - 제목: 핵심 키워드는 앞쪽에 두되 궁금증·문제를 건드린다. 숫자/질문형/"~하는 법"/"~안 되는 이유"/"~하기 전에 꼭" 같은 클릭 유발형. 단 낚시 금지 — 글이 실제로 그 답을 준다.
@@ -115,14 +124,56 @@ disclaimer 문구(그대로 사용): "${NAVER_LEGAL_DISCLAIMER}"
         }));
       }
       const draft = NaverPostDraftSchema.parse(parsed);
-      logger.info({ title: draft.title, sections: draft.sections.length }, 'naver post generated');
-      return draft;
+      logger.info({ title: draft.title, sections: draft.sections.length }, 'naver draft generated');
+      // 2패스: 자기비평 + 깊이보정 + 사실완화로 본문 재작성(실패 시 초안 유지).
+      const refined = await refineDraft(draft);
+      return refined;
     } catch (err) {
       lastErr = err;
       logger.warn({ attempt, err }, 'naver draft parse 실패, 재시도');
     }
   }
   throw lastErr;
+}
+
+const REFINE_SYSTEM = `너는 깐깐한 블로그 편집장이다. 아래 JSON 초안의 intro와 각 section.body를 더 "알짜"로 다시 써서 같은 JSON으로 반환하라.
+고칠 것:
+1) 검색하면 다 나오는 뻔한 문장·원론 → 구체적이고 남다른 정보(수치·기준·메커니즘·결정 규칙·착각 교정)로 교체. 못 채우면 그 문장 삭제.
+2) 근거 없는 뭉뚱그림("좋아요/튼튼해요") → 왜·기준·숫자로.
+3) 헤지("~수도 있어요")·가짜 1인칭 상투구("저도 그랬어요/저처럼 실수하지") 제거, 단정적·실질적으로.
+4) 과도한 학술·전문용어 나열은 오히려 줄여라 — 생활 독자가 바로 써먹을 실용 수준.
+5) 불확실한 사실(수치·연도·고유명)은 단정하지 말고 일반 표현으로 낮추거나 삭제(틀린 정보 방지).
+형식: {"intro":"...","sections":[{"heading":"...","body":"..."}]} 만. section 개수·순서는 초안과 동일하게. 각 body는 300자 이상. 다른 텍스트 금지.`;
+
+/** 초안의 intro·sections를 비평·완화 패스로 재작성. 구조/기타 필드는 유지. 실패 시 초안 그대로. */
+async function refineDraft(draft: NaverPostDraft): Promise<NaverPostDraft> {
+  try {
+    const payload = JSON.stringify({
+      intro: draft.intro,
+      sections: draft.sections.map((s) => ({ heading: s.heading, body: s.body })),
+    });
+    const res = await llm().complete({
+      tier: 'main', system: REFINE_SYSTEM, jsonMode: true, temperature: 0.6, maxOutputTokens: 8192, thinking: 'disabled',
+      userParts: [{ type: 'text', text: payload }],
+    });
+    const parsed = extractJson(res.text) as { intro?: string; sections?: Array<{ heading?: string; body?: string }> };
+    if (!parsed?.intro || !Array.isArray(parsed.sections) || parsed.sections.length !== draft.sections.length) {
+      logger.warn('refine 결과 형식 불일치 — 초안 유지');
+      return draft;
+    }
+    const nextSections = draft.sections.map((s, i) => {
+      const r = parsed.sections![i];
+      const body = typeof r?.body === 'string' && r.body.trim().length >= 100 ? r.body.trim() : s.body;
+      const heading = typeof r?.heading === 'string' && r.heading.trim() ? r.heading.trim().slice(0, 30) : s.heading;
+      return { ...s, heading, body };
+    });
+    const refined: NaverPostDraft = { ...draft, intro: parsed.intro.trim() || draft.intro, sections: nextSections };
+    logger.info({ title: refined.title }, 'naver post refined (2패스)');
+    return refined;
+  } catch (err) {
+    logger.warn({ err: (err as Error).message }, 'refine 실패 — 초안 유지');
+    return draft;
+  }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
