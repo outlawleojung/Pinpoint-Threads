@@ -50,7 +50,9 @@ for (const v of variants) {
       <span style="font-size:34px">${v.icon}</span>
       <span>${label}</span>
     </span>
-    <span style="font-size:30px;line-height:.7;transform:scaleX(1.6)">⌄</span>
+    <span style="width:0;height:0;margin-top:10px;
+      border-left:20px solid transparent;border-right:20px solid transparent;
+      border-top:24px solid currentColor"></span>
   </div>`;
   await page.setContent(html);
   const el = await page.$('#btn');
