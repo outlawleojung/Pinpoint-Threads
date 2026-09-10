@@ -571,6 +571,11 @@ export interface DailyCopyInput {
   sourceText?: string;
   sourceLanguage?: string | null;
   sourceImageUrl?: string;
+  /**
+   * 사용자가 준 **영상 내용 설명** (캡션 아님).
+   * 이게 있으면 "그대로 옮기기"가 아니라 "이 상황에 대한 반응/감상"을 쓴다 (설명 복붙 금지).
+   */
+  mediaDescription?: string;
 }
 
 export async function generateDailyBody(input: DailyCopyInput): Promise<string> {
@@ -580,9 +585,15 @@ export async function generateDailyBody(input: DailyCopyInput): Promise<string> 
     variantIndex: 0,
     sourceLanguage: input.sourceLanguage ?? null,
   });
-  const system = `${baseSystem}
-
-== 이번 글의 특수 규칙 (일상글 · 수익화 아님) ==
+  const specialRules = input.mediaDescription
+    ? `== 이번 글의 특수 규칙 (일상글 · 영상 내용 "설명" 기반) ==
+**★★ 아래 "영상 내용"은 사람이 영상을 보고 알려준 설명이다. 이걸 그대로 문장으로 옮기지 마라 (1차원적·설명충).**
+이 상황을 이해하고, 사람이 그 영상을 보면 할 법한 **진짜 반응·감상 한 줄**을 써라.
+- 나쁨(설명 복붙): "엘베 바닥에 구멍 뚫린 것처럼 카페트 깔아놓은 몰카 실화냐" ← 설명을 그대로 나열
+- 좋음(반응): "이거 타는 순간 진짜 소리 지를 듯ㅋㅋ 나였으면 못 탐" · "엘베 문 열리자마자 이거면 심장 내려앉음" ← 상황에 대한 반응
+- 설명의 모든 디테일을 나열하지 말고, 그 상황의 **핵심 재미·감정 하나**에 반응. 짧고 자연스럽게.
+- 없는 사실 지어내기 금지. 상품·가격·링크 X.`
+    : `== 이번 글의 특수 규칙 (일상글 · 수익화 아님) ==
 **★★ 원본 캡션(문장)의 "뜻"을 그대로 옮겨라. 이게 최우선이다.**
 - 원본이 말하는 그 내용·의도를 이 페르소나 어투로 자연스럽게 옮긴다. 새로 창작하거나 딴 얘기로 바꾸지 마라.
 - **영상 화면을 보고 내용을 "추측·해석"하지 마라.** 풍자·개념·밈 영상은 프레임만 보면 엉뚱하게 해석된다.
@@ -592,10 +603,19 @@ export async function generateDailyBody(input: DailyCopyInput): Promise<string> 
 - 캡션이 짧으면(예: "웃겨") 그 감정만 담백하게 ("완전 웃김ㅋㅋ"). 없는 상황·구체 내용 지어내기 금지.
 - 외국어 캡션은 자연스러운 한국어로 뜻만 옮김(딱딱한 직역 X). 억지 부연·지어낸 가정("~하면 빡침")·설명충·시적 은유 금지.
 - 검증 불가한 규정(장르·AI·브랜드·인물 단정) 금지. 상품·가격·링크 언급 X (커머스 없음).`;
+  const system = `${baseSystem}
+
+${specialRules}`;
 
   const buildOnce = async (idx: number, avoid?: string): Promise<string> => {
     const parts: LlmContentPart[] = [];
     if (input.sourceImageUrl) parts.push({ type: 'image', url: input.sourceImageUrl });
+    if (input.mediaDescription) {
+      parts.push({
+        type: 'text',
+        text: `영상 내용 (사람이 알려준 설명 · 그대로 옮기지 말고 이 상황에 반응하라):\n"""\n${input.mediaDescription.slice(0, 800)}\n"""`,
+      });
+    }
     if (input.sourceText) {
       parts.push({
         type: 'text',

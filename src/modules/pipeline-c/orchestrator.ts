@@ -123,18 +123,17 @@ export async function runPipelineC(input: RunPipelineCInput): Promise<PipelineCO
     //     (예: "男人的腦"=남자머릿속 풍자 → 프레임 보고 "그림커팅" 오해) 캡션이 있으면 화면을 넘기지 않는다.
     //     캡션이 아예 없을 때만 프레임을 보조로.
     const rawText = (inbound.rawText ?? '').trim();
-    // 사용자가 준 영상 설명이 있으면 그게 최우선 내용 기준 (무캡션·반응만 있는 영상 대응 · AI가 못 보는 영상 전개를 사람이 알려줌).
-    //   설명이 있으면 프레임 이미지는 넘기지 않는다(엉뚱한 프레임 해석 방지).
+    // 사용자가 준 영상 설명이 있으면 → mediaDescription 으로 넘겨 "반응" 모드 (설명 복붙 X · 그 상황에 대한 반응).
+    //   설명이 있으면 캡션·프레임 이미지는 안 넘긴다(엉뚱한 해석·복붙 방지).
     const desc = (input.description ?? '').trim();
-    const effectiveSource = desc || rawText || undefined;
-    const effectiveLang = desc ? 'ko' : inbound.rawLanguage;
-    const imageForCopy = effectiveSource ? undefined : publicUrls.find((u) => !isVideoUrl(u));
+    const imageForCopy = (desc || rawText) ? undefined : publicUrls.find((u) => !isVideoUrl(u));
     const body = await generateDailyBody({
       personaPrompt: account.personaPrompt,
       accountSeed: account.id,
       accountId: account.id,
-      sourceText: effectiveSource,
-      sourceLanguage: effectiveLang,
+      sourceText: desc ? undefined : (rawText || undefined),
+      mediaDescription: desc || undefined,
+      sourceLanguage: desc ? 'ko' : inbound.rawLanguage,
       sourceImageUrl: imageForCopy,
     });
 
