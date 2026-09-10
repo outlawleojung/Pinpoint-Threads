@@ -123,9 +123,20 @@ export async function runPipelineC(input: RunPipelineCInput): Promise<PipelineCO
     //     (예: "男人的腦"=남자머릿속 풍자 → 프레임 보고 "그림커팅" 오해) 캡션이 있으면 화면을 넘기지 않는다.
     //     캡션이 아예 없을 때만 프레임을 보조로.
     const rawText = (inbound.rawText ?? '').trim();
+    const desc = (input.description ?? '').trim();
+    // ★ 캡션·설명 둘 다 없는데 **영상**이면 → 프레임(정지화면)만으론 내용·뉘앙스를 알 수 없어
+    //   지어내면 매번 뜻이 틀린다(예: 고양이+개 친함 → "신종 동물 소름"). 프레임 추측 금지 → 설명 요청.
+    //   (사진은 정지화면이 곧 내용이라 프레임 허용.)
+    const hasVideoMedia = publicUrls.some((u) => isVideoUrl(u)) || hasCoverFrame;
+    if (!desc && !rawText && hasVideoMedia) {
+      return await finishFailed(
+        post.id,
+        'caption',
+        '원본 캡션을 못 읽었어요. 영상은 화면만으론 내용을 알 수 없어 지어내면 뉘앙스가 틀립니다. "일상 {URL} | 영상 내용 한 줄 설명" 으로 다시 보내주세요.',
+      );
+    }
     // 사용자가 준 영상 설명이 있으면 → mediaDescription 으로 넘겨 "반응" 모드 (설명 복붙 X · 그 상황에 대한 반응).
     //   설명이 있으면 캡션·프레임 이미지는 안 넘긴다(엉뚱한 해석·복붙 방지).
-    const desc = (input.description ?? '').trim();
     const imageForCopy = (desc || rawText) ? undefined : publicUrls.find((u) => !isVideoUrl(u));
     const body = await generateDailyBody({
       personaPrompt: account.personaPrompt,
