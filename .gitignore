@@ -62,3 +62,4 @@ tmp/
 # Coverage
 coverage/
 .nyc_output/
+assets/naver/cards/
