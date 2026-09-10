@@ -33,6 +33,11 @@ export interface RunPipelineCInput {
   sourceUrl: string;
   /** 사용자가 "비디오 있음/없음" 명시. true=mp4 확보까지 강하게, false=스킵, undefined=자동. */
   hasVideo?: boolean;
+  /**
+   * 사용자가 텔레그램에 함께 준 **영상 내용 한 줄 설명**.
+   * 무캡션·반응만 있는 영상은 AI가 내용을 모르므로, 이 설명을 내용 기준으로 카피 생성.
+   */
+  description?: string;
 }
 
 export type PipelineCOutcome =
@@ -118,13 +123,18 @@ export async function runPipelineC(input: RunPipelineCInput): Promise<PipelineCO
     //     (예: "男人的腦"=남자머릿속 풍자 → 프레임 보고 "그림커팅" 오해) 캡션이 있으면 화면을 넘기지 않는다.
     //     캡션이 아예 없을 때만 프레임을 보조로.
     const rawText = (inbound.rawText ?? '').trim();
-    const imageForCopy = rawText ? undefined : publicUrls.find((u) => !isVideoUrl(u));
+    // 사용자가 준 영상 설명이 있으면 그게 최우선 내용 기준 (무캡션·반응만 있는 영상 대응 · AI가 못 보는 영상 전개를 사람이 알려줌).
+    //   설명이 있으면 프레임 이미지는 넘기지 않는다(엉뚱한 프레임 해석 방지).
+    const desc = (input.description ?? '').trim();
+    const effectiveSource = desc || rawText || undefined;
+    const effectiveLang = desc ? 'ko' : inbound.rawLanguage;
+    const imageForCopy = effectiveSource ? undefined : publicUrls.find((u) => !isVideoUrl(u));
     const body = await generateDailyBody({
       personaPrompt: account.personaPrompt,
       accountSeed: account.id,
       accountId: account.id,
-      sourceText: rawText || undefined,
-      sourceLanguage: inbound.rawLanguage,
+      sourceText: effectiveSource,
+      sourceLanguage: effectiveLang,
       sourceImageUrl: imageForCopy,
     });
 

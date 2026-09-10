@@ -99,10 +99,11 @@ bot.command('daily', async (ctx) => {
   const arg = (ctx.match ?? '').trim();
   const url = extractUrls(arg)[0];
   if (!url) {
-    await ctx.reply('사용법: /daily https://... (또는 "일상 https://...")');
+    await ctx.reply('사용법: /daily https://... | 영상 내용 한 줄 설명 (또는 "일상 https://... | 설명")');
     return;
   }
-  await runDailyFromUrl(ctx, url, detectVideoFlag(arg));
+  const desc = stripVideoFlag(arg.replace(/https?:\/\/\S+/g, '').replace(/^\s*\|\s*/, '').trim()).trim();
+  await runDailyFromUrl(ctx, url, detectVideoFlag(arg), desc.length >= 2 ? desc : undefined);
 });
 
 /**
@@ -112,8 +113,10 @@ async function runDailyFromUrl(
   ctx: { reply: (t: string) => Promise<unknown> },
   url: string,
   hasVideo?: boolean,
+  description?: string,
 ): Promise<void> {
-  await ctx.reply(`🌿 일상글 처리 중 (상품·링크 없이 본문만): ${url.slice(0, 60)}...`);
+  const descNote = description ? ` · 설명 반영: "${description.slice(0, 40)}"` : '';
+  await ctx.reply(`🌿 일상글 처리 중 (상품·링크 없이 본문만)${descNote}: ${url.slice(0, 60)}...`);
   try {
     const acc = await pickLeastUsedDailyAccount();
     if (!acc) {
@@ -121,7 +124,7 @@ async function runDailyFromUrl(
       return;
     }
     const { runPipelineC } = await import('../../pipeline-c/orchestrator.js');
-    const outcome = await runPipelineC({ accountId: acc.id, sourceUrl: url, hasVideo });
+    const outcome = await runPipelineC({ accountId: acc.id, sourceUrl: url, hasVideo, description });
     if (outcome.status === 'PENDING_APPROVAL') {
       await ctx.reply(`✅ [${acc.handle}] 일상글 승인 카드 확인 (실발행 아님, 승인해야 나감)`);
     } else {
@@ -544,10 +547,19 @@ bot.on('message:text', async (ctx, next) => {
   if (/^\s*일상(?=[\s:：]|$)/.test(text)) {
     const dailyUrl = urls[0];
     if (!dailyUrl) {
-      await ctx.reply('⚠️ 일상글로 만들 URL이 없어요.\n예: 일상 https://www.threads.net/...');
+      await ctx.reply('⚠️ 일상글로 만들 URL이 없어요.\n예: 일상 https://www.threads.net/... | 영상 내용 한 줄 설명');
       return;
     }
-    await runDailyFromUrl(ctx, dailyUrl, detectVideoFlag(text));
+    // "일상 {URL} | {설명}" 또는 "일상 {URL} {설명}" — URL·태그·비디오플래그 뺀 나머지 = 영상 내용 설명.
+    //   무캡션·반응만 있는 영상은 AI가 내용을 모르므로, 사용자가 준 이 설명을 내용 기준으로 씀.
+    const desc = stripVideoFlag(
+      text
+        .replace(/^\s*일상[\s:：]*/, '')
+        .replace(/https?:\/\/\S+/g, '')
+        .replace(/^\s*\|\s*/, '')
+        .trim(),
+    ).trim();
+    await runDailyFromUrl(ctx, dailyUrl, detectVideoFlag(text), desc.length >= 2 ? desc : undefined);
     return;
   }
 
