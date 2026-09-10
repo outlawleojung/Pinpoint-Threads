@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { prisma } from '../../../db/prisma.js';
@@ -21,6 +21,23 @@ const CTA_BUTTON_DATA_URI: string = (() => {
     return '';
   }
 })();
+
+/** 이 글의 정보 카드(assets/naver/cards/<id>-N.png)를 번호순으로 읽어 data URI 배열로. 없으면 []. */
+function loadCardDataUris(postId: string): string[] {
+  try {
+    const dir = resolve(process.cwd(), 'assets/naver/cards');
+    return readdirSync(dir)
+      .filter((f) => f.startsWith(`${postId}-`) && f.endsWith('.png'))
+      .sort((a, b) => {
+        const na = Number(a.replace(`${postId}-`, '').replace('.png', ''));
+        const nb = Number(b.replace(`${postId}-`, '').replace('.png', ''));
+        return na - nb;
+      })
+      .map((f) => `data:image/png;base64,${readFileSync(resolve(dir, f)).toString('base64')}`);
+  } catch {
+    return [];
+  }
+}
 
 export function renderPublishPage(
   post: { id: string; title: string | null; state: string; kind?: string; category?: string | null; suggestedProduct?: string | null },
@@ -149,7 +166,10 @@ export async function registerNaverRoutes(app: AnyFastify): Promise<void> {
     const { id } = req.params as { id: string };
     const post = await prisma.naverPost.findUnique({ where: { id } });
     if (!post || !post.draftJson) return reply.code(404).send('not found');
-    const pkg = buildPublishPackage(post.draftJson as unknown as NaverPostDraft, post.imageUrls, {
+    // 정보 카드가 있으면 이미지칸을 카드로 채운다(없으면 기존 imageUrls).
+    const cards = loadCardDataUris(post.id);
+    const images = cards.length ? [...cards, ...post.imageUrls] : post.imageUrls;
+    const pkg = buildPublishPackage(post.draftJson as unknown as NaverPostDraft, images, {
       includeDisclaimer: post.kind !== 'INFO',
       connectUrl: post.connectUrl ?? undefined,
     });
