@@ -146,13 +146,13 @@ async function pickLeastUsedDailyAccount() {
     orderBy: { handle: 'asc' },
   });
   if (accounts.length === 0) return null;
+  // 오늘 전체 발행/카드 수 기준(종류 무관) → 한 계정에 일상·쇼핑 겹쳐 몰리는 것 방지.
   const counts = await Promise.all(
     accounts.map(async (a) => ({
       a,
       c: await prisma.post.count({
         where: {
           accountId: a.id,
-          kind: PostKind.DAILY,
           createdAt: { gte: today },
           state: { notIn: [PostState.REJECTED, PostState.FAILED] },
         },
@@ -862,13 +862,13 @@ async function pickLeastUsedAccount(gender?: 'male' | 'female' | null) {
     accounts = accounts.filter((a) => a.audienceGender !== 'male');
   }
   if (accounts.length === 0) return null;
+  // 오늘 전체 발행/카드 수 기준(종류 무관) → 한 계정에 쇼핑·일상 겹쳐 몰리는 것 방지.
   const counts = await Promise.all(
     accounts.map(async (a) => ({
       acc: a,
       n: await prisma.post.count({
         where: {
           accountId: a.id,
-          kind: 'SHOPPING',
           createdAt: { gte: today },
           state: { notIn: ['REJECTED', 'FAILED'] },
         },
