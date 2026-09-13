@@ -1,7 +1,7 @@
 ---
 title: "강의 지식 추출 파이프라인"
 tags: ["data-collection", "knowledge", "lecture", "whisper"]
-related: ["strategy", "rag-design"]
+related: ["strategy", "rag-design", "lecture-insights/alphaman-blog-monetization"]
 last_updated: "2026-08-29"
 status: "planned"
 ---

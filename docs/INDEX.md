@@ -45,6 +45,8 @@
 - [rag-design](05-data-collection/rag-design.md) — 벡터 검색·Few-shot 설계
 - [self-improvement](05-data-collection/self-improvement.md) — 발행 성과 회수 루프
 - [lecture-knowledge](05-data-collection/lecture-knowledge.md) — 수익화 강의 → Whisper 전사 → 지식 추출 파이프라인
+- [lecture-insights/](05-data-collection/lecture-insights/) — 강의·인플루언서 인사이트 정리
+  - [alphaman-blog-monetization](05-data-collection/lecture-insights/alphaman-blog-monetization.md) — 알파남 블로그 수익화 전략 (네이버·애드센스·키워드)
 
 ## 06-accounts
 - [personas](06-accounts/personas.md) — 4계정 페르소나 정의
