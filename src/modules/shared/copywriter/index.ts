@@ -299,22 +299,45 @@ function renderBenchmarkHints(items: SimilarBenchmark[]): string {
   return lines.join('\n');
 }
 
+/**
+ * JSON 문자열 리터럴 안의 이스케이프 안 된 제어문자(0x00-0x1F)를 \uXXXX 로 이스케이프.
+ *   LLM이 "body":"1줄<진짜 줄바꿈>2줄" 처럼 raw 개행을 넣으면 JSON.parse 가 "Bad control character" 로 터짐.
+ *   (특히 줄바꿈 지침 이후 발생.) 구조적 공백은 문자열 밖이라 건드리지 않는다.
+ */
+function escapeControlCharsInStrings(s: string): string {
+  let out = '';
+  let inStr = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]!;
+    if (inStr) {
+      if (c === '\\') { out += c + (s[i + 1] ?? ''); i++; continue; } // 이스케이프 쌍 보존
+      if (c === '"') { inStr = false; out += c; continue; }
+      const code = s.charCodeAt(i);
+      if (code < 0x20) { out += '\\u' + code.toString(16).padStart(4, '0'); continue; }
+      out += c;
+    } else {
+      if (c === '"') inStr = true;
+      out += c;
+    }
+  }
+  return out;
+}
+
 function extractJson(raw: string): unknown {
   const stripped = raw
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```\s*$/i, '')
     .replace(/:\s*undefined\b/g, ': null')
     .trim();
-  try {
-    return JSON.parse(stripped);
-  } catch {
-    const start = stripped.indexOf('{');
-    const end = stripped.lastIndexOf('}');
-    if (start === -1 || end === -1 || end < start) {
-      throw new Error(`no JSON object in LLM response: ${stripped.slice(0, 200)}`);
-    }
-    return JSON.parse(stripped.slice(start, end + 1));
+  const start = stripped.indexOf('{');
+  const end = stripped.lastIndexOf('}');
+  const candidates = [stripped];
+  if (start !== -1 && end !== -1 && end > start) candidates.push(stripped.slice(start, end + 1));
+  for (const c of candidates) {
+    try { return JSON.parse(c); } catch { /* try next */ }
+    try { return JSON.parse(escapeControlCharsInStrings(c)); } catch { /* try next */ }
   }
+  throw new Error(`no JSON object in LLM response: ${stripped.slice(0, 200)}`);
 }
 
 export function buildReply(deeplinkUrl: string | undefined): string {
