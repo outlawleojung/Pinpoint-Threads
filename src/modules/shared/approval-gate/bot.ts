@@ -563,6 +563,52 @@ bot.on('message:text', async (ctx, next) => {
     return;
   }
 
+  // 방식 0.5: "발행 {소스URL} | {카피 방향} | {커머스 링크(선택)}" → 커스텀 발행
+  //   사용자가 카피 방향을 직접 지정하는 유일한 경로. 소스 미디어 + 방향대로 본문 + 커머스 링크는
+  //   파트너스 딥링크 자동 변환해 고정댓글(+공정위). 커머스 없으면 순수 본문(일상형).
+  if (/^\s*발행(?=[\s:：]|$)/.test(text)) {
+    const commerceUrl = urls.find((u) => isCommerceUrl(u));
+    const sourceUrl = urls.find((u) => !isCommerceUrl(u));
+    if (!sourceUrl) {
+      await ctx.reply('⚠️ 소스 URL(스레드/IG 등)이 없어요.\n예: 발행 https://www.threads.com/... | 아이폰 칭찬하면서 갤럭시도 좋다는 논쟁 유발 | https://link.coupang.com/a/...');
+      return;
+    }
+    // 방향 = "발행" 태그·모든 URL·비디오플래그·구분자(|) 제거한 나머지 텍스트
+    const direction = stripVideoFlag(
+      text
+        .replace(/^\s*발행[\s:：]*/, '')
+        .replace(/https?:\/\/\S+/g, '')
+        .replace(/\|/g, ' ')
+        .trim(),
+    ).trim();
+    if (direction.length < 2) {
+      await ctx.reply('⚠️ 원하는 카피 방향을 같이 적어주세요.\n예: 발행 {URL} | 아이폰 인정하면서 갤럭시도 좋다는 식으로 논쟁 유발 | {쿠팡링크}');
+      return;
+    }
+    await ctx.reply(`🖊 커스텀 발행 생성 중… ${commerceUrl ? '(커머스 링크 딥링크 변환 포함) ' : ''}(실발행 아님, 승인해야 나감)`);
+    try {
+      const { runCustomPublish } = await import('../../pipeline-a/custom-publish.js');
+      const acc = commerceUrl ? await pickLeastUsedAccount(null) : await pickLeastUsedDailyAccount();
+      if (!acc) { await ctx.reply('⚠️ 발행 가능한 계정 없음'); return; }
+      const outcome = await runCustomPublish({
+        accountId: acc.id,
+        sourceUrl,
+        direction,
+        commerceUrl,
+        hasVideo: detectVideoFlag(text),
+      });
+      if (outcome.status === 'PENDING_APPROVAL') {
+        await ctx.reply(`✅ [${acc.handle}] 커스텀 발행 카드 확인 (틀리면 리젝)`);
+      } else {
+        await ctx.reply(`❌ [${acc.handle}] 실패: ${outcome.stage} · ${outcome.reason}`);
+      }
+    } catch (err) {
+      logger.error({ err }, '커스텀 발행 처리 실패');
+      await ctx.reply(`❌ 처리 실패: ${(err as Error).message}`);
+    }
+    return;
+  }
+
   // 방식 1: "코드 URL" 또는 "코드 상품명" 일반 메시지 (텔레그램 링크 차단 회피 · 권장)
   //   예: "4UNB https://link.coupang.com/a/..."  또는  "4UNB 팍스홈 쿠션양말 페이크삭스"
   //   URL 없어도 처리하므로 urls.length 게이트보다 먼저 검사.

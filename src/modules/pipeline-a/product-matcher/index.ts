@@ -92,14 +92,17 @@ export async function matchProduct(input: MatchInput): Promise<MatchOutcome> {
   if (keyword !== input.searchKeyword) {
     logger.info({ original: input.searchKeyword.slice(0, 80), compacted: keyword }, 'search keyword compacted (>50자)');
   }
+  // trustKeyword: 코드·단위 노이즈(OAP97A4S·2.5·g) 제거 후 검색 — 쿠팡 관련도↑. broaden 도 정제된 토큰 기준으로.
+  //   (유사도 판정엔 원본 input.searchKeyword 유지.)
+  if (input.trustKeyword) keyword = stripSearchNoise(keyword);
   let attempts = 0;
 
   for (attempts = 1; attempts <= maxAttempts; attempts++) {
     let candidates: CommerceSearchResult[];
     try {
-      // trustKeyword(수동 상품명): Vision 안 쓰므로 3개. 자동 매칭: Vision 이 올바른 색/변형을
-      // 고르려면 후보에 그 변형이 있어야 함 → 6개로 넓혀 정확도↑ (색 포함 검색어와 결합).
-      const searchLimit = input.trustKeyword ? 3 : 6;
+      // trustKeyword(수동 상품명): 브랜드 상품이 top 밖에 밀리는 경우가 있어 넓게(10개) 본 뒤
+      //   이름 유사도+브랜드/품목 게이트로 정확히 고른다. 자동 매칭: 6개.
+      const searchLimit = input.trustKeyword ? 10 : 6;
       candidates = await primary.search(keyword, { limit: searchLimit });
     } catch (err) {
       logger.error({ err, attempts, channel: primary.channel }, 'product search failed');
@@ -114,14 +117,28 @@ export async function matchProduct(input: MatchInput): Promise<MatchOutcome> {
     // 상품명을 사용자가 지정한 경우(trustKeyword): Vision 스킵 · 검색어와 **이름이 가장 비슷한 후보** 선택.
     // coupang 이 top 을 항상 정확히 주지 않으므로 (예: "팍스홈" 검색에 "어썸H" 를 top 으로) 문자열 유사도로 재정렬.
     if (input.trustKeyword) {
-      const { candidate: best, hits, tokenCount } = pickByNameSimilarity(input.searchKeyword, candidates);
-      // 0 토큰 겹침 = 검색어의 어떤 단어도 후보 이름에 없음 → 쿠팡이 엉뚱한 상품만 반환한 것.
-      // (예: "동영상 없음" → 산업기사 교재, 상품명 오추출 시). candidates[0] 을 신뢰하면 오발행 → 폐기.
-      if (hits === 0) {
+      // 브랜드(사용자 상품명 첫 실단어)를 담은 후보가 있으면 그 안에서만 고른다.
+      //   "무인양품 립스틱" 검색에 "아미옥 …오클린베이지"가 섞여 들어와도, "베이지"(색상) 같은
+      //   흔한 단어로 다른 브랜드가 뽑히는 걸 막는다. 브랜드 후보 없으면 전체에서.
+      const meaningful = stripSearchNoise(input.searchKeyword).split(/\s+/).filter((t) => t.length >= 2);
+      const brand = meaningful[0];
+      const brandPool = brand ? candidates.filter((c) => (c.productName ?? '').includes(brand)) : [];
+      const pool = brandPool.length > 0 ? brandPool : candidates;
+      const { candidate: best, hits, tokenCount } = pickByNameSimilarity(input.searchKeyword, pool);
+      const bestName = best.productName ?? '';
+      // 폐기 조건: 0 토큰 겹침, 또는 **브랜드가 매칭 상품에 없음**(색상 같은 부수 단어 하나로 통과한
+      //   다른 브랜드 오매칭). 상품명을 명시했는데 브랜드가 안 맞으면 게시 계정에 다른 브랜드가 나감.
+      //   폐기여도 즉시 포기 X — 키워드를 줄여 재검색(브랜드 상품이 top 밖에 밀린 경우 구제).
+      const brandPresent = Boolean(brand && bestName.includes(brand));
+      if (hits === 0 || !brandPresent) {
         logger.warn(
-          { keyword: input.searchKeyword, candidates: candidates.map((c) => c.productName) },
-          'trustKeyword: 0 토큰 겹침 — 오매칭 의심 → 폐기',
+          { keyword, matched: bestName, hits, brand, brandPresent, attempts },
+          'trustKeyword: 브랜드 불일치 — 키워드 축소 재시도',
         );
+        if (attempts < maxAttempts && keyword.split(/\s+/).length > 1) {
+          keyword = broadenKeyword(keyword);
+          continue;
+        }
         return { success: false, reason: 'no-candidates', attempts };
       }
       let deeplinkUrl: string;
@@ -203,6 +220,22 @@ function pickByNameSimilarity(
     }
   }
   return { candidate: best, hits: Math.max(0, bestScore), tokenCount: kwTokens.length };
+}
+
+/**
+ * 검색어에서 쿠팡 관련도를 망치는 노이즈 토큰 제거 — 상품코드(OAP97A4S·IF6184·TFI-80053),
+ * 순수 숫자·용량(2.5), 단위(g·ml·kg). 브랜드·품목·색상 같은 실단어만 남긴다.
+ * (유사도 판정엔 원본을 쓰므로 여기선 '검색 쿼리'만 정제.)
+ */
+function stripSearchNoise(keyword: string): string {
+  const tokens = keyword.split(/\s+/).filter(Boolean);
+  const kept = tokens.filter((t) => {
+    if (/^\d+(?:[.,]\d+)?$/.test(t)) return false; // 순수 숫자·용량 "2.5"
+    if (/^(?:g|kg|mg|ml|l|oz|cm|mm)$/i.test(t)) return false; // 단위
+    if (t.length >= 4 && /[A-Za-z]/.test(t) && /\d/.test(t)) return false; // SKU 코드 (영문+숫자 혼합)
+    return true;
+  });
+  return kept.length >= 1 ? kept.join(' ') : keyword;
 }
 
 function broadenKeyword(keyword: string): string {

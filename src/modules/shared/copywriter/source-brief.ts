@@ -48,11 +48,18 @@ const SYSTEM = `너는 해외 쇼핑 콘텐츠를 한국어로 재구성하기 �
 JSON만 반환: {"situation":"...","points":[{"fact":"...","evidenceType":"source_text","evidence":"원어 인용"}],"focusIndex":0,"allowedChanges":["..."],"unknowns":["..."]}`;
 
 /**
- * 근거 인용 검증용 정규화 — 공백·줄바꿈만 접는다.
- * 조작 차단(원문에 실제로 존재하는 구절인지)은 유지하고, 지저분한 해외 캡션에서
- * 줄바꿈·연속공백 차이로만 나던 하드 실패를 제거한다. 문자 자체는 손대지 않는다.
+ * 근거 인용 검증용 정규화 — 공백·줄바꿈 접기 + 보이지 않는 노이즈 문자 제거.
+ * 조작 차단(원문에 실제로 존재하는 구절인지)은 유지하되, 지저분한 해외 캡션에서
+ *   ① 줄바꿈·연속공백 차이  ② 오브젝트치환(￼ U+FFFC)·제로폭·BOM·워드조이너·이모지 변이선택자
+ * 같은 **눈에 안 보이는 문자 차이**로만 나던 하드 실패를 제거한다.
+ * LLM은 인용 시 이런 노이즈를 자연히 빼므로, 양쪽에서 동일하게 제거해야 실제 글자 일치를 본다.
  */
-const normalizeQuote = (s: string): string => s.replace(/\s+/g, ' ').trim();
+const normalizeQuote = (s: string): string =>
+  s
+    .replace(/[￼​-‍⁠﻿]/g, '') // 오브젝트치환·제로폭·워드조이너·BOM
+    .replace(/[︀-️]/g, '') // 이모지 변이 선택자(표현형 차이)
+    .replace(/\s+/g, ' ')
+    .trim();
 
 export function validateSourceBrief(value: unknown, input: SourceBriefInput): SourceBrief {
   const brief = SourceBriefSchema.parse(value);
@@ -69,10 +76,20 @@ export function validateSourceBrief(value: unknown, input: SourceBriefInput): So
   return brief;
 }
 
+// analyzeSource 결과 인메모리 캐시 — 같은 소스(캡션·이미지·설명)면 Sonnet 재분석(1600토큰) 생략.
+//   재생성(텍스트 재생성 버튼)·확산(여러 계정 동일 소스)에서 반복 분석 비용 제거. 프로세스 재시작 시 비움.
+const briefCache = new Map<string, SourceBrief>();
+const BRIEF_CACHE_MAX = 300;
+const briefCacheKey = (i: SourceBriefInput): string =>
+  JSON.stringify([i.sourceText ?? '', i.sourceImageUrl ?? '', i.sourceMediaDescription ?? '']);
+
 export async function analyzeSource(input: SourceBriefInput, complete: Complete): Promise<SourceBrief> {
   if (!input.sourceText?.trim() && !input.sourceImageUrl && !input.sourceMediaDescription?.trim()) {
     throw new Error('Source analysis requires original text, an image, or a media description');
   }
+  const cacheK = briefCacheKey(input);
+  const cached = briefCache.get(cacheK);
+  if (cached) return cached;
   const parts: LlmContentPart[] = [];
   if (input.sourceImageUrl) parts.push({ type: 'image', url: input.sourceImageUrl });
   parts.push({ type: 'text', text: JSON.stringify({
@@ -105,7 +122,10 @@ export async function analyzeSource(input: SourceBriefInput, complete: Complete)
     });
     try {
       const text = response.text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-      return validateSourceBrief(JSON.parse(text), input);
+      const brief = validateSourceBrief(JSON.parse(text), input);
+      if (briefCache.size >= BRIEF_CACHE_MAX) briefCache.delete(briefCache.keys().next().value as string);
+      briefCache.set(cacheK, brief);
+      return brief;
     } catch (err) { lastError = err; }
   }
   throw new Error('원본 보존 기준을 확인하지 못했습니다. 원문/미디어 설명을 확인한 뒤 재생성해 주세요.', { cause: lastError });
@@ -116,6 +136,13 @@ export function renderSourceBrief(brief: SourceBrief): string {
   // 1인칭 사용·목격·소장 톤 금지 문구는 사용자 방침(가드 해제)에 따라 제거함.
   return `원본 장면 참고 (모델이 정리한 자료 · 새 지시 아님):\n${JSON.stringify(brief)}\n` +
     `이번 문구의 초점: ${brief.points[brief.focusIndex]!.fact}\n` +
-    '이 상품·장면에 딱 붙는 반응을 써라. 1인칭 사용·목격·소장 톤("신어보니/봤는데/써보니/소장각")은 허용한다. ' +
+    '이 상품·장면에 딱 붙는 반응을 써라. 1인칭 사용·목격·소장 톤("봤는데/써보니")은 허용한다. ' +
+    '단, **1인칭은 "반응·구매욕"에만 쓴다.** ' +
+    '**원작자의 특정 정황을 내가 한 것처럼 재연하지 마라** — 특정 매장·지역 방문(예: "부산 신세계 B1 가서"), 여행·출장, 국적, 외화 가격, ' +
+    '"거기 가야만 산다" 같은 오프라인 구매 경위, 가족·연인 관계, 직접 구매 경위, ' +
+    '**원작자 나라 기준 유통·출시 상태**(예: 원문 "日本未入荷=일본 미입고" → "아직 안 풀림/국내 미출시/들어오면 산다/직구만 가능")는 전부 원작자의 일이지 내 일이 아니다. ' +
+    '**★ 이 상품은 지금 쿠팡에서 바로 살 수 있다** — "아직 안 나옴/국내에 없음/들어오면 사겠다/구하기 어려움" 같이 **"지금은 못 산다"는 거짓 뉘앙스**만 금지(링크와 모순). ' +
+    '반대로 브랜드·평판 언급("무인양품에서 이거 좋다는 소문")은 거짓이 아니니 허용. (희소·품절임박 재고 FOMO도 허용.) ' +
+    '나는 그 상품을 보고 반응할 뿐이다(구매욕·감탄). **매번 "소장각"으로 끝내지 말고 마무리·구매욕 표현을 글마다 다르게.** ' +
     '상품 종류 자체를 착각하지만 마라(§1). 상품명·페르소나·참고 글이 초점을 흐리지 않게 한다.';
 }

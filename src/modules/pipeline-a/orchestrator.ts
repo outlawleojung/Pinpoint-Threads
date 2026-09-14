@@ -217,10 +217,18 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
 
   // 10. Copywriter
   logger.info({ postId: post.id }, 'pipeline-a: copywriting');
+  // ★ 이미지 서술 방지 (사용자 반복 지시): 원문 캡션이 있으면 카피 생성엔 이미지를 넘기지 않는다.
+  //   이미지를 넘기면 소스 브리프가 '흰/검 클로그·주름 앞코' 같은 이미지 서술 포인트를 만들고 focus까지
+  //   거기로 쏠려서, 원문의 뜻(예: 커플템·저렴)이 사라지고 이미지 묘사가 본문이 된다.
+  //   이미지는 상품 매칭(비전, 위 matchProduct)에만 쓰고, 카피는 캡션의 뜻으로 쓴다.
+  //   캡션이 아예 없을 때만(이미지가 유일한 소스) 이미지를 넘긴다.
+  const hasSourceCaption = Boolean(input.sourceText?.trim());
+  const imageForCopy = hasSourceCaption
+    ? undefined
+    : (uploadedImageForVision && !isVideoUrl(uploadedImageForVision) ? uploadedImageForVision : undefined);
   const copy = await generateCopy({
     sourceText: input.sourceText,
-    // 영구 Cloudinary 이미지 사용 (원본 만료 무관 · 없으면 undefined → 텍스트만)
-    sourceImageUrl: uploadedImageForVision && !isVideoUrl(uploadedImageForVision) ? uploadedImageForVision : undefined,
+    sourceImageUrl: imageForCopy,
     productName: matched.result.product.productName,
     productCategory: matched.result.product.category ?? classified.category,
     accountSeed: account.id,

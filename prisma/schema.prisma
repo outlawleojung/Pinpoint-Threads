@@ -129,6 +129,7 @@ model Post {
 
   generatedBody       String?           @db.Text
   generatedReply      String?           @db.Text
+  sourceBrief         Json?             // analyzeSource 결과 캐시 필드(옵셔널). 클라이언트-DB 일치 위해 유지.
   mediaUrl            String?           // deprecated; use mediaUrls
   mediaUrls           String[]          // Cloudinary 업로드 결과 공개 URL 목록
   sourceMediaUrls     String[]          // 원본 소스 미디어 URL 목록 (참고용)
