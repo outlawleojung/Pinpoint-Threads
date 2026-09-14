@@ -37,44 +37,23 @@ interface HookDef {
   label: string;
   query: string;
   ageOK: AgeBucket[];
+  /** true인 훅만 프롬프트에 현재 팔로워 숫자를 노출(마일스톤 언급용). 나머지는 숫자 없이 순수 에너지로. */
+  milestone?: boolean;
 }
 
+const ALL_AGES: AgeBucket[] = ['fresh_under_7d', 'young_under_30d', 'settled_1to3m', 'mature_3m_plus', 'unknown'];
+
+// ★ 실제 고참여 스하리 글(댓글 400~900)의 훅 패턴을 반영. 공통점 = "에너지 + 매번 다른 각도".
+//   밍밍한 잡담 X · 신상(직업·자녀 등) 노출 X · 하지만 스하리 특유의 텐션은 그대로. 회전해서 매일 다른 훅.
+//   ★ 숫자(마일스톤)는 milestone 훅에서만 — 안 그러면 전 계정이 "N 넘고싶어"로 또 수렴(숫자만 바뀜).
 const HOOK_QUERIES: HookDef[] = [
-  {
-    label: '진행형',
-    query: '스하리 계속 진행 중 몇 달째 소통 요청',
-    ageOK: ['fresh_under_7d', 'young_under_30d', 'settled_1to3m', 'mature_3m_plus', 'unknown'],
-  },
-  {
-    label: '모집형',
-    query: '혼자 하기 힘들어서 같이 할 사람 찾아요 리포 맞팔',
-    ageOK: ['fresh_under_7d', 'young_under_30d', 'settled_1to3m', 'mature_3m_plus', 'unknown'],
-  },
-  {
-    label: '질문형·자기폭로',
-    query: '아직 스친 없어? 그게 나야 못 채운',
-    ageOK: ['fresh_under_7d', 'young_under_30d', 'settled_1to3m', 'mature_3m_plus', 'unknown'],
-  },
-  {
-    label: '겸손 목표형',
-    query: '100명이라도 좋겠다 욕심 안 부림 천천히',
-    ageOK: ['fresh_under_7d', 'young_under_30d', 'settled_1to3m', 'mature_3m_plus', 'unknown'],
-  },
-  {
-    label: 'N일차 (초기)',
-    query: '스하리 프로젝트 2일차 3일차 시작한 지 얼마 안 됨',
-    ageOK: ['fresh_under_7d', 'young_under_30d'], // 실제 최근 시작한 계정만
-  },
-  {
-    label: '발견·감탄형',
-    query: '방금 시작했는데 이 태그 신기하다 처음 알았음',
-    ageOK: ['fresh_under_7d', 'young_under_30d'], // 이제 막 알았다는 뉘앙스 · fresh only
-  },
-  {
-    label: '오래 하는 중',
-    query: '몇 달째 꾸준히 하는데 아직 여기 정체 중',
-    ageOK: ['settled_1to3m', 'mature_3m_plus'], // 오래 됐다는 뉘앙스 · mature only
-  },
+  { label: '마일스톤 긴박', query: '몇 명만 더 하면 목표 오늘 넘고 싶어 도와줘', ageOK: ALL_AGES, milestone: true },
+  { label: '하이에너지 달리기', query: '스하리 달리자 반하리 1분컷 자동발사 바로 갈게', ageOK: ALL_AGES },
+  { label: '같이 성장·떡상', query: '천명 안 된 사람 같이 커요 리포 성장 떡상시키자', ageOK: ALL_AGES },
+  { label: '탑승 하이프', query: '지금 탑승하면 무한 쓰팔 알고리즘 타자', ageOK: ALL_AGES },
+  { label: '초대·리액션약속', query: '스하리 하면 바로 반하리 갈게 눈도장 찍자 환영', ageOK: ALL_AGES },
+  { label: '솔직·자조', query: '반하리 생각보다 안 와서 속상한데 그래도 달린다', ageOK: ALL_AGES },
+  { label: '새싹 시작', query: '스레드 이제 막 시작 서툴지만 소통하고 싶어', ageOK: ['fresh_under_7d', 'young_under_30d'] },
 ];
 
 /** 본문 blacklist. 노출 시 재생성. */
@@ -136,28 +115,24 @@ const SYSTEM_PROMPT = `너는 한국 Threads "스하리1000명프로젝트" 해�
 - 존댓말 X (스레드 반말 기본).
 - 신상(자녀·직업·나이·구체 취미) 노출 절대 X.
 
-⚠️⚠️ 반복 금지 (제일 중요 · 최근 우리 글이 다 똑같음):
-최근 5계정 글이 전부 **"오래 굴린 계정인데 + 지금 N명 + 같이 갈 스친 구해 + 뒷삭 없이 반하리 확실"** 하나의 틀로만 나왔다. 숫자만 바뀜. 이 틀을 완전히 버려라.
-- **계정 나이("오래 굴린/붙잡은/굴려온 계정") 언급 대부분 생략.** 매번 계정이 오래됐다고 하지 마라.
-- **팔로워 숫자(100/200/300/500/1000) 대부분 생략.** 숫자는 어쩌다 한 번만. 대부분 글은 숫자 없이 써라.
-- **"뒷삭 없이 반하리 확실" 류 상투적 꼬리말 매번 붙이지 마라.** 붙일 거면 표현을 매번 완전히 바꿔라.
-- **각 글은 다른 각도·기분으로:** 어떤 건 그냥 소통하고 싶은 가벼운 한마디, 어떤 건 질문, 어떤 건 소소한 일상 감정(신상 노출 X · 날씨·기분·시간대 정도), 어떤 건 유머, 어떤 건 담백한 모집. **모집 공고문처럼만 쓰지 마.**
+⚠️⚠️ 핵심 (밍밍함 금지 + 반복 금지):
+실제로 터지는 스하리 글(댓글 수백)은 **에너지·텐션·확신**이 있다. 예: "스하리 달리자 나 1분컷", "N명만 남았어 오늘 넘고 싶어 도와줄래🥹", "지금 탑승 무한 쓰팔🔥", "천명 안 된 사람 같이 커요 리포=성장", "반하리 자동발사".
+- **밍밍한 잡담 금지.** "밤에 스레드 켜면 마음 편해지네" 같은 알맹이 없는 감성글은 반응이 안 온다. 스하리는 **텐션 있는 소통·성장 콜**이다.
+- 숫자·마일스톤·"달리자/떡상/쓰팔/반하리" 같은 스하리 어휘는 **에너지 살릴 때 적극 써도 됨** (원래 이게 스하리 문화다).
+- **다만 매번 똑같은 틀은 금지:** "오래 굴린 계정 + N명 + 같이 갈 스친 구해 + 뒷삭 없이 반하리 확실" 이 조합 반복 X. 훅마다 완전히 다른 각도(긴박/하이에너지/같이성장/탑승하이프/초대/자조)로.
+- **"뒷삭 없이 반하리 확실"·"몇 달째 아직 N도 못 채움" 상투구 반복 금지.** 붙일 거면 표현을 매번 완전히 바꿔라.
+- 계정 나이·숫자는 실 상황(아래)과 맞을 때만. "스린이·N일차"=7일 미만, "몇 달째"=3개월+ 계정만.
 
-⚠️ 팔로워·나이는 "넣을 때만" 규칙 (대부분 생략이 기본):
-- 넣는다면 실 계정 상황(아래)과 맞는 구간 표현만. "스린이·N일차"는 7일 미만, "몇 달째·오래"는 3개월+ 계정만. 안 맞으면 아예 언급 마.
-- "몇 달째 하는데 아직 N도 못 채움" · "팔로워 늘리는 거 어렵네" 계열 오프너 절대 금지 (이미 다 같은 카피 만들어냄).
-
-훅 유형별 오프너 예시 (참고 · 숫자·계정나이에 기대지 말 것):
-- 일상·기분형: "오늘따라 스레드 조용하네, 나만 그런가" · "비 오니까 괜히 소통하고 싶은 날" (신상 노출 X)
-- 질문형: "요즘 스친 새로 사귀는 사람 있어? 나 여기 있음 🙋" 처럼 질문 던지고 슬쩍 초대
-- 유머·자폭형: "스하리 하겠다고 이 시간에 안 자는 나… 제정신 아님ㅋㅋ" 처럼 웃긴 자기폭로
-- 담백 모집형: "말 걸어줄 스친 환영, 조용히 왔다 가지 말구요" 처럼 부담 없는 콜
-- 발견·감탄형: "이 태그 도는 사람들 다 다정하네 신기해" 처럼 발견 뉘앙스
-- 진행형(가끔): 계정이 실제로 오래됐고 다른 각도가 없을 때만, 숫자 없이 "천천히 오래 하는 중" 정도
+훅 유형별 예시 (에너지 살려서 · 매번 다른 각도):
+- 마일스톤 긴박: "진짜 얼마 안 남았어 오늘 넘고 싶은데 스하리 달려줄 사람🥹🙌"
+- 하이에너지 달리기: "스하리 달리자 나 반하리 1분컷 자동발사임ㅋㅋ 바로 갈게"
+- 같이 성장·떡상: "천명 안 된 사람 손🙌 리포 눌러주면 같이 떡상하는 거임 서로 키워주자"
+- 탑승 하이프: "지금 타면 주말 내내 무한 쓰팔🔥 알고리즘 같이 타보자"
+- 초대·리액션약속: "스하리 하면 바로 반하리 갈게, 조용히 눈팅만 말고 하트라도 콕"
+- 솔직·자조: "반하리 생각보다 안 와서 살짝 속상ㅋㅋ 그래도 오늘도 달린다 같이 달릴 사람"
 
 ⚠️ 훅 유형 강제:
-사용자 프롬프트에 "이번 variant 훅 유형" 지시가 들어감. **그 훅 유형 그대로 살려서 각색해라.**
-벤치마크의 훅 개성(N일차·질문형·모집형·겸손형·발견형)을 반드시 재현.
+사용자 프롬프트에 "이번 variant 훅 유형" 지시가 들어감. **그 훅 유형의 에너지·각도 그대로 살려서** 실제 벤치마크 텐션을 흡수해 각색해라.
 
 톤:
 - 짧고 리드미컬. 2~4줄, 40~150자 (해시태그 포함 200자 이내).
@@ -170,7 +145,7 @@ JSON만. { "body": "여기에 본문 + 마지막 줄 해시태그" }`;
 
 async function generateOne(
   context: AccountContext,
-  hook: { label: string; query: string },
+  hook: { label: string; query: string; milestone?: boolean },
   benchmarks: SimilarBenchmark[],
   variantIndex: number,
   recentBodies: string[] = [],
@@ -191,12 +166,20 @@ async function generateOne(
     : `${context.accountAgeDays}일 (${context.accountAgeBucket})`;
 
   const userPrompt = [
-    '== 참고: 이 계정 상황 (숫자·나이는 대부분 글에 넣지 마 · 넣을 때만 사실과 맞게) ==',
-    `- (필요시만) 팔로워 구간: ${context.followerBucket} · 계정 나이: ${ageLabel}`,
-    `  ※ 이 글엔 숫자·계정나이 언급 없이 다른 각도로 쓰는 걸 기본으로 한다. 숫자를 쓰면 위 구간과만 맞춰라.`,
+    ...(hook.milestone
+      ? [
+          '== 참고: 이 계정 상황 (이 훅은 마일스톤 언급 OK · 실 구간과 맞게) ==',
+          `- 팔로워 구간: ${context.followerBucket} · 계정 나이: ${ageLabel}`,
+          `  ※ 숫자·"몇 달째/N일차"는 위 구간과 맞는 것만.`,
+        ]
+      : [
+          '== 참고: 이 훅은 **숫자·마일스톤 쓰지 마** ==',
+          `  ※ "N 넘고 싶어/몇 명 남았어" 류 숫자 목표 금지. 숫자 없이 순수 에너지·초대·리액션·자조로. (전 계정이 "N 넘고싶어"로 수렴하는 것 방지)`,
+        ]),
     '',
     `== 이번 variant 훅 유형: ${hook.label} ==`,
-    `이 유형의 개성을 살려서 각색해라. 숫자·"오래된 계정"에 기대지 말고 이 각도로.`,
+    `이 유형의 에너지·각도를 살려서 각색해라. **아래 실제 고참여 스하리 벤치마크의 텐션·표현을 적극 흡수**하되(밍밍한 잡담 금지), 그 각도로 새 문장을 써라.`,
+    `단 매번 같은 오프너·같은 상투구("몇 달째 아직 N도 못 채움", "뒷삭 없이 반하리 확실")는 반복 금지 — 훅마다 완전히 다른 각도.`,
     '',
     ...(learnings.factors.length > 0
       ? [
@@ -253,6 +236,11 @@ async function generateOne(
   const patHit = FORBIDDEN_PATTERNS.find((p) => p.re.test(cleaned));
   if (patHit) throw new SharingBlacklistError(patHit.label, cleaned, true); // 템플릿 패턴 = 소프트
 
+  // 비마일스톤 훅인데 "N 넘고싶어/몇 명 남았어" 숫자 목표가 새면 소프트 재시도 (전 계정 숫자 수렴 방지).
+  if (!hook.milestone && /\d{2,4}\s*(명|넘|찍|까지|앞두|근처|언저리)/.test(cleaned)) {
+    throw new SharingBlacklistError('비마일스톤-숫자목표누출', cleaned, true);
+  }
+
   return cleaned;
 }
 
@@ -266,7 +254,7 @@ export class SharingBlacklistError extends Error {
 const MAX_RETRY = 2;
 async function generateOneWithRetry(
   context: AccountContext,
-  hook: { label: string; query: string },
+  hook: { label: string; query: string; milestone?: boolean },
   benchmarks: SimilarBenchmark[],
   variantIndex: number,
   recentBodies: string[] = [],

@@ -89,33 +89,46 @@ export async function sendApprovalRequest(postId: string): Promise<void> {
     return out;
   };
 
-  if (mediaUrls.length >= 2) {
-    // Media group: 각 항목별 video/photo 타입 지정 · 확장자 보정
-    const group = mediaUrls.slice(0, 10).map((url, i) => ({
+  // ★ 미디어 프리뷰는 '보조'다. 텔레그램이 특정 URL(예: 쿠팡 CDN 상품썸네일 — 외부 핫링크 차단으로
+  //   WEBPAGE_CURL_FAILED 자주 남)을 못 가져오면 그룹 전체가 400으로 실패한다. 그게 승인 카드 자체를
+  //   못 나가게 하면 안 된다(실 발행 미디어는 post.mediaUrls 로 따로 나감). → 프리뷰 실패는 삼키고
+  //   버튼 카드는 반드시 보낸다. 단계적 폴백: 전체 → 상품썸네일 제외 → 첫 이미지 1장 → 텍스트만.
+  const sendGroup = async (urls: string[]): Promise<boolean> => {
+    if (urls.length < 2) return false;
+    const group = urls.slice(0, 10).map((url, i) => ({
       type: (isVideoUrl(url) ? 'video' : 'photo') as 'photo' | 'video',
       media: withTelegramSafe(url),
       caption: i === 0 ? caption : undefined,
     }));
-    const groupMessages = await bot.api.sendMediaGroup(env.TELEGRAM_ADMIN_CHAT_ID, group);
-    anchorMessageId = groupMessages[0]?.message_id ?? 0;
+    await bot.api.sendMediaGroup(env.TELEGRAM_ADMIN_CHAT_ID, group);
+    return true;
+  };
+  const sendSinglePhoto = async (url: string | undefined): Promise<boolean> => {
+    if (!url || isVideoUrl(url)) return false;
+    await bot.api.sendPhoto(env.TELEGRAM_ADMIN_CHAT_ID, withTelegramSafe(url), { caption });
+    return true;
+  };
 
-    await bot.api.sendMessage(
-      env.TELEGRAM_ADMIN_CHAT_ID,
-      `Post: ${post.id}\n승인 결정:`,
-      { reply_markup: keyboard },
-    );
-  } else if (mediaUrls.length === 1) {
-    const only = withTelegramSafe(mediaUrls[0]!);
-    const msg = isVideoUrl(only)
-      ? await bot.api.sendVideo(env.TELEGRAM_ADMIN_CHAT_ID, only, { caption, reply_markup: keyboard })
-      : await bot.api.sendPhoto(env.TELEGRAM_ADMIN_CHAT_ID, only, { caption, reply_markup: keyboard });
-    anchorMessageId = msg.message_id;
-  } else {
-    const msg = await bot.api.sendMessage(env.TELEGRAM_ADMIN_CHAT_ID, caption, {
-      reply_markup: keyboard,
-    });
-    anchorMessageId = msg.message_id;
+  let previewSent = false;
+  try {
+    previewSent = (await sendGroup(mediaUrls)) || (await sendSinglePhoto(mediaUrls[0]));
+  } catch (err) {
+    logger.warn({ err, postId }, '미디어 프리뷰 실패 → 외부 상품썸네일 빼고 재시도');
+    try {
+      previewSent = (await sendGroup(baseMediaUrls)) || (await sendSinglePhoto(baseMediaUrls[0]));
+    } catch (err2) {
+      logger.warn({ err2, postId }, '미디어 프리뷰 재시도도 실패 → 텍스트 카드로 대체');
+    }
   }
+
+  // 승인 버튼 카드는 항상 전송. 프리뷰가 나갔으면 결정만, 못 나갔으면 캡션까지 담아 보낸다.
+  const decisionText = previewSent
+    ? `Post: ${post.id}\n승인 결정:`
+    : `${caption}\n\n⚠️ 미디어 프리뷰 표시 실패(발행엔 영향 없음)\nPost: ${post.id}\n승인 결정:`;
+  const decisionMsg = await bot.api.sendMessage(env.TELEGRAM_ADMIN_CHAT_ID, decisionText, {
+    reply_markup: keyboard,
+  });
+  anchorMessageId = decisionMsg.message_id;
 
   await prisma.post.update({
     where: { id: post.id },
@@ -147,7 +160,10 @@ async function regenerateCopyAndResend(postId: string): Promise<void> {
   // Cloudinary 재호스팅된 mediaUrls(영구) 이미지를 우선, 없으면 원본 fallback.
   const uploadedImg = post.mediaUrls.find((u) => !isVideoUrl(u));
   const originalImg = post.sourceMediaUrls.find((u) => !isVideoUrl(u));
-  const sourceImageForCopy = uploadedImg ?? originalImg;
+  // ★ 원본 생성(orchestrator)과 동일하게: 캡션이 있으면 카피에 이미지를 넘기지 않는다.
+  //   (이미지 서술 방지 + analyzeSource 캐시키 일치로 재분석 생략 + Vision 비용 절감)
+  const hasCaption = Boolean(post.sourceItem?.rawText?.trim());
+  const sourceImageForCopy = hasCaption ? undefined : (uploadedImg ?? originalImg);
   const channel = post.commerceProduct.channel as 'COUPANG' | 'MUSINSA' | 'NAVER';
   const category = post.commerceProduct.category ?? undefined;
   const deeplinkUrl = post.commerceProduct.deeplinkUrl ?? undefined;

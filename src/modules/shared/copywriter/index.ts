@@ -135,23 +135,32 @@ export const UNIVERSAL_PRINCIPLES = `너는 원본 콘텐츠를 보고 한국 �
 - 미디어가 이미 보여주는 기능을 불필요하게 설명하고 있지는 않은가?
 - 다른 상품에 그대로 붙여도 통하는 막연한 감탄이면 원본의 구체적인 포인트를 다시 고른다.
 - "왜 이제 알았지" 같은 정형 마무리를 반복하지 않는다. 상품 칭찬보다 발견·행동·감정이 자연스럽게 느껴지는가?
+- **★ "소장각"으로 매번 끝내지 마라.** 특정 마무리 한 단어("소장각"·"소장 욕구")를 글마다 반복하면 티 난다. 마무리·구매욕 표현을 매번 다르게: "이건 사야 됨"·"지갑 위험"·"장바구니 직행"·"눈 돌아감"·"못 참겠다"·"영업 제대로 당함"·"품절 전에 잡아야"·"이런 건 못 지나치지"·"갖고 싶다 진심" 등 각도·어휘를 계정/상품마다 바꾼다.
 
 금지 어휘 (광고 냄새 100% · 강사 GPT 정본):
 - 직접 구매유도: 지금 바로 구매, 사러가기, 구매 링크, 할인 중, 최저가, 선착순, 강추/강력 추천.
 - 진부한 찬사·스펙: 최고의 제품, 완벽한, 압도적, 필수 아이템, 고성능, OO% 함유, 특허, 가성비/혜자.
 - 설명조 종결어미: "~에 좋습니다 / ~해보세요 / ~을 자랑합니다 / ~에 효과적입니다" (상세페이지 말투 = 스크롤 넘김).
 - **허용(오히려 권장): 미쳤네/미쳤나, 실화?, 사고 쳤네, 소름, 대박, 진심, 종결, 원탑 템, 갓템, 소장각/소장 욕구, 장난 아님, ㄷㄷ, 순삭.** 반응 강하면 절제 말고 그대로.
+- **독자를 부를 땐 "님들"보다 "스친들"**(스레드 친구)을 쓴다. (질문·의견 유도 시: "스친들은 어때?", "스친들 뭐 골라?")
 
 **개인정보·가족·직업 노출 절대 금지**:
 - 자녀·아이·아기·학부모·육아·유치원·학교 관련 언급 X
 - **특정 직업·직종 식별** (간호사·교사·나이트 근무·3교대·야간 근무·워킹맘 등) X
 - 결혼·남편·아내·시댁·친정 언급 X
 - 나이·연령대 (30대·40대 등) 명시 X
+- **★ 원본이 커플·연인·부부 소재여도 그 관계를 게시자 '나'로 옮기지 마라.** "남편이랑/애인이랑 하나씩" 처럼 내 배우자·연인으로 투영 금지. **'커플이 맞춰 신는' 처럼 3인칭 관찰**로만 쓰고, 나는 "나도 하나 갖고 싶다"/"이건 사야겠다" 정도의 구매욕만 표현.
 - **일반 사회 상황은 OK**: 회식·외식·출근·퇴근·모임·여행 등 누구나 겪는 상황은 허용.
 - **페르소나에 그런 배경이 있어도 신상은 감춘다.** 톤만 반영 · 상품 경험 중심.
 
+줄바꿈(가독성):
+- 한두 줄 짜리 짧은 카피는 그대로 한 덩어리로.
+- **문장이 길면(3문장 이상 등) 한두 줄씩 묶고 그룹 사이에 빈 줄(\\n\\n)을 넣어** 읽기 쉽게 나눈다.
+  한 줄로 죽 이어 쓰지 말 것. 예: "…인정ㅋㅋ\\n\\n근데 갤폴드도…위 아님?\\n\\n이건 취향 싸움…어디 손?"
+- 억지로 자르지 말고 의미 단위(감탄→반전→질문 등)로 자연스럽게 끊는다.
+
 출력 포맷:
-JSON으로만 반환. 다른 텍스트 금지.
+JSON으로만 반환. 다른 텍스트 금지. 본문 안의 줄바꿈은 \\n 으로.
 { "body": "여기에 본문 문장" }`;
 
 function buildSystemPrompt(input: {
@@ -403,14 +412,22 @@ export async function factCheckCopy(args: {
 
 JSON으로만: { "ok": boolean, "reason": "짧게 어떤 오류인지 (ok=true면 빈 문자열)" }`;
 
+  // ★ 원문을 반드시 함께 준다. 없으면 검사기가 "원본에 없는 비교"인지 판단 불가 →
+  //   원문에 있는 소문·비교(예: "샤넬112 닮았다는 소문")를 지어낸 걸로 오판해 리젝한다.
+  const sourceCtx = args.sourceText?.trim()
+    ? `\n원본 캡션(이 안에 있는 사실·소문·타제품 비교는 근거 있음 → 카피가 이를 반영하면 지어낸 것 아님):\n"${args.sourceText.trim().slice(0, 500)}"`
+    : args.sourceBrief
+      ? `\n원본 상황(근거): ${args.sourceBrief.situation}`
+      : '';
   const user = `${args.productName ? `상품: ${args.productName}${args.productCategory ? ` (카테고리: ${args.productCategory})` : ''}` : '상품 없음 (일상글 · 개인정보·정책만 검사)'}
-카피: "${args.body}"
+카피: "${args.body}"${sourceCtx}
 
 판정 JSON:`;
 
   try {
     const res = await llm().complete({
-      tier: args.sourceBrief ? 'main' : 'fast',
+      // 팩트·정책 이진 검사 → Haiku(fast)로 충분. 원문을 함께 주므로 근거 판단도 가능(비용 절감).
+      tier: 'fast',
       system,
       userParts: [{ type: 'text', text: user }],
       maxOutputTokens: 350,
@@ -648,6 +665,82 @@ ${specialRules}`;
     body = await buildOnce(attempt + 1, check.reason);
   }
   return body;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 커스텀 발행 — 사용자가 텔레그램으로 "방향(브리프)"을 직접 지정한 글.
+//   소스(영상/캡션)는 맥락 참고, 사용자 방향이 최우선. 커머스 링크가 있으면 고정댓글 리드도 같이 생성.
+//   공통 원칙(voice·줄바꿈·스친들·사실 가드·정황 재연 금지)은 그대로 적용.
+// ─────────────────────────────────────────────────────────────────────────
+export interface CustomBodyInput {
+  direction: string; // 사용자가 준 카피 방향/원하는 내용
+  personaPrompt?: string;
+  accountSeed: string;
+  accountId: string;
+  sourceText?: string;
+  sourceImageUrl?: string;
+  sourceLanguage?: string | null;
+  withReplyLead?: boolean; // 커머스 링크 있을 때 고정댓글 리드도 생성
+}
+
+export async function generateCustomBody(
+  input: CustomBodyInput,
+): Promise<{ body: string; replyLead?: string }> {
+  const baseSystem = buildSystemPrompt({
+    personaPrompt: input.personaPrompt,
+    accountSeed: input.accountSeed,
+    variantIndex: 0,
+    sourceLanguage: input.sourceLanguage ?? null,
+    shopping: input.withReplyLead, // 커머스면 쇼핑 톤 허용
+  });
+  const specialRules = `== 이번 글의 특수 규칙 (커스텀 발행 · 사용자가 방향을 직접 지정) ==
+**★★ 아래 "요청 방향"이 이 글의 핵심 지시다. 그 의도·각도대로 써라.** 소스(영상/캡션)는 맥락 참고용.
+- 요청 방향과 소스를 결합해 자연스러운 한 편으로. 방향이 우선, 소스는 사실 근거·소재.
+- **없는 사실 지어내기 금지** — 소스에 있는 것/일반 상식만. 원작자의 특정 정황(매장 방문·여행·국적·관계·구매경위) 재연 금지, 1인칭은 반응·의견만.
+${input.withReplyLead
+      ? '- 이 글은 **고정댓글에 상품 링크**가 붙는다. 본문은 광고처럼 쓰지 말고 방향대로 흥미·공감·논쟁을 유도. 상품은 지금 링크로 살 수 있다("못 산다/들어오면 산다" 뉘앙스 금지).\n- **replyLead**: 고정댓글 첫 줄 — 광고 티 안 나게 링크(상품/딜)로 자연스럽게 이어주는 한 마디(15~50자, 이모지 최대 1개).'
+      : '- 상품·링크 없음. 순수 본문만.'}
+- 줄바꿈·"스친들" 호칭·과장 허용 톤은 공통 원칙대로.`;
+  const system = `${baseSystem}\n\n${specialRules}`;
+
+  const schema = input.withReplyLead
+    ? { type: 'object', properties: { body: { type: 'string' }, replyLead: { type: 'string' } }, required: ['body', 'replyLead'] }
+    : { type: 'object', properties: { body: { type: 'string' } }, required: ['body'] };
+
+  const buildOnce = async (idx: number, avoid?: string): Promise<{ body: string; replyLead?: string }> => {
+    const parts: LlmContentPart[] = [];
+    if (input.sourceImageUrl) parts.push({ type: 'image', url: input.sourceImageUrl });
+    parts.push({ type: 'text', text: renderWinningStyle() });
+    parts.push({ type: 'text', text: `요청 방향 (이 글의 핵심 지시):\n"""\n${input.direction.slice(0, 1000)}\n"""` });
+    if (input.sourceText) {
+      parts.push({ type: 'text', text: `소스 원문 (맥락·사실 근거 · 직역 금지):\n"""\n${input.sourceText.slice(0, 800)}\n"""` });
+    }
+    if (avoid) parts.push({ type: 'text', text: `⛔ 방금 실패 사유 · 이번엔 반드시 회피: ${avoid}` });
+    parts.push({ type: 'text', text: `JSON으로만 반환${input.withReplyLead ? ' ({body, replyLead})' : ' ({body})'}.` });
+
+    const response = await llm().complete({
+      tier: 'main',
+      system: system.replace('variant=0', `variant=${idx}`),
+      userParts: parts,
+      maxOutputTokens: 500,
+      temperature: 0.9 + idx * 0.05,
+      jsonMode: true,
+      thinking: 'disabled',
+      jsonSchema: schema,
+    });
+    const parsed = extractJson(response.text) as { body?: string; replyLead?: string };
+    if (!parsed.body) throw new Error('generateCustomBody: body 누락');
+    return { body: parsed.body, replyLead: parsed.replyLead };
+  };
+
+  let out = await buildOnce(0);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const check = await factCheckCopy({ body: out.body, sourceText: input.sourceText });
+    if (check.ok) break;
+    logger.warn({ attempt, body: out.body, reason: check.reason }, '커스텀 카피 검증 실패 → 재생성');
+    out = await buildOnce(attempt + 1, check.reason);
+  }
+  return out;
 }
 
 export async function generateBodyVariants(

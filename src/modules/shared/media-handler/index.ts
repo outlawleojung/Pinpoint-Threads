@@ -42,16 +42,31 @@ export async function handleMedia(input: HandleMediaInput): Promise<HandledMedia
     input.sourceMediaTypes?.[i] ?? inferKind(u),
   );
 
-  // 각 URL 별로 image/video resource_type 지정해서 업로드
-  const uploads = await Promise.all(
+  // 각 URL 별로 image/video resource_type 지정해서 업로드.
+  //   ★ 일부 실패(예: Cloudinary가 못 읽는 fbcdn 영상 "Unsupported video format")에 전체가 죽지 않게
+  //     allSettled 로 성공분만 채택 · 실패는 스킵. (이미지 여러 장 멀쩡한데 영상 1개로 전체 실패 방지)
+  const settled = await Promise.allSettled(
     input.sourceMediaUrls.map((sourceUrl, i) => {
       const resourceType: 'image' | 'video' = types[i] === 'video' ? 'video' : 'image';
       return uploadFromUrl({ sourceUrl, postId: input.postId, resourceType });
     }),
   );
+  const uploads = settled.flatMap((s) => (s.status === 'fulfilled' ? [s.value] : []));
+  const failed = settled.filter((s) => s.status === 'rejected') as PromiseRejectedResult[];
+  if (failed.length > 0) {
+    logger.warn(
+      { postId: input.postId, failedCount: failed.length, reasons: failed.map((f) => String(f.reason?.message ?? f.reason).slice(0, 120)) },
+      'media: 일부 업로드 실패 · 스킵하고 성공분으로 진행',
+    );
+  }
+  if (uploads.length < MEDIA_MIN_COUNT) {
+    throw new MediaValidationError(
+      `업로드 성공 미디어 ${uploads.length}개 < 필요 ${MEDIA_MIN_COUNT}개 (실패 ${failed.length}건)`,
+    );
+  }
 
   logger.info(
-    { postId: input.postId, count: uploads.length, types },
+    { postId: input.postId, count: uploads.length, skipped: failed.length },
     'media uploaded to cloudinary',
   );
 
