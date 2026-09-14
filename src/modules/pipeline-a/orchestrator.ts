@@ -6,7 +6,7 @@ import { classifySourceItem } from '../shared/content-classifier/index.js';
 import { matchProduct, type MatchResult } from './product-matcher/index.js';
 import { CoupangAdapter } from '../../infra/commerce/coupang-client.js';
 import { env } from '../../config/env.js';
-import { handleMedia } from '../shared/media-handler/index.js';
+import { handleMedia, uploadFromUrl } from '../shared/media-handler/index.js';
 import { generateCopy } from '../shared/copywriter/index.js';
 import { composeReply } from './reply-composer/index.js';
 import { sendApprovalRequest } from '../shared/approval-gate/service.js';
@@ -145,10 +145,23 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
   // 6. Media Handler — Cloudinary 미러를 **매칭보다 먼저**.
   //   원본 IG/Threads CDN(~10분) 이 매칭(최대 3회 Vision) 도중 만료돼 업로드 실패하는 것을 방지 + 2개 이상 하드룰 조기 검증.
   logger.info({ postId: post.id }, 'pipeline-a: media upload (pre-match)');
-  const media = await handleMedia({
-    postId: post.id,
-    sourceMediaUrls: input.sourceMediaUrls,
-  });
+  // 소스가 단일 영상 1개면 2장 룰(MEDIA_MIN_COUNT) 미달 → Cloudinary 업로드 + 프레임 JPG 1장 추가로 2장 구성.
+  //   (Pipeline C·커스텀발행과 동일. 안 하면 "Media count 1 < required 2" 로 실패.)
+  let media: Awaited<ReturnType<typeof handleMedia>>;
+  if (input.sourceMediaUrls.length === 1 && isVideoUrl(input.sourceMediaUrls[0]!)) {
+    const up = await uploadFromUrl({ sourceUrl: input.sourceMediaUrls[0]!, postId: post.id, resourceType: 'video' });
+    const frameDelivery = videoToJpgThumb(up.publicUrl);
+    let framePublic: string;
+    try {
+      framePublic = (await uploadFromUrl({ sourceUrl: frameDelivery, postId: post.id, resourceType: 'image' })).publicUrl;
+    } catch {
+      framePublic = frameDelivery;
+    }
+    media = { publicUrls: [up.publicUrl, framePublic], publicTypes: ['video', 'image'], raw: [up] };
+    logger.info({ postId: post.id }, 'pipeline-a: 단일 영상 → 프레임 1장 추가로 2장 구성');
+  } else {
+    media = await handleMedia({ postId: post.id, sourceMediaUrls: input.sourceMediaUrls });
+  }
   // 이후 Vision·카피는 영구 Cloudinary 이미지를 사용 (원본 만료 무관)
   const uploadedImageForVision = media.publicUrls.find((u) => !isVideoUrl(u))
     ?? (media.publicUrls[0] ? videoToJpgThumb(media.publicUrls[0]) : firstImageForVision);

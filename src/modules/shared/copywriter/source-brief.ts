@@ -61,6 +61,31 @@ const normalizeQuote = (s: string): string =>
     .replace(/\s+/g, ' ')
     .trim();
 
+/** LLM JSON 문자열 안 raw 제어문자(개행 등) → \uXXXX 이스케이프해서 "Bad control character" 파싱실패 방지. */
+function escapeControlCharsInStrings(s: string): string {
+  let out = '';
+  let inStr = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]!;
+    if (inStr) {
+      if (c === '\\') { out += c + (s[i + 1] ?? ''); i++; continue; }
+      if (c === '"') { inStr = false; out += c; continue; }
+      const code = s.charCodeAt(i);
+      if (code < 0x20) { out += '\\u' + code.toString(16).padStart(4, '0'); continue; }
+      out += c;
+    } else {
+      if (c === '"') inStr = true;
+      out += c;
+    }
+  }
+  return out;
+}
+
+/** raw 파싱 실패 시 제어문자 이스케이프 후 재시도. */
+function parseJsonLoose(text: string): unknown {
+  try { return JSON.parse(text); } catch { return JSON.parse(escapeControlCharsInStrings(text)); }
+}
+
 export function validateSourceBrief(value: unknown, input: SourceBriefInput): SourceBrief {
   const brief = SourceBriefSchema.parse(value);
   for (const point of brief.points) {
@@ -122,7 +147,7 @@ export async function analyzeSource(input: SourceBriefInput, complete: Complete)
     });
     try {
       const text = response.text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-      const brief = validateSourceBrief(JSON.parse(text), input);
+      const brief = validateSourceBrief(parseJsonLoose(text), input);
       if (briefCache.size >= BRIEF_CACHE_MAX) briefCache.delete(briefCache.keys().next().value as string);
       briefCache.set(cacheK, brief);
       return brief;
