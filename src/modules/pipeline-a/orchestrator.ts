@@ -280,8 +280,10 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
   });
 
   // 13. Approval Gate — sendApprovalRequest 안에서 state → PENDING_APPROVAL 전이
-  logger.info({ postId: post.id }, 'pipeline-a: sending approval');
-  await sendApprovalRequest(post.id);
+  //   자동 완화 경고(카피·댓글 사실검사 우려)를 카드에 표시 → 사용자가 최종 판단. (포스트는 안 죽음)
+  const warnings = [...(copy.warnings ?? []), ...(reply.warning ? [reply.warning] : [])];
+  logger.info({ postId: post.id, warnings: warnings.length }, 'pipeline-a: sending approval');
+  await sendApprovalRequest(post.id, { warnings });
 
   return {
     status: 'PENDING_APPROVAL',

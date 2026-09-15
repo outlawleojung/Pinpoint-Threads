@@ -30,6 +30,8 @@ export type CopywriteResult = {
   body: string;
   reply: string;
   sourceBrief: SourceBrief;
+  /** 자동 완화된 우려사항(예: 사실검사 최종 실패 후 통과시킴). 승인 카드에 경고로 표시. */
+  warnings?: string[];
 };
 
 export interface CopywriteInput {
@@ -353,8 +355,24 @@ export function buildReply(deeplinkUrl: string | undefined): string {
 }
 
 export async function generateCopy(input: CopywriteInput): Promise<CopywriteResult> {
+  const warnings: string[] = [];
   // 상품명/페르소나로 사건을 재창작하기 전에 원본을 고정. 본문 재시도는 같은 분석을 재사용.
-  const sourceBrief = await analyzeSource(input, (request) => llm().complete(request));
+  //   ★ analyzeSource 실패해도 포스트를 죽이지 않는다 — 최소 브리프로 폴백하고 경고만 단다.
+  let sourceBrief: SourceBrief;
+  try {
+    sourceBrief = await analyzeSource(input, (request) => llm().complete(request));
+  } catch (err) {
+    logger.warn({ err: (err as Error).message }, 'analyzeSource 실패 → 최소 브리프 폴백');
+    const src = (input.sourceText ?? '').trim();
+    sourceBrief = {
+      situation: src ? src.slice(0, 200) : '원본 정밀 분석 실패 (자동 폴백)',
+      points: [{ fact: src ? src.slice(0, 100) : '원본 참고', evidenceType: 'source_text', evidence: src.slice(0, 100) || '원본' }],
+      focusIndex: 0,
+      allowedChanges: ['한국어 표현·호흡'],
+      unknowns: ['원본 정밀 분석 실패'],
+    } as SourceBrief;
+    warnings.push('원본 보존 분석 실패 → 최소 정보로 생성됨 (원본과 대조 후 승인 권장)');
+  }
   const groundedInput = { ...input, sourceBrief };
   const factCheck = input.factCheckEnabled ?? Boolean(input.productName); // 상품 있으면 기본 ON
   const maxRetries = input.factCheckMaxRetries ?? 1; // 비용 절감: 2→1 (최대 2회 생성)
@@ -378,14 +396,16 @@ export async function generateCopy(input: CopywriteInput): Promise<CopywriteResu
         'copy fact-check failed → regenerate',
       );
       if (attempt === maxRetries) {
-        throw new Error(`Copywriter fact-check failed ${maxRetries + 1} times: ${check.reason}`);
+        // ★ 포스트를 죽이지 않는다. 마지막 본문을 채택하되 경고를 달아 사용자가 최종 판단하게 한다.
+        warnings.push(`카피 자동점검 우려: ${check.reason ?? '사실 오류 가능'}`);
+        break;
       }
       body = await generateBody(groundedInput, attempt + 1, check.reason);
     }
   }
 
   const reply = buildReply(input.deeplinkUrl);
-  const result: CopywriteResult = { body, reply, sourceBrief };
+  const result: CopywriteResult = { body, reply, sourceBrief, warnings: warnings.length ? warnings : undefined };
   logger.debug({ result, factCheck, lastReason }, 'generateCopy');
   return result;
 }

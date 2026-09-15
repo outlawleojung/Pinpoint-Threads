@@ -29,6 +29,17 @@ export async function ensureBenchmarkVideo(
     logger.info({ benchmarkId }, 'video-rescue: 사용자 "비디오 없음" → 스킵');
     return mediaUrls;
   }
+  // ★ phantom 비디오 방지: 비디오 신호가 하나도 없으면(커버프레임 마커 X · 사용자 "비디오있음" X) 스킵.
+  //   사진만 있는 글도 Playwright 가 페이지의 엉뚱한 mp4(추천글·자동재생)를 주워 앞에 붙이던 문제.
+  //   (Apify 는 실제 비디오면 커버 프레임을 남김 → 마커가 rescue 신호. 진짜 비디오인데 마커까지 없으면
+  //    사용자가 "비디오있음"으로 강제.)
+  const hasVideoSignal = mediaUrls.some(
+    (u) => u.includes('video_default_cover_frame') || /\/t51\.71878-15\//.test(u),
+  );
+  if (hasVideo !== true && !hasVideoSignal) {
+    logger.info({ benchmarkId }, 'video-rescue: 비디오 신호 없음(마커·플래그 X) → 스킵 (phantom 방지)');
+    return mediaUrls;
+  }
 
   // "비디오 있음" 이면 확보까지 강하게 (8회), 미지정이면 3회
   const maxAttempts = hasVideo === true ? 8 : 3;
