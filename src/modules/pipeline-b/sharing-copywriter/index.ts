@@ -165,12 +165,21 @@ async function generateOne(
     ? '미확인'
     : `${context.accountAgeDays}일 (${context.accountAgeBucket})`;
 
+  // 마일스톤 훅: 실제 스친 수 기준 "믿을 만한 다음 목표"만. 구간(bucket)만 주면 107명인데 "300 코앞" 같은 거짓이 나옴.
+  const cur = context.followersCount;
+  const nextMilestone = cur < 100 ? 100 : Math.ceil((cur + 1) / 100) * 100; // 107 → 200
+  const gap = nextMilestone - cur;
+  const closeToMilestone = gap <= 25; // 코앞이라 할 수 있는 거리
+
   const userPrompt = [
     ...(hook.milestone
       ? [
-          '== 참고: 이 계정 상황 (이 훅은 마일스톤 언급 OK · 실 구간과 맞게) ==',
-          `- 팔로워 구간: ${context.followerBucket} · 계정 나이: ${ageLabel}`,
-          `  ※ 숫자·"몇 달째/N일차"는 위 구간과 맞는 것만.`,
+          `== 참고: 이 계정 실제 스친 수 ≈ ${cur}명 (마일스톤 언급 OK · 반드시 실제 수 기준) ==`,
+          `- 다음 목표는 ${nextMilestone}. ${closeToMilestone
+            ? `${nextMilestone} 코앞이라 "얼마 안 남았어/오늘 넘고 싶어" OK.`
+            : `아직 ${nextMilestone}까지 ${gap}명 남아서 "코앞/얼마 안 남았어"는 거짓 → 금지. "${nextMilestone} 가보고 싶다" 정도의 목표로만.`}`,
+          `  ※ 실제 수(${cur})와 안 맞는 숫자(예: 300)는 절대 쓰지 마라. 라운드 숫자(100·200 등)만, 그것도 위 목표(${nextMilestone})에 맞게.`,
+          `  ※ 계정 나이: ${ageLabel} — "몇 달째/N일차"도 실제와 맞을 때만.`,
         ]
       : [
           '== 참고: 이 훅은 **숫자·마일스톤 쓰지 마** ==',

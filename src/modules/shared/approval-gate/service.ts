@@ -7,7 +7,7 @@ import { logger } from '../../../config/logger.js';
 import { prisma } from '../../../db/prisma.js';
 import { assertTransition } from '../../../state/post-state-machine.js';
 import { publishQueue } from '../../../queues/queues.js';
-import { generateCopy } from '../copywriter/index.js';
+import { generateCopy, generateDailyBody } from '../copywriter/index.js';
 import { composeReply } from '../../pipeline-a/reply-composer/index.js';
 
 type PostWithRelations = Post & {
@@ -35,7 +35,10 @@ function buildPreviewCaption(post: PostWithRelations, hasProductThumb: boolean):
   return lines.join('\n');
 }
 
-export async function sendApprovalRequest(postId: string): Promise<void> {
+export async function sendApprovalRequest(
+  postId: string,
+  opts?: { warnings?: string[] },
+): Promise<void> {
   const post = await prisma.post.findUnique({
     where: { id: postId },
     include: { account: true, sourceItem: true, commerceProduct: true },
@@ -70,7 +73,11 @@ export async function sendApprovalRequest(postId: string): Promise<void> {
   const videoBadge = videoCount > 0
     ? `🎬 비디오 ${videoCount}개 포함됨 ✅ (프리뷰엔 이미지만 · 발행 시 비디오 나감)`
     : `🖼 비디오 없음 · 이미지 ${imageOnly.length}개`;
-  const caption = `${videoBadge}\n\n${captionCore}`;
+  // 자동 완화 경고(사실검사 우려 등) — 있으면 카드 상단에 눈에 띄게. 사용자가 최종 판단.
+  const warnBlock = opts?.warnings?.length
+    ? `⚠️ 자동 점검 경고 (확인 후 승인):\n${opts.warnings.map((w) => `· ${w}`).join('\n')}\n\n`
+    : '';
+  const caption = `${warnBlock}${videoBadge}\n\n${captionCore}`;
 
   let anchorMessageId: number;
 
@@ -153,6 +160,44 @@ async function regenerateCopyAndResend(postId: string): Promise<void> {
     include: { account: true, sourceItem: true, commerceProduct: true },
   });
   if (!post) throw new Error('post not found');
+
+  // 일상글(DAILY): 상품·링크 없음 → generateDailyBody 로 본문만 재생성.
+  if (post.kind === 'DAILY') {
+    // ★ 일상글은 sourceItem 이 없어 rawText 가 빌 수 있음 → 소스 없이 생성하면 엉뚱한 글을 지어낸다.
+    //   sourceMediaUrls 로 원본 inbound 를 찾아 캡션(rawText)을 회수. 그래도 없으면 헛것 대신 안내.
+    let srcText = post.sourceItem?.rawText?.trim() || undefined;
+    if (!srcText && post.sourceMediaUrls.length > 0) {
+      const ib = await prisma.inboundLink.findFirst({
+        where: { mediaUrls: { hasSome: post.sourceMediaUrls } },
+        orderBy: { receivedAt: 'desc' },
+        select: { rawText: true },
+      });
+      srcText = ib?.rawText?.trim() || undefined;
+    }
+    if (!srcText) {
+      throw new Error('원본 내용을 못 찾아 재생성 불가 · "일상 {URL} | 설명" 으로 다시 보내주세요');
+    }
+    const body = await generateDailyBody({
+      personaPrompt: post.account.personaPrompt,
+      accountSeed: `${post.accountId}:regen:${post.retryCount + 1}`, // 다른 변형 유도
+      accountId: post.accountId,
+      sourceText: srcText,
+    });
+    await prisma.post.update({ where: { id: postId }, data: { generatedBody: body, retryCount: { increment: 1 } } });
+    await sendApprovalRequest(postId);
+    return;
+  }
+  // 스하리(SHARING): generateSharingCopy 로 재생성 (훅 회전).
+  if (post.kind === 'SHARING') {
+    const { generateSharingCopy } = await import('../../pipeline-b/sharing-copywriter/index.js');
+    const r = await generateSharingCopy({ accountId: post.accountId, variantCount: 1, hookOffset: post.retryCount + 1 });
+    const body = r.variants[0]?.body;
+    if (!body) throw new Error('스하리 재생성 실패');
+    await prisma.post.update({ where: { id: postId }, data: { generatedBody: body, retryCount: { increment: 1 } } });
+    await sendApprovalRequest(postId);
+    return;
+  }
+
   if (!post.commerceProduct) throw new Error('상품 정보 없음 · 재생성 불가');
 
   const isVideoUrl = (u: string) => /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/');
@@ -199,8 +244,9 @@ async function regenerateCopyAndResend(postId: string): Promise<void> {
     where: { id: postId },
     data: { generatedBody: copy.body, generatedReply: reply.text },
   });
-  // sendApprovalRequest 가 state → PENDING_APPROVAL 로 되돌리고 새 카드 발송
-  await sendApprovalRequest(postId);
+  // sendApprovalRequest 가 state → PENDING_APPROVAL 로 되돌리고 새 카드 발송 (경고도 함께)
+  const warnings = [...(copy.warnings ?? []), ...(reply.warning ? [reply.warning] : [])];
+  await sendApprovalRequest(postId, { warnings });
 }
 
 export async function handleApprovalCallback(action: Action, postId: string): Promise<string> {

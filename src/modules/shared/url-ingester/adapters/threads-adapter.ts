@@ -220,9 +220,10 @@ async function normalizeApifyItem(
             result.mediaTypes.push('video');
           }
         } else {
-          // carousel: 커버 프레임 마커 있는 슬롯을 mp4 로 교체
-          // 마커 없으면 첫 슬롯이 비디오 커버 프레임일 가능성이 높음 (Threads 는 대체로 비디오를 앞에 배치)
-          // 따라서 슬롯 0을 mp4로 교체 (unshift 아님 · 총 개수 유지)
+          // carousel: **커버 프레임 마커가 있는 슬롯만** mp4 로 교체.
+          //   ⚠️ 마커가 하나도 없으면 = 실제로는 photo-only 캐러셀인데 Playwright 가 페이지의
+          //     엉뚱한 mp4(추천글·자동재생 등)를 주운 것. 예전엔 "슬롯 0을 mp4로 교체" heuristic 이
+          //     사진 2장짜리 글에 phantom 비디오를 심었음. → 마커 없으면 주입하지 않는다(사진 유지).
           let replaced = 0;
           for (let i = 0; i < result.mediaUrls.length && replaced < bestMp4s.length; i++) {
             if (result.mediaUrls[i]?.includes('video_default_cover_frame')) {
@@ -231,15 +232,11 @@ async function normalizeApifyItem(
               replaced += 1;
             }
           }
-          if (replaced === 0 && result.mediaUrls.length > 0) {
-            // 마커 매칭 실패 → 슬롯 0을 mp4로 교체 (heuristic)
-            result.mediaUrls[0] = bestMp4s[0]!;
-            result.mediaTypes[0] = 'video';
-            replaced = 1;
-          }
           logger.info(
-            { url, rawMediaType, replaced, totalMp4: bestMp4s.length },
-            'threads carousel · mp4 URL merged into mediaUrls',
+            { url, rawMediaType, replaced, totalMp4: bestMp4s.length, injected: replaced > 0 },
+            replaced > 0
+              ? 'threads carousel · mp4 URL merged into mediaUrls'
+              : 'threads carousel · 커버프레임 마커 없음 → mp4 주입 안 함(photo-only 추정)',
           );
         }
       } else {
