@@ -93,3 +93,60 @@ related:
 ## 6. 열린 질문
 - 규칙 저장소 vs 프롬프트 직접 주입의 경계(규칙이 많아지면 프롬프트 비대) — 범위 매칭 RAG로 상위 N개만 주입?
 - "발행 승인 버전"만 저장 시, 승인 전 여러 정정의 이력도 학습에 쓸지(정정 지시 자체가 신호).
+
+---
+
+## 7. 구현 계획 확정 (2026-09-16)
+
+### 7.1 현재 구현 상태 (실측)
+- 성과 피드백 루프(scorer·copy-learning·propagation)는 구현·**스하리에만 연결**. 쇼핑/일상 학습은 표본 대기로 미연결.
+- **정정 학습 루프는 통째로 미구현** — CopyCorrection·CopyRule 모델 없음. 사용자의 반복 정정이 어디에도 안 쌓임. ← 본 스펙이 채운다.
+- Track 1(생성 품질 검사)은 오늘까지 상당 부분 선반영됨: winning-style 실측 승자/패자 대비, factCheck 개인정보·사실검사, 소장각 상투마무리 지양. → Track 1 은 factCheck에 "마무리 힘빼기·본문 되풀이" 검사 소폭 추가만 하고, **주력은 Track 2**.
+
+### 7.2 데이터 모델 (실제 스키마 기준 잠금)
+```prisma
+model CopyCorrection {
+  id               String   @id @default(cuid())
+  postId           String
+  post             Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  accountId        String
+  contentKind      PostKind
+  productType      String?  // 상품 카테고리 (쇼핑)
+  sceneType        String?  // 장면 유형 (일상)
+  originalBody     String   @db.Text
+  correctionText   String   @db.Text
+  resultingBody    String?  @db.Text
+  classifiedType   String?  // fact | preference | focus
+  approvedFinal    Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  @@index([contentKind, createdAt])
+  @@index([postId])
+}
+
+model CopyRule {
+  id                 String   @id @default(cuid())
+  ruleText           String   @db.Text
+  scope              String   // global | category | foreign | sceneType
+  scopeKey           String?
+  sourceCorrectionId String?
+  approved           Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  @@index([scope, approved])
+}
+// Post 확장(추가 전용·nullable/default): cardVersion Int @default(0), correctionCount Int @default(0), approvedCardVersion Int?
+// + relation: corrections CopyCorrection[]
+```
+
+### 7.3 단계 (각 단계 실측 검증 후 다음 · execute-don't-gate)
+1. **마이그레이션 + 캡처 + 즉시 재생성 + 카드 버전 멱등**
+   - `prisma db push`(추가 전용·무손실) + `prisma generate`(봇 DLL 락 시 일시정지 후).
+   - 승인 카드에 텔레그램 **답장** → 그 postId의 CopyCorrection 저장 → 정정을 **하드 제약**으로 카드 재생성·재전송 (규칙 승인 대기 X).
+   - `cardVersion++`; 승인 콜백에 버전 실어 **옛 카드 승인은 무효**(최신 버전만 발행).
+   - 검증: 테스트 카드에 "옆사람이야" 답장 → 정정 반영된 새 카드, 옛 승인 버튼 dead 확인.
+2. **승인본 저장**: 승인 시 그 버전의 body를 CopyCorrection.resultingBody + approvedFinal=true. 검증: 승인 후 DB 확인.
+3. **재사용(핵심)**: 생성 시 같은 contentKind+productType/sceneType의 과거 승인 정정을 few-shot 주입(generateBody·generateDailyBody). 검증: 과거 정정한 유형 재발행 → 같은 실수 안 나옴.
+4. **비동기 규칙 승격**: 반복 정정만 좁은 scope로 CopyRule 후보 → 사용자 승인 시 저장·주입.
+
+### 7.4 리스크
+- **공유 DB(네이버 세션)**: db push 는 schema.prisma 전체 동기화라, push 전 schema 가 DB 와 일치하는지 확인(추가 전용이라 drop 위험 낮음). generate 는 봇 실행 중 DLL 락(EPERM) 가능 → 필요 시 봇 잠깐 정지.
+- 과대 일반화 금지(§D): 정정을 즉시 전역 규칙화하지 않음. 1·2·3단계는 "이 유형 한정" few-shot, 규칙화는 4단계에서 사용자 승인 하에만.

@@ -42,6 +42,7 @@ export interface CopywriteInput {
   productName?: string;
   productCategory?: string;
   productNote?: string; // 판매자/큐레이터가 준 부연설명 — 원문에 없어도 신뢰 가능한 상품 사실(아이디어 상품 셀링포인트 등)
+  correctionInstruction?: string; // 사용자가 카드에 답장으로 준 정정 지시 — 반드시 반영(정정 학습 루프)
   personaPrompt?: string;
   accountSeed: string;
   deeplinkUrl?: string;
@@ -200,6 +201,16 @@ async function generateBody(input: CopywriteInput & { sourceBrief: SourceBrief }
   userParts.push({ type: 'text', text: renderSourceBrief(input.sourceBrief) });
   // 목표 스타일 주입 — 사용자 계정 실제 고반응 글에서 역설계한 하입/FOMO/무심한 툭툭 공식.
   userParts.push({ type: 'text', text: renderWinningStyle() });
+
+  // 사용자 정정 지시 (정정 학습 루프) — 이번 재생성에 반드시 반영. 최우선.
+  if (input.correctionInstruction?.trim()) {
+    userParts.push({
+      type: 'text',
+      text:
+        `★★ 사용자 정정 지시 — 이번 재생성에 반드시 반영하라 (최우선):\n"""\n${input.correctionInstruction.trim()}\n"""\n` +
+        `이전 카피의 이 문제를 확실히 고쳐라. 지시를 무시하거나 표현만 살짝 바꾸지 말고, 정정 내용을 실제로 반영한 새 본문을 쓴다.`,
+    });
+  }
 
   // 판매자/큐레이터 부연설명 — 원문에 안 보여도 이 상품의 진짜 셀링포인트(특히 아이디어 상품).
   //   신뢰 가능한 사실로 취급하되, 여기 적힌 것 이상으로 기능·효능을 지어내지 않는다.
@@ -661,6 +672,7 @@ export interface DailyCopyInput {
    * 이게 있으면 "그대로 옮기기"가 아니라 "이 상황에 대한 반응/감상"을 쓴다 (설명 복붙 금지).
    */
   mediaDescription?: string;
+  correctionInstruction?: string; // 사용자 정정 지시 — 반드시 반영(정정 학습 루프)
 }
 
 export async function generateDailyBody(input: DailyCopyInput): Promise<string> {
@@ -706,6 +718,12 @@ ${specialRules}`;
       parts.push({
         type: 'text',
         text: `참고 원문 — 소재·훅만, 직역 금지:\n"""\n${input.sourceText.slice(0, 800)}\n"""`,
+      });
+    }
+    if (input.correctionInstruction?.trim()) {
+      parts.push({
+        type: 'text',
+        text: `★★ 사용자 정정 지시 — 반드시 반영하라 (최우선):\n"""\n${input.correctionInstruction.trim()}\n"""\n표현만 바꾸지 말고 정정 내용을 실제로 반영한 새 문장을 써라.`,
       });
     }
     if (avoid) parts.push({ type: 'text', text: `⛔ 방금 실패 사유 · 이번엔 반드시 회피: ${avoid}` });

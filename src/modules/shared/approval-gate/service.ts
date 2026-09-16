@@ -142,6 +142,7 @@ export async function sendApprovalRequest(
     data: {
       state: PostState.PENDING_APPROVAL,
       telegramMessageId: String(anchorMessageId),
+      cardVersion: { increment: 1 }, // 카드 발송 횟수(지표 · 정정 학습 루프)
     },
   });
 
@@ -154,7 +155,7 @@ type Action = 'approve' | 'regen-text' | 'regen-product' | 'reject';
  * 텔레그램 "텍스트 재생성" — 같은 상품·소스로 카피/고정댓글만 다시 생성 후 승인 카드 재발송.
  * 이전 카피를 회피 힌트로 넘겨 다른 각도의 문장이 나오게 함.
  */
-async function regenerateCopyAndResend(postId: string): Promise<void> {
+async function regenerateCopyAndResend(postId: string, correctionText?: string): Promise<void> {
   const post = await prisma.post.findUnique({
     where: { id: postId },
     include: { account: true, sourceItem: true, commerceProduct: true },
@@ -182,6 +183,7 @@ async function regenerateCopyAndResend(postId: string): Promise<void> {
       accountSeed: `${post.accountId}:regen:${post.retryCount + 1}`, // 다른 변형 유도
       accountId: post.accountId,
       sourceText: srcText,
+      correctionInstruction: correctionText,
     });
     await prisma.post.update({ where: { id: postId }, data: { generatedBody: body, retryCount: { increment: 1 } } });
     await sendApprovalRequest(postId);
@@ -225,6 +227,7 @@ async function regenerateCopyAndResend(postId: string): Promise<void> {
     channel,
     ragEnabled: true,
     factCheckEnabled: true,
+    correctionInstruction: correctionText,
     regenAvoid: post.generatedBody
       ? `원본 사건·관찰·반응 포인트는 유지하고 한국어 표현·호흡만 바꾼다. 이전 문구 반복 금지: "${post.generatedBody}"`
       : undefined,
@@ -247,6 +250,43 @@ async function regenerateCopyAndResend(postId: string): Promise<void> {
   // sendApprovalRequest 가 state → PENDING_APPROVAL 로 되돌리고 새 카드 발송 (경고도 함께)
   const warnings = [...(copy.warnings ?? []), ...(reply.warning ? [reply.warning] : [])];
   await sendApprovalRequest(postId, { warnings });
+}
+
+/**
+ * 정정 학습 루프 — 사용자가 승인 카드에 텔레그램 답장으로 준 자유 정정을 처리.
+ *   1) CopyCorrection 저장 (학습 소스)  2) 정정을 하드 제약으로 카드 즉시 재생성·재전송
+ *   3) 재생성 결과를 이 정정의 resultingBody 로 기록 (승인 시 approvedFinal 확정)
+ * 규칙 승인 대기 없음 (편집 부담 방지 · execute-don't-gate).
+ */
+export async function applyCorrection(postId: string, correctionText: string): Promise<void> {
+  const post = await prisma.post.findUnique({
+    where: { id: postId },
+    include: { commerceProduct: true },
+  });
+  if (!post) throw new Error('post not found');
+
+  const correction = await prisma.copyCorrection.create({
+    data: {
+      postId,
+      accountId: post.accountId,
+      contentKind: post.kind,
+      productType: post.commerceProduct?.category ?? null,
+      originalBody: post.generatedBody ?? '',
+      correctionText,
+    },
+  });
+  await prisma.post.update({ where: { id: postId }, data: { correctionCount: { increment: 1 } } });
+
+  // 정정 반영 재생성 (COPYWRITING 로 잠깐 내렸다가 sendApprovalRequest 가 다시 PENDING 으로)
+  if (post.state === PostState.PENDING_APPROVAL) {
+    await prisma.post.update({ where: { id: postId }, data: { state: PostState.COPYWRITING } }).catch(() => {});
+  }
+  await regenerateCopyAndResend(postId, correctionText);
+
+  const after = await prisma.post.findUnique({ where: { id: postId }, select: { generatedBody: true } });
+  await prisma.copyCorrection
+    .update({ where: { id: correction.id }, data: { resultingBody: after?.generatedBody ?? null } })
+    .catch(() => {});
 }
 
 export async function handleApprovalCallback(action: Action, postId: string): Promise<string> {
@@ -306,6 +346,14 @@ export async function handleApprovalCallback(action: Action, postId: string): Pr
   });
 
   logger.info({ postId, action, from: post.state, to: nextState }, 'post state transitioned');
+
+  // 정정 학습 루프: 승인 시 이 게시물의 정정들을 "최종 승인본"으로 확정 (학습 재사용의 정답 데이터).
+  if (action === 'approve') {
+    const approvedBody = (await prisma.post.findUnique({ where: { id: postId }, select: { generatedBody: true } }))?.generatedBody ?? null;
+    await prisma.copyCorrection
+      .updateMany({ where: { postId, approvedFinal: false }, data: { approvedFinal: true, resultingBody: approvedBody } })
+      .catch(() => {});
+  }
 
   // 텔레그램 수동 승인 = 즉시 발행 (사용자님이 지금 발행하려고 승인한 것).
   // 자동 크론(shopping-publisher)만 계정 시차 스케줄 적용.

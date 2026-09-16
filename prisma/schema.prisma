@@ -150,11 +150,54 @@ model Post {
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
 
+  // 정정 학습 루프 (correction-learning): 카드 버전 멱등 + 정정 이력
+  cardVersion         Int               @default(0)  // 재전송마다 ++ · 옛 카드 승인 무효화용
+  correctionCount     Int               @default(0)  // 이 게시물에 누적된 정정 횟수
+  approvedCardVersion Int?                            // 사용자가 승인한 카드 버전 (이 버전만 발행 가능)
+
   insightSnapshots    PostInsightSnapshot[]
+  corrections         CopyCorrection[]
 
   @@unique([accountId, commerceProductId, createdAt])
   @@index([state])
   @@index([scheduledAt])
+}
+
+// ==========================================
+// CopyCorrection: 사용자가 승인 카드에 텔레그램 답장으로 준 정정 (학습 소스)
+// ==========================================
+model CopyCorrection {
+  id               String   @id @default(cuid())
+  postId           String
+  post             Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  accountId        String
+  contentKind      PostKind
+  productType      String?  // 상품 카테고리 (쇼핑)
+  sceneType        String?  // 장면 유형 (일상)
+  originalBody     String   @db.Text
+  correctionText   String   @db.Text
+  resultingBody    String?  @db.Text  // 이 정정 반영해 재생성된 본문
+  classifiedType   String?  // fact | preference | focus
+  approvedFinal    Boolean  @default(false)  // 이 버전이 최종 승인됐는지
+  createdAt        DateTime @default(now())
+
+  @@index([contentKind, createdAt])
+  @@index([postId])
+}
+
+// ==========================================
+// CopyRule: 반복 정정에서 승격된 규칙 (좁은 scope · 사용자 승인 필요)
+// ==========================================
+model CopyRule {
+  id                 String   @id @default(cuid())
+  ruleText           String   @db.Text
+  scope              String   // global | category | foreign | sceneType
+  scopeKey           String?
+  sourceCorrectionId String?
+  approved           Boolean  @default(false)
+  createdAt          DateTime @default(now())
+
+  @@index([scope, approved])
 }
 
 // ==========================================

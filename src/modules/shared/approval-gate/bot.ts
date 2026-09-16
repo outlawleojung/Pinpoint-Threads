@@ -1,7 +1,7 @@
 import { Bot } from 'grammy';
 import { env } from '../../../config/env.js';
 import { logger } from '../../../config/logger.js';
-import { handleApprovalCallback, sendApprovalRequest } from './service.js';
+import { handleApprovalCallback, sendApprovalRequest, applyCorrection } from './service.js';
 import { prisma } from '../../../db/prisma.js';
 import { PostState, PostKind } from '@prisma/client';
 import { classifySourceItem } from '../content-classifier/index.js';
@@ -534,6 +534,33 @@ bot.command('naverlink', async (ctx) => {
     );
   } catch (err) {
     await ctx.reply(`❌ 실패: ${(err as Error).message}`);
+  }
+});
+
+// 정정 학습 루프: 승인 카드(버튼 메시지)에 "답장"으로 준 자유 정정 → 캡처 + 즉시 재생성·재전송.
+//   ("옆사람이야" / "마무리 밋밋" / "동전 살려" 등) 규칙 승인 대기 없이 그 카드가 바로 다시 만들어진다.
+//   메인 메시지 핸들러보다 먼저 등록 — 답장이 아니면 next() 로 일반 흐름에 넘긴다.
+bot.on('message:text', async (ctx, next) => {
+  const replied = ctx.message.reply_to_message;
+  if (!replied) return next();
+  const post = await prisma.post.findFirst({
+    where: { telegramMessageId: String(replied.message_id) },
+    select: { id: true, state: true },
+  });
+  if (!post) return next(); // 카드가 아닌 메시지에 답장 → 일반 흐름
+  const correction = (ctx.message.text ?? '').trim();
+  if (correction.length < 2) return next();
+  if (['APPROVED', 'PUBLISHING', 'PUBLISHED'].includes(post.state)) {
+    await ctx.reply(`⚠️ 이미 ${post.state} 상태라 정정 반영 불가 (리젝/삭제 후 재발행하세요)`);
+    return;
+  }
+  await ctx.reply(`📝 정정 반영해서 다시 만드는 중… "${correction.slice(0, 40)}${correction.length > 40 ? '…' : ''}"`);
+  try {
+    await applyCorrection(post.id, correction);
+    await ctx.reply('✅ 정정 반영 새 카드 확인 (틀리면 또 그 카드에 답장으로 고쳐주세요)');
+  } catch (err) {
+    logger.error({ err, postId: post.id }, '정정 반영 실패');
+    await ctx.reply(`❌ 정정 반영 실패: ${(err as Error).message}`);
   }
 });
 
