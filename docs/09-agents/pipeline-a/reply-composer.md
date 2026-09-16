@@ -57,7 +57,9 @@ interface ReplyComposeResult {
 
 1. Anthropic Sonnet에 system prompt (감초 톤 규칙) + user prompt (상품·본문) 전송
 2. `{ lead: string }` JSON 응답 파싱 (extractJson으로 안전 파싱)
-3. 최종 조립: `${lead}\n${deeplinkUrl}\n\n${LEGAL_DISCLAIMER}`
+3. 최종 조립: `[광고] ${lead}` + **딥링크 `REPLY_LINK_REPEAT`(=3)회 반복** + `${LEGAL_DISCLAIMER}`
+   - 딥링크 반복 이유: Threads 가 고정댓글 링크를 하나 먹어버려 터진 글에서 링크가 통째로 사라지는 사고 방어(중복). 사용자 원본 템플릿(양식 3·4 = 링크 2회)에서 유래, 실전 근거로 3회로 상향.
+   - URL 은 **깨끗하게**(ZWS 마스킹 제거 → 클릭 보장). 링크 프리뷰 카드는 publisher 가 답글에 Cloudinary 미디어 프레임을 첨부해 억제.
 
 ## 프롬프트 핵심 규칙
 
@@ -87,7 +89,8 @@ interface ReplyComposeResult {
 ## 하드 룰
 
 - 공정위 문구 필수: `이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.`
-- 딥링크는 반드시 리드 문장 다음 줄
+- 딥링크는 반드시 리드 문장 다음 줄 · **3회 반복**(`REPLY_LINK_REPEAT`) — 링크 증발 방어
+- URL 은 ZWS 마스킹 없이 깨끗하게(클릭 보장) · 프리뷰는 미디어 프레임 첨부로 억제
 - 브랜드·가격 등 홍보 요소는 프롬프트로 강제 배제
 
 ## 실패 모드 & 폴백

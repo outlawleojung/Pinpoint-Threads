@@ -354,13 +354,20 @@ function extractJson(raw: string): unknown {
   throw new Error(`no JSON object in LLM response: ${stripped.slice(0, 200)}`);
 }
 
+/**
+ * 고정댓글에 딥링크를 몇 번 반복해 붙일지.
+ *   Threads 가 고정댓글의 링크를 하나 먹어버려(오류) 터진 글에서 링크가 통째로 사라지는 사고가 있다.
+ *   같은 링크를 여러 번 박아 하나라도 살아남게 하는 중복 방어 (사용자 원본 템플릿 · 실전 확인).
+ */
+export const REPLY_LINK_REPEAT = 3;
+
 export function buildReply(deeplinkUrl: string | undefined): string {
   if (!deeplinkUrl) {
     return LEGAL_DISCLAIMER;
   }
   return [
     '정보 물어보시는 분들 많아서 링크 남겨요 🙌',
-    deeplinkUrl,
+    ...Array(REPLY_LINK_REPEAT).fill(deeplinkUrl),
     '',
     LEGAL_DISCLAIMER,
   ].join('\n');

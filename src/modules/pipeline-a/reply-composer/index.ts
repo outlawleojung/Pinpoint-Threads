@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { llm } from '../../../infra/llm/index.js';
 import { logger } from '../../../config/logger.js';
-import { factCheckCopy } from '../../shared/copywriter/index.js';
+import { factCheckCopy, REPLY_LINK_REPEAT } from '../../shared/copywriter/index.js';
 import { renderSourceBrief, type SourceBrief } from '../../shared/copywriter/source-brief.js';
 
 /**
@@ -159,10 +159,11 @@ export async function composeReply(input: ReplyComposeInput): Promise<ReplyCompo
 
   // [광고] prefix 는 공정위·플랫폼 안전 표기용 — 링크 바로 옆에 반드시 존재해야 함
   const labeledLead = lead.startsWith('[광고]') ? lead : `[광고] ${lead}`;
-  // Threads 자동 링크 미리보기 카드 방지: URL 앞에 zero-width space 삽입.
-  // 브라우저는 여전히 클릭 가능한 URL로 인식하지만 Threads의 URL 감지·OG fetch는 회피.
-  const maskedUrl = `​${input.deeplinkUrl}`;
-  const text = [labeledLead, maskedUrl, '', disclaimerFor(input.channel)].join('\n');
+  // 딥링크를 REPLY_LINK_REPEAT 회 반복 — Threads 가 고정댓글 링크를 하나 먹어버려 터진 글에서
+  //   링크가 통째로 사라지는 사고를 막는 중복 방어(사용자 원본 템플릿 복원).
+  //   프리뷰 카드는 publisher 가 답글에 Cloudinary 미디어 프레임을 첨부해 억제하므로 URL 은 깨끗하게(클릭 보장).
+  const linkLines = Array(REPLY_LINK_REPEAT).fill(input.deeplinkUrl);
+  const text = [labeledLead, ...linkLines, '', disclaimerFor(input.channel)].join('\n');
   logger.debug({ lead, textLength: text.length }, 'composeReply');
   return { text, lead, warning };
 }
@@ -213,8 +214,9 @@ export async function composeCurationReply(input: CurationReplyInput): Promise<R
   }
 
   const labeledLead = lead.startsWith('[광고]') ? lead : `[광고] ${lead}`;
-  // 각 링크 앞 zero-width space (Threads 링크 프리뷰 카드 억제)
-  const linkLines = input.items.slice(0, 3).map((it) => `​${it.deeplinkUrl}`);
+  // 큐레이션은 상품마다 다른 링크(2~3개)라 그 자체로 다중 링크 방어가 됨. URL 은 깨끗하게(클릭 보장) —
+  //   프리뷰 카드는 publisher 의 미디어 프레임 첨부로 억제. (ZWS 마스킹은 프리뷰도 못 막고 클릭만 깨져 제거)
+  const linkLines = input.items.slice(0, 3).map((it) => it.deeplinkUrl);
   const text = [labeledLead, ...linkLines, '', disclaimerFor(input.channel)].join('\n');
   logger.debug({ lead, links: linkLines.length }, 'composeCurationReply');
   return { text, lead };
