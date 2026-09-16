@@ -11,7 +11,7 @@ import { CoupangAdapter } from '../../../infra/commerce/coupang-client.js';
 import { composeReply } from '../../pipeline-a/reply-composer/index.js';
 import { matchProduct } from '../../pipeline-a/product-matcher/index.js';
 import { runPipelineA } from '../../pipeline-a/orchestrator.js';
-import { isShoppingEligible } from '../../pipeline-a/reach-health.js';
+import { isShoppingEligible, isRecoveringAccount } from '../../pipeline-a/reach-health.js';
 import { ingestUrlsFromText, ingestUrl } from '../url-ingester/index.js';
 import { isCommerceUrl, splitBenchmarkAndCommerce } from '../url-ingester/platform-detector.js';
 import { InboundSource } from '@prisma/client';
@@ -148,9 +148,11 @@ async function pickLeastUsedDailyAccount() {
   });
   if (accounts.length === 0) return null;
   // 오늘 전체 발행/카드 수 기준(종류 무관) → 한 계정에 일상·쇼핑 겹쳐 몰리는 것 방지.
+  //   + 도달이 막힌(억제) 계정은 일상글로 회복시켜야 하므로 일상글을 우선 몰아준다(recovery bias).
   const counts = await Promise.all(
     accounts.map(async (a) => ({
       a,
+      rec: await isRecoveringAccount(a.id),
       c: await prisma.post.count({
         where: {
           accountId: a.id,
@@ -160,7 +162,8 @@ async function pickLeastUsedDailyAccount() {
       }),
     })),
   );
-  counts.sort((x, y) => x.c - y.c);
+  // 1순위: 회복 대상(막힌 계정) 먼저 → 2순위: 오늘 적게 쓴 계정. (막힌 계정을 일상글로 워밍업)
+  counts.sort((x, y) => Number(y.rec) - Number(x.rec) || x.c - y.c);
   return counts[0]!.a;
 }
 

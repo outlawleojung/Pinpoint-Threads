@@ -55,6 +55,17 @@ export async function feedReachMedian(accountId: string): Promise<number | null>
   return (await feedReachStats(accountId))?.median ?? null;
 }
 
+/**
+ * "도달이 막힌(억제)" 계정 판정 — 일상글 워밍업 대상.
+ *   이력이 있는데(표본 충분) 중앙값도 낮고 최근 한 번도 안 터진 계정.
+ *   신생(이력 부족)은 여기 해당 X — 별개로 자연 워밍업.
+ */
+export async function isRecoveringAccount(accountId: string): Promise<boolean> {
+  const s = await feedReachStats(accountId);
+  if (s == null) return false;
+  return s.median < REACH_FLOOR && s.max < BREAKOUT_PROOF;
+}
+
 export interface ShoppingEligibility {
   ok: boolean;
   median: number | null;
