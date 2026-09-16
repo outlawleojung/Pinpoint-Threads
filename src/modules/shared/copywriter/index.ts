@@ -268,6 +268,17 @@ async function generateBody(input: CopywriteInput & { sourceBrief: SourceBrief }
     }
   }
 
+  // 정정 학습 재사용 (Phase 3): 과거 승인된 정정 지시를 미리 반영 → 같은 실수 반복 차단.
+  const priorCorrections = await loadRecentCorrections('SHOPPING', input.productCategory);
+  if (priorCorrections.length) {
+    userParts.push({
+      type: 'text',
+      text:
+        `⚠️ 과거 비슷한 글에서 사용자가 이렇게 정정했다 — 이번엔 미리 반영해서 같은 지적 안 나오게:\n` +
+        priorCorrections.map((c, i) => `${i + 1}. ${c}`).join('\n'),
+    });
+  }
+
   const contextLines: string[] = [];
   if (input.productName) {
     contextLines.push(`연결 상품명(종류 확인용. 원본과 일치가 확인된 브랜드·모델은 자연스럽게 언급 가능, 전체 상품명 복사 금지): ${input.productName}`);
@@ -575,6 +586,41 @@ async function loadRecentRejections(
   }
 }
 
+/**
+ * 정정 학습 재사용 (Phase 3) — 과거 사용자가 승인한 정정(approvedFinal)을 같은 유형 생성에 few-shot 주입.
+ *   같은 실수 반복 차단 → 무수정 승인율↑. 정정 "지시 텍스트"만 재사용(본문 복붙 아님 · 나쁜 템플릿 재학습 방지).
+ *   글로벌(전 계정) 학습 · contentKind 일치 · productType(카테고리) 지정 시 같은 카테고리 우선.
+ */
+async function loadRecentCorrections(
+  contentKind: 'SHOPPING' | 'DAILY' | 'SHARING',
+  productType?: string,
+): Promise<string[]> {
+  try {
+    const rows = await prisma.copyCorrection.findMany({
+      where: { contentKind, approvedFinal: true },
+      orderBy: { createdAt: 'desc' },
+      take: 30,
+      select: { correctionText: true, productType: true },
+    });
+    const same = productType ? rows.filter((r) => r.productType === productType) : [];
+    const others = rows.filter((r) => !same.includes(r));
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const r of [...same, ...others]) {
+      const t = r.correctionText.trim();
+      const k = t.toLowerCase();
+      if (t.length < 2 || seen.has(k)) continue;
+      seen.add(k);
+      out.push(t);
+      if (out.length >= 5) break;
+    }
+    return out;
+  } catch (err) {
+    logger.warn({ err }, 'loadRecentCorrections failed');
+    return [];
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Line B — 미니 큐레이션 (상품 2~3개 묶음) 전용 카피/리플
 //   단일 상품 카피와 보이스 규칙(UNIVERSAL_PRINCIPLES)은 동일하되,
@@ -705,6 +751,9 @@ export async function generateDailyBody(input: DailyCopyInput): Promise<string> 
 
 ${specialRules}`;
 
+  // 정정 학습 재사용 (Phase 3): 과거 승인된 일상글 정정을 미리 반영 (한 번만 조회).
+  const priorCorrections = await loadRecentCorrections('DAILY');
+
   const buildOnce = async (idx: number, avoid?: string): Promise<string> => {
     const parts: LlmContentPart[] = [];
     if (input.sourceImageUrl) parts.push({ type: 'image', url: input.sourceImageUrl });
@@ -724,6 +773,14 @@ ${specialRules}`;
       parts.push({
         type: 'text',
         text: `★★ 사용자 정정 지시 — 반드시 반영하라 (최우선):\n"""\n${input.correctionInstruction.trim()}\n"""\n표현만 바꾸지 말고 정정 내용을 실제로 반영한 새 문장을 써라.`,
+      });
+    }
+    if (priorCorrections.length) {
+      parts.push({
+        type: 'text',
+        text:
+          `⚠️ 과거 일상글에서 사용자가 이렇게 정정했다 — 이번엔 미리 반영해서 같은 지적 안 나오게:\n` +
+          priorCorrections.map((c, i) => `${i + 1}. ${c}`).join('\n'),
       });
     }
     if (avoid) parts.push({ type: 'text', text: `⛔ 방금 실패 사유 · 이번엔 반드시 회피: ${avoid}` });
