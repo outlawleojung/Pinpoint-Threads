@@ -289,7 +289,15 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
 
   // 13. Approval Gate — sendApprovalRequest 안에서 state → PENDING_APPROVAL 전이
   //   자동 완화 경고(카피·댓글 사실검사 우려)를 카드에 표시 → 사용자가 최종 판단. (포스트는 안 죽음)
-  const warnings = [...(copy.warnings ?? []), ...(reply.warning ? [reply.warning] : [])];
+  // 영상 유실 경고: 원본에 영상이 있었는데 최종 발행 미디어가 이미지뿐이면 도달이 크게 낮아진다.
+  //   실측(2026-09-16): 쇼핑 영상포함 평균 1096뷰 vs 이미지only 115뷰 (~9.5배). 조용히 넘기지 말고 알린다.
+  const mediaWarnings: string[] = [];
+  if (input.sourceMediaUrls.some(isVideoUrl) && !media.publicUrls.some(isVideoUrl)) {
+    mediaWarnings.push(
+      '영상이 유실돼 이미지만 발행됨 — 영상 글은 도달이 ~9배 높음(실측 1096 vs 115뷰). 원본 영상 확보 후 재발행 권장.',
+    );
+  }
+  const warnings = [...(copy.warnings ?? []), ...(reply.warning ? [reply.warning] : []), ...mediaWarnings];
   logger.info({ postId: post.id, warnings: warnings.length }, 'pipeline-a: sending approval');
   await sendApprovalRequest(post.id, { warnings });
 
