@@ -11,6 +11,7 @@ import { generateCopy } from '../shared/copywriter/index.js';
 import { composeReply } from './reply-composer/index.js';
 import { sendApprovalRequest } from '../shared/approval-gate/service.js';
 import { assertTransition } from '../../state/post-state-machine.js';
+import { isShoppingEligible } from './reach-health.js';
 
 /**
  * Pipeline A Orchestrator — 소스 인풋을 받아 승인 카드까지 자동 진행.
@@ -21,8 +22,6 @@ import { assertTransition } from '../../state/post-state-machine.js';
  *          → Copywriter → Reply Composer → Post 저장 → Approval Gate
  */
 
-/** 쇼핑 발행 최소 팔로워 (이 값 이하 계정은 쇼핑 차단 · 사용자 방침). */
-const SHOPPING_MIN_FOLLOWERS = 100;
 
 export interface RunPipelineAInput {
   accountId: string;
@@ -42,6 +41,11 @@ export interface RunPipelineAInput {
    * 텔레그램이 쿠팡 링크를 차단하므로, 링크 아닌 상품명으로 매칭 (docs/08-decisions/manual-shopping-flow.md).
    */
   productNameHint?: string;
+  /**
+   * 사용자가 텔레그램에 붙여준 상품 부연설명 (`| ` 뒤).
+   * 원문·이미지에 안 드러나는 셀링포인트(특히 아이디어 상품)를 신뢰 가능한 사실로 카피·고정댓글에 반영.
+   */
+  productNote?: string;
 }
 
 export type PipelineAOutcome =
@@ -64,13 +68,15 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
   const account = await prisma.account.findUnique({ where: { id: input.accountId } });
   if (!account) return { status: 'REJECTED', stage: 'account', reason: 'account not found' };
 
-  // 쇼핑 콘텐츠는 팔로워 100명 이하 계정에서 발행 금지 (사용자 방침).
-  //   저팔로워 계정에 커머스 노출 → 신뢰·전환 낮고 계정 색깔만 흐림. 팔로워 키운 뒤 쇼핑 투입.
-  if ((account.followersCount ?? 0) <= SHOPPING_MIN_FOLLOWERS) {
+  // 쇼핑 콘텐츠는 **실제 피드 도달**이 낮은 계정에서 발행 금지 (팔로워 수 아님 · 2026-09 실측 근거).
+  //   팔로워 최다 계정이 쇼핑 도달 19뷰였다 — 스하리 팔로워는 죽은 계정이라 도달을 보장 못 함.
+  //   DAILY+SHOPPING 도달 중앙값으로 판정 · 이력 부족 계정은 팔로워>100 폴백. (reach-health.ts)
+  const eligibility = await isShoppingEligible(account.id, account.followersCount);
+  if (!eligibility.ok) {
     return {
       status: 'REJECTED',
       stage: 'account',
-      reason: `쇼핑 발행 차단: @${account.handle} 팔로워 ${account.followersCount}명 (${SHOPPING_MIN_FOLLOWERS}명 이하) · 100명 초과 계정에서 발행하세요`,
+      reason: `쇼핑 발행 차단: @${account.handle} · ${eligibility.reason}`,
     };
   }
 
@@ -244,6 +250,7 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
     sourceImageUrl: imageForCopy,
     productName: matched.result.product.productName,
     productCategory: matched.result.product.category ?? classified.category,
+    productNote: input.productNote,
     accountSeed: account.id,
     accountId: account.id,
     personaPrompt: account.personaPrompt,
@@ -258,6 +265,7 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
     body: copy.body,
     sourceBrief: copy.sourceBrief,
     sourceText: input.sourceText,
+    productNote: input.productNote,
     productName: matched.result.product.productName,
     productCategory: matched.result.product.category ?? classified.category,
     deeplinkUrl: matched.result.deeplinkUrl,

@@ -52,9 +52,17 @@ export async function ingestUrl(input: IngestInput): Promise<IngestResult> {
 
   if (existing) {
     // 이전에 FETCHED 성공한 URL 은 dedup 반환 (재fetch 낭비 X).
-    // 단, FAILED 였던 링크는 재전송 = 재시도 요청으로 보고 다시 fetch (원인 고친 뒤 재발행 가능하게).
+    // 단, 아래는 재전송 = 재시도 요청으로 보고 다시 fetch:
+    //   - FAILED: 원인 고친 뒤 재발행.
+    //   - 멈춘 FETCHING/RECEIVED: 이전 인제스트가 fetch 도중 죽어(프로세스 종료·재시작·DLL 락) 상태가 고착됨.
+    //     진짜 동시 진행 중인 fetch(방금 시작)는 계속 dedup 되게 stale 윈도우(3분)로 구분.
+    const STALE_INFLIGHT_MS = 3 * 60_000;
+    const isStaleInflight =
+      (existing.status === InboundStatus.FETCHING || existing.status === InboundStatus.RECEIVED) &&
+      Date.now() - existing.updatedAt.getTime() > STALE_INFLIGHT_MS;
     const retryable =
-      existing.status === InboundStatus.FAILED && existing.platform !== InboundPlatform.UNKNOWN;
+      existing.platform !== InboundPlatform.UNKNOWN &&
+      (existing.status === InboundStatus.FAILED || isStaleInflight);
     if (!retryable) {
       logger.info(
         { inboundLinkId: existing.id, platform, status: existing.status },
@@ -65,7 +73,10 @@ export async function ingestUrl(input: IngestInput): Promise<IngestResult> {
         platform: existing.platform,
         status: existing.status,
         isNew: false,
-        message: `이미 등록된 URL입니다 (상태: ${existing.status}).`,
+        message:
+          existing.status === InboundStatus.FETCHING || existing.status === InboundStatus.RECEIVED
+            ? `이미 인제스트 진행 중인 URL입니다 (상태: ${existing.status}). 잠시 후(수 초~수십 초) 다시 시도하세요.`
+            : `이미 등록된 URL입니다 (상태: ${existing.status}).`,
       };
     }
     // 재시도 시에도 같은 메시지에 붙인 커머스 URL 을 보존 (신규 생성 경로에서만 저장되던 버그).

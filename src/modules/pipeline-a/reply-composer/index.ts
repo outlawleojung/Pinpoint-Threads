@@ -43,6 +43,7 @@ export interface ReplyComposeInput {
   channel?: 'COUPANG' | 'MUSINSA' | 'NAVER';
   sourceBrief?: SourceBrief;
   sourceText?: string;
+  productNote?: string; // 판매자 부연설명 (셀링포인트) — 리드에 활용 · factCheck 근거
 }
 
 export interface ReplyComposeResult {
@@ -114,6 +115,7 @@ export async function composeReply(input: ReplyComposeInput): Promise<ReplyCompo
     '위 본문 톤과 자연스럽게 이어지는 리드 한 문장을 JSON으로만 반환.',
     input.sourceBrief ? renderSourceBrief(input.sourceBrief) : '',
     input.sourceText ? `원문 자료: ${JSON.stringify(input.sourceText)}` : '',
+    input.productNote?.trim() ? `판매자가 알려준 상품 핵심(신뢰 가능 · 리드에 활용 가능): "${input.productNote.trim()}"` : '',
   ].join('\n');
 
   let lead = '';
@@ -142,6 +144,7 @@ export async function composeReply(input: ReplyComposeInput): Promise<ReplyCompo
       body: `본문: ${input.body}\n댓글 리드: ${lead}`,
       productName: input.productName, productCategory: input.productCategory,
       sourceBrief: input.sourceBrief, sourceText: input.sourceText,
+      productNote: input.productNote,
     });
     if (check.ok) break;
     if (attempt === 1) {

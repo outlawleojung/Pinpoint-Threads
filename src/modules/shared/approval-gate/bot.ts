@@ -11,6 +11,7 @@ import { CoupangAdapter } from '../../../infra/commerce/coupang-client.js';
 import { composeReply } from '../../pipeline-a/reply-composer/index.js';
 import { matchProduct } from '../../pipeline-a/product-matcher/index.js';
 import { runPipelineA } from '../../pipeline-a/orchestrator.js';
+import { isShoppingEligible } from '../../pipeline-a/reach-health.js';
 import { ingestUrlsFromText, ingestUrl } from '../url-ingester/index.js';
 import { isCommerceUrl, splitBenchmarkAndCommerce } from '../url-ingester/platform-detector.js';
 import { InboundSource } from '@prisma/client';
@@ -732,8 +733,13 @@ bot.on('message:text', async (ctx, next) => {
   //   비디오 플래그: "비디오 있음"/"비디오 없음" (사용자가 원본 비디오 유무 명시 → 재시도 판단)
   //   있음=true · 없음=false · 미지정=undefined(자동 판단)
   // 비디오 플래그: "비디오/영상/동영상 + 있음/없음" (사용자 표현 편차 흡수)
-  const hasVideoFlag = detectVideoFlag(text);
-  const productName = text
+  // "| " 뒤 = 상품 부연설명(셀링포인트) — 원문에 없어도 신뢰 가능한 상품 사실로 카피에 반영.
+  //   예: "{URL} 에우셉 스낵통 | 뚜껑에 손가락 넣어 과자를 손에 안 묻히고 먹는 아이디어 상품"
+  const pipeIdx = text.indexOf('|');
+  const beforePipe = pipeIdx >= 0 ? text.slice(0, pipeIdx) : text;
+  const productNote = pipeIdx >= 0 ? text.slice(pipeIdx + 1).trim() : '';
+  const hasVideoFlag = detectVideoFlag(beforePipe);
+  const productName = beforePipe
     .split('\n')
     .map((l) => l.replace(/https?:\/\/\S+/gi, ''))   // 줄 안 URL 제거 (상품명이 URL과 같은 줄이어도 살림)
     .map((l) => stripVideoFlag(l))                    // 비디오 플래그 제거 (위치·구두점 무관)
@@ -743,7 +749,8 @@ bot.on('message:text', async (ctx, next) => {
     // 커머스 URL(쿠팡 딥링크·무신사/네이버 큐레이터 링크)을 직접 주면 → Matcher 스킵, 그 링크 그대로 발행.
     // 상품명만 주면 → 쿠팡 검색 매칭. (커머스 URL 있으면 그게 우선)
     const mode = commerceUrls.length > 0 ? `커머스 링크(${commerceUrls[0]!.slice(0, 32)}…)` : `"${productName}"`;
-    await ctx.reply(`🔍 ${mode} · 링크 ${supported.length}개 조합 → 카드 1개 생성 중 (실발행 아님, 승인해야 나감)...`);
+    const noteHint = productNote ? `\n📝 부연설명 반영: "${productNote.slice(0, 60)}${productNote.length > 60 ? '…' : ''}"` : '';
+    await ctx.reply(`🔍 ${mode} · 링크 ${supported.length}개 조합 → 카드 1개 생성 중 (실발행 아님, 승인해야 나감)...${noteHint}`);
     try {
       const { ingestUrl } = await import('../url-ingester/index.js');
       const { ensureBenchmarkVideo } = await import('../../pipeline-a/video-rescue.js');
@@ -787,7 +794,7 @@ bot.on('message:text', async (ctx, next) => {
       const combinedText = texts.join('\n\n');
       const gender = inferGender(productName);
       const acc = await pickLeastUsedAccount(gender);
-      if (!acc) { await ctx.reply(`⚠️ ${gender ?? ''} 발행 가능한 계정 없음 (쇼핑은 팔로워 100명 초과만)`); return; }
+      if (!acc) { await ctx.reply(`⚠️ ${gender ?? ''} 발행 가능한 계정 없음 (쇼핑은 피드 도달 낮은 계정 자동 제외 · 도달 좋은 계정만)`); return; }
       const outcome = await runPipelineA({
         accountId: acc.id,
         sourceMediaUrls: mergedMedia,
@@ -797,6 +804,7 @@ bot.on('message:text', async (ctx, next) => {
         ...(commerceUrls.length > 0
           ? { explicitCommerceUrl: commerceUrls[0]! }
           : { productNameHint: productName }),
+        ...(productNote ? { productNote } : {}),
       });
       if (outcome.status === 'PENDING_APPROVAL') {
         await ctx.reply(`✅ [${acc.handle}] ${outcome.matchedProductName?.slice(0,40)} · 링크 ${texts.length}개 조합 · 승인 카드 확인 (틀리면 리젝)`);
@@ -895,9 +903,12 @@ async function pickLeastUsedAccount(gender?: 'male' | 'female' | null) {
     select: { id: true, handle: true, audienceGender: true, followersCount: true },
     orderBy: { handle: 'asc' },
   });
-  // 쇼핑은 팔로워 100명 이하 계정 제외 (사용자 방침 · orchestrator 가드와 동일 기준).
+  // 쇼핑은 **피드 도달**이 낮은 계정 제외 (팔로워 수 아님 · orchestrator 가드와 동일 기준 · reach-health.ts).
   //   여기서 미리 걸러 애초에 안 뽑히게 → "발행 차단 실패" 카드 안 뜨게.
-  accounts = accounts.filter((a) => (a.followersCount ?? 0) > 100);
+  const elig = await Promise.all(
+    accounts.map(async (a) => ({ a, ok: (await isShoppingEligible(a.id, a.followersCount)).ok })),
+  );
+  accounts = elig.filter((e) => e.ok).map((e) => e.a);
   if (gender === 'male') {
     accounts = accounts.filter((a) => a.audienceGender === 'male' || a.audienceGender === 'unisex');
   } else if (gender === 'female') {

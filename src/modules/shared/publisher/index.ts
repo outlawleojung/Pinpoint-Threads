@@ -22,6 +22,36 @@ function normalizeBody(s: string): string {
 }
 
 /**
+ * 고정 답글에 붙일 이미지 URL 을 고른다 — Threads 가 확실히 fetch 가능한 것 우선.
+ * 이미지가 붙으면 쿠팡 링크 OG 프리뷰 카드가 억제된다.
+ *   1) 상품 썸네일이 Cloudinary 면 사용 (쿠팡 ads-partners 썸네일은 Threads fetch 실패라 제외)
+ *   2) 본문 미디어 중 첫 Cloudinary 이미지
+ *   3) Cloudinary 비디오 → 첫 프레임(so_0) jpg 변환
+ */
+function deriveReplyImage(post: {
+  mediaUrls?: string[] | null;
+  commerceProduct?: { thumbnailUrl?: string | null } | null;
+}): string | undefined {
+  const isCloudinary = (u: string) => u.includes('res.cloudinary.com');
+  const isVideo = (u: string) => u.includes('/video/upload/') || /\.mp4(?:\?|$)/i.test(u);
+
+  const thumb = post.commerceProduct?.thumbnailUrl ?? undefined;
+  if (thumb && isCloudinary(thumb) && !isVideo(thumb)) return thumb;
+
+  const media = post.mediaUrls ?? [];
+  const img = media.find((u) => isCloudinary(u) && !isVideo(u));
+  if (img) return img;
+
+  const vid = media.find((u) => isCloudinary(u) && isVideo(u));
+  if (vid) {
+    return vid
+      .replace('/video/upload/', '/video/upload/so_0/')
+      .replace(/\.mp4(?=\?|$)/i, '.jpg');
+  }
+  return undefined;
+}
+
+/**
  * Publisher — 2-step 발행 오케스트레이션.
  *
  * 흐름:
@@ -204,19 +234,24 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
       const replyDelayMs = hasVideo ? 30_000 : 1_000;
 
       // 재시도 로직: reply 실패 시 지수 백오프 (비디오 후단 처리 대기 · 최대 총 ~3분)
-      const maxAttempts = hasVideo ? 6 : 2;
+      const maxAttempts = hasVideo ? 6 : 3;
       let lastErr: unknown = null;
+      // 답글에 이미지를 첨부하면 미디어 슬롯이 채워져 쿠팡 링크 자동 OG 프리뷰 카드가 억제된다.
+      //   (ZWS URL 마스킹은 실제로 안 먹히고 링크만 깨진다 — API 엔 프리뷰 끄는 파라미터 없음.)
+      //   쿠팡 파트너스 썸네일(ads-partners.coupang.com)은 Threads 가 못 가져와(WEBPAGE_CURL_FAILED) 리플이 통째로 실패하므로,
+      //   Threads 가 항상 fetch 가능한 우리 Cloudinary 미디어 프레임을 우선 사용한다.
+      //   그래도 실패하면 텍스트 전용으로 폴백(이 경우에만 프리뷰가 뜰 수 있음 · 드묾).
+      let replyImageUrl: string | undefined = deriveReplyImage(post);
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         const wait = attempt === 1 ? replyDelayMs : replyDelayMs * attempt;
-        logger.info({ postId: post.id, attempt, waitMs: wait, hasVideo }, 'waiting before pinned reply');
+        logger.info({ postId: post.id, attempt, waitMs: wait, hasVideo, withImage: Boolean(replyImageUrl) }, 'waiting before pinned reply');
         await new Promise((r) => setTimeout(r, wait));
         try {
           const reply = await client.reply({
             accessToken,
             parentId: threadsPostId,
             text: post.generatedReply,
-            // 상품 썸네일을 reply 에 첨부 → 쿠팡 링크 자동 OG 프리뷰 카드 억제
-            imageUrl: post.commerceProduct?.thumbnailUrl ?? undefined,
+            imageUrl: replyImageUrl,
           });
           threadsReplyId = reply.threadsReplyId;
           logger.info({ postId: post.id, threadsReplyId, attempt }, 'pinned reply published');
@@ -224,7 +259,9 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
           break;
         } catch (err) {
           lastErr = err;
-          logger.warn({ err, postId: post.id, attempt, maxAttempts }, 'pinned reply attempt failed, retrying');
+          logger.warn({ err, postId: post.id, attempt, maxAttempts, hadImage: Boolean(replyImageUrl) }, 'pinned reply attempt failed, retrying');
+          // 이미지 첨부가 실패 원인일 가능성 높음 → 다음 시도는 텍스트 전용으로 (딥링크+공정위는 텍스트에 그대로).
+          replyImageUrl = undefined;
         }
       }
       if (lastErr) {

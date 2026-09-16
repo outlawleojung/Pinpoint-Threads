@@ -41,6 +41,7 @@ export interface CopywriteInput {
   sourceMediaDescription?: string;
   productName?: string;
   productCategory?: string;
+  productNote?: string; // 판매자/큐레이터가 준 부연설명 — 원문에 없어도 신뢰 가능한 상품 사실(아이디어 상품 셀링포인트 등)
   personaPrompt?: string;
   accountSeed: string;
   deeplinkUrl?: string;
@@ -199,6 +200,17 @@ async function generateBody(input: CopywriteInput & { sourceBrief: SourceBrief }
   userParts.push({ type: 'text', text: renderSourceBrief(input.sourceBrief) });
   // 목표 스타일 주입 — 사용자 계정 실제 고반응 글에서 역설계한 하입/FOMO/무심한 툭툭 공식.
   userParts.push({ type: 'text', text: renderWinningStyle() });
+
+  // 판매자/큐레이터 부연설명 — 원문에 안 보여도 이 상품의 진짜 셀링포인트(특히 아이디어 상품).
+  //   신뢰 가능한 사실로 취급하되, 여기 적힌 것 이상으로 기능·효능을 지어내지 않는다.
+  if (input.productNote?.trim()) {
+    userParts.push({
+      type: 'text',
+      text:
+        `★ 판매자/큐레이터가 알려준 이 상품의 핵심 (신뢰 가능한 사실 — 원문·이미지에 안 드러나도 사실로 간주하고 활용):\n"""\n${input.productNote.trim()}\n"""\n` +
+        `이게 이 상품의 진짜 셀링포인트다. 이걸 중심으로 "왜 갖고 싶은지"를 표현한다. 단, 여기 적힌 것 이상으로 기능·효능·수치를 지어내지 않는다.`,
+    });
+  }
 
   if (input.sourceImageUrl) {
     userParts.push({ type: 'image', url: input.sourceImageUrl });
@@ -388,6 +400,7 @@ export async function generateCopy(input: CopywriteInput): Promise<CopywriteResu
         productCategory: input.productCategory,
         sourceBrief,
         sourceText: input.sourceText,
+        productNote: input.productNote,
       });
       if (check.ok) break;
       lastReason = check.reason;
@@ -420,6 +433,7 @@ export async function factCheckCopy(args: {
   productCategory?: string;
   sourceBrief?: SourceBrief;
   sourceText?: string;
+  productNote?: string;
 }): Promise<{ ok: boolean; reason?: string }> {
   // productName 없어도 **개인정보·정책 검사**는 수행 (일상글 Pipeline C 페르소나 누출 방지).
   // 상품이 없으면 사실오류(§1)는 자연히 해당 없음, 개인정보(§2)만 판정.
@@ -462,8 +476,12 @@ JSON으로만: { "ok": boolean, "reason": "짧게 어떤 오류인지 (ok=true�
     : args.sourceBrief
       ? `\n원본 상황(근거): ${args.sourceBrief.situation}`
       : '';
+  // 판매자 부연설명도 근거로 준다 → 원문에 없어도 이 설명 기반 표현은 지어낸 게 아니다(아이디어 상품 셀링포인트).
+  const noteCtx = args.productNote?.trim()
+    ? `\n판매자가 알려준 상품 사실(이 내용 기반 표현은 근거 있음 → 지어낸 것 아님):\n"${args.productNote.trim().slice(0, 400)}"`
+    : '';
   const user = `${args.productName ? `상품: ${args.productName}${args.productCategory ? ` (카테고리: ${args.productCategory})` : ''}` : '상품 없음 (일상글 · 개인정보·정책만 검사)'}
-카피: "${args.body}"${sourceCtx}
+카피: "${args.body}"${sourceCtx}${noteCtx}
 
 판정 JSON:`;
 
