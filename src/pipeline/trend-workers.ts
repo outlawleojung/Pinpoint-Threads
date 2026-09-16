@@ -253,15 +253,11 @@ export async function scheduleTrendJobs(): Promise<void> {
     },
   );
 
-  // daily digest at 08:00 KST
-  await trendDigestQueue.add(
-    'trend-digest-daily',
-    { perBucket: 6 },
-    {
-      repeat: { pattern: DIGEST_CRON, tz: 'Asia/Seoul' },
-      jobId: 'trend-digest-daily',
-    },
-  );
+  // ⛔ 아침 트렌드 다이제스트(08:00 텔레그램 보고서) **정지** (2026-09-16 사용자 방침 · "쓸데없다").
+  //   등록 안 함 + 기존 repeatable 제거. 트렌드 수집(poll)·검색(search)은 콘텐츠 소스용이라 유지.
+  await trendDigestQueue
+    .removeRepeatable('trend-digest-daily', { pattern: DIGEST_CRON, tz: 'Asia/Seoul' }, 'trend-digest-daily')
+    .catch(() => {});
 
   // daily trend-driven search + auto ingest
   await trendSearchQueue.add(
