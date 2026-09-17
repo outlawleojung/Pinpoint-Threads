@@ -241,27 +241,33 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
       //   쿠팡 파트너스 썸네일(ads-partners.coupang.com)은 Threads 가 못 가져와(WEBPAGE_CURL_FAILED) 리플이 통째로 실패하므로,
       //   Threads 가 항상 fetch 가능한 우리 Cloudinary 미디어 프레임을 우선 사용한다.
       //   그래도 실패하면 텍스트 전용으로 폴백(이 경우에만 프리뷰가 뜰 수 있음 · 드묾).
-      let replyImageUrl: string | undefined = deriveReplyImage(post);
+      const replyImageUrl: string | undefined = deriveReplyImage(post);
+      // ★ 이미지를 최대한 유지한다(이미지=프리뷰 억제). 한 번 실패했다고 바로 텍스트로 떨어뜨리면
+      //   일시적 오류에도 영구 텍스트 폴백 → OG 프리뷰가 뜬다(실측 MUJI 사고). 이미지로 여러 번 재시도하고,
+      //   **마지막 몇 시도에서만** 텍스트로 폴백(리플 자체는 반드시 나가게).
+      const imageMaxAttempt = replyImageUrl ? Math.min(maxAttempts - 1, 3) : 0;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         const wait = attempt === 1 ? replyDelayMs : replyDelayMs * attempt;
-        logger.info({ postId: post.id, attempt, waitMs: wait, hasVideo, withImage: Boolean(replyImageUrl) }, 'waiting before pinned reply');
+        const useImage = attempt <= imageMaxAttempt ? replyImageUrl : undefined;
+        logger.info({ postId: post.id, attempt, waitMs: wait, hasVideo, withImage: Boolean(useImage) }, 'waiting before pinned reply');
         await new Promise((r) => setTimeout(r, wait));
         try {
           const reply = await client.reply({
             accessToken,
             parentId: threadsPostId,
             text: post.generatedReply,
-            imageUrl: replyImageUrl,
+            imageUrl: useImage,
           });
           threadsReplyId = reply.threadsReplyId;
-          logger.info({ postId: post.id, threadsReplyId, attempt }, 'pinned reply published');
+          logger.info({ postId: post.id, threadsReplyId, attempt, withImage: Boolean(useImage) }, 'pinned reply published');
+          if (!useImage) {
+            logger.warn({ postId: post.id }, '고정댓글이 텍스트로 발행됨 → OG 프리뷰가 뜰 수 있음(이미지 첨부 계속 실패)');
+          }
           lastErr = null;
           break;
         } catch (err) {
           lastErr = err;
-          logger.warn({ err, postId: post.id, attempt, maxAttempts, hadImage: Boolean(replyImageUrl) }, 'pinned reply attempt failed, retrying');
-          // 이미지 첨부가 실패 원인일 가능성 높음 → 다음 시도는 텍스트 전용으로 (딥링크+공정위는 텍스트에 그대로).
-          replyImageUrl = undefined;
+          logger.warn({ err, postId: post.id, attempt, maxAttempts, triedImage: Boolean(useImage) }, 'pinned reply attempt failed, retrying');
         }
       }
       if (lastErr) {
