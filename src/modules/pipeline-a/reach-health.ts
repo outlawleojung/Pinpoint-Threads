@@ -55,14 +55,39 @@ export async function feedReachMedian(accountId: string): Promise<number | null>
   return (await feedReachStats(accountId))?.median ?? null;
 }
 
+// 붕괴(도달 완전 억제·섀도우밴/메타 제한) 판정 기준.
+const COLLAPSE_MAX = 20;      // 최근 발행이 전부 이 미만이면 붕괴로 본다
+const COLLAPSE_SAMPLE = 3;    // 최근 N개 연속
+
+/**
+ * "붕괴" 계정 — 최근 발행이 전 종류(스하리 포함) 전부 극저(<COLLAPSE_MAX)로 억제된 상태.
+ *   메타 계정 제한·섀도우밴 신호. 글을 더 넣어도 워밍업이 안 되므로 **발행 대상에서 뺀다(휴식·관찰)**.
+ */
+export async function isCollapsedAccount(accountId: string): Promise<boolean> {
+  // 최근 글엔 아직 스냅샷 없는(24h 전) 게 섞이므로 넉넉히 가져와 **스냅샷 있는 최근 3건**으로 판정.
+  const posts = await prisma.post.findMany({
+    where: { accountId, state: 'PUBLISHED', kind: { in: ['DAILY', 'SHOPPING', 'SHARING'] } },
+    orderBy: { publishedAt: 'desc' },
+    take: 12,
+    select: { insightSnapshots: { select: { views: true }, orderBy: { hoursAfterPublish: 'desc' }, take: 1 } },
+  });
+  const vals = posts
+    .map((p) => p.insightSnapshots[0]?.views)
+    .filter((v): v is number => typeof v === 'number')
+    .slice(0, COLLAPSE_SAMPLE);
+  return vals.length >= COLLAPSE_SAMPLE && vals.every((v) => v < COLLAPSE_MAX);
+}
+
 /**
  * "도달이 막힌(억제)" 계정 판정 — 일상글 워밍업 대상.
  *   이력이 있는데(표본 충분) 중앙값도 낮고 최근 한 번도 안 터진 계정.
+ *   ★ 단 **붕괴(collapsed) 계정은 제외** — 워밍업으로 안 살아나므로 휴식 대상이지 라우팅 대상이 아님.
  *   신생(이력 부족)은 여기 해당 X — 별개로 자연 워밍업.
  */
 export async function isRecoveringAccount(accountId: string): Promise<boolean> {
   const s = await feedReachStats(accountId);
   if (s == null) return false;
+  if (await isCollapsedAccount(accountId)) return false; // 붕괴는 워밍업 대상 아님
   return s.median < REACH_FLOOR && s.max < BREAKOUT_PROOF;
 }
 
