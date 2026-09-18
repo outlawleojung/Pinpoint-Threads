@@ -20,8 +20,32 @@ let sharedBrowser: Browser | null = null;
 
 async function getBrowser(): Promise<Browser> {
   if (sharedBrowser && sharedBrowser.isConnected()) return sharedBrowser;
-  sharedBrowser = await chromium.launch({ headless: true });
+  // ★ 자동재생 강제: Threads 는 영상이 재생되기 전엔 <video> 를 만들지 않아
+  //   헤드리스에선 DOM·네트워크 캡처가 둘 다 빈다. no-user-gesture 정책으로
+  //   상단 target 게시글 영상이 자동재생 → 네트워크로 mp4 응답이 잡힌다.
+  sharedBrowser = await chromium.launch({
+    headless: true,
+    args: ['--autoplay-policy=no-user-gesture-required', '--mute-audio'],
+  });
   return sharedBrowser;
+}
+
+/**
+ * 페이지 초기 HTML(Relay 캐시)에서 video_versions mp4 URL 추출 (DOM·네트워크가 빈 경우 폴백).
+ *   target 게시글이 Relay 데이터 앞쪽에 렌더되므로 순서 유지 → 첫 URL 이 target 영상일 확률이 높다.
+ */
+function parseMp4sFromHtml(html: string): string[] {
+  const re = /"url":"([^"]*?\.mp4[^"]*?)"/g;
+  const seen = new Set<string>();
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    const u = m[1]!
+      .replace(/\\u0025/g, '%')
+      .replace(/\\u0026/g, '&')
+      .replace(/\\\//g, '/');
+    seen.add(u);
+  }
+  return Array.from(seen);
 }
 
 export async function shutdownPlaywrightBrowser(): Promise<void> {
@@ -100,11 +124,20 @@ export async function extractThreadsVideoUrls(url: string): Promise<ThreadsVideo
       return out;
     }, shortcode);
 
-    // DOM shortcode-매칭 우선 (가장 정확). 없으면 네트워크 캡처 fallback (스크롤 안 해서 target 만 로드됨).
+    // DOM shortcode-매칭 우선 (가장 정확). 없으면 네트워크 캡처. 둘 다 비면 HTML(Relay) 파싱 폴백.
     const domMp4s = Array.from(new Set(videoSrcs));
-    const chosen = domMp4s.length > 0 ? domMp4s : Array.from(new Set(networkMp4s));
+    let chosen = domMp4s.length > 0 ? domMp4s : Array.from(new Set(networkMp4s));
+    let source = domMp4s.length > 0 ? 'dom' : 'network';
+    if (chosen.length === 0) {
+      const html = await page.content().catch(() => '');
+      const htmlMp4s = parseMp4sFromHtml(html);
+      if (htmlMp4s.length > 0) {
+        chosen = htmlMp4s;
+        source = 'html';
+      }
+    }
     logger.info(
-      { url, shortcode, domCount: domMp4s.length, networkCount: networkMp4s.length, source: domMp4s.length > 0 ? 'dom' : 'network' },
+      { url, shortcode, domCount: domMp4s.length, networkCount: networkMp4s.length, htmlCount: source === 'html' ? chosen.length : 0, source },
       'threads video extract done',
     );
     return { mp4Urls: chosen, fetchedAt: new Date() };

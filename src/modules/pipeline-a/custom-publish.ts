@@ -3,7 +3,7 @@ import { logger } from '../../config/logger.js';
 import { PostKind, PostState, InboundSource, InboundStatus } from '@prisma/client';
 import { ingestUrl } from '../shared/url-ingester/index.js';
 import { handleMedia, uploadFromUrl } from '../shared/media-handler/index.js';
-import { generateCustomBody } from '../shared/copywriter/index.js';
+import { generateCustomBody, REPLY_LINK_REPEAT } from '../shared/copywriter/index.js';
 import { sendApprovalRequest } from '../shared/approval-gate/service.js';
 import { CoupangAdapter } from '../../infra/commerce/coupang-client.js';
 import { env } from '../../config/env.js';
@@ -141,7 +141,9 @@ export async function runCustomPublish(input: RunCustomPublishInput): Promise<Cu
     let generatedReply: string | undefined;
     if (deeplink && channel) {
       const lead = (gen.replyLead ?? '').trim() || '자세한 건 여기서 확인해봐';
-      generatedReply = `[광고] ${lead}\n${deeplink}\n\n${disclaimerFor(channel)}`;
+      // 딥링크 3회 반복 — 링크 증발(첫 링크 누락) 방어. project_reply_link_repeat.
+      const links = Array(REPLY_LINK_REPEAT).fill(deeplink).join('\n');
+      generatedReply = `[광고] ${lead}\n${links}\n\n${disclaimerFor(channel)}`;
     }
 
     await prisma.post.update({

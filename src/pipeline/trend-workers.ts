@@ -243,15 +243,11 @@ export function startTrendWorkers(): Worker[] {
 const LINE_B_SLOTS = ['20 10 * * *', '10 13 * * *', '40 15 * * *', '20 18 * * *', '10 21 * * *'];
 
 export async function scheduleTrendJobs(): Promise<void> {
-  // daily poll at 07:00 KST (하루 1회. 다이제스트 1h 전)
-  await trendPollQueue.add(
-    'trend-poll-daily',
-    { triggeredBy: 'scheduler' },
-    {
-      repeat: { pattern: POLL_CRON, tz: 'Asia/Seoul' },
-      jobId: 'trend-poll-daily',
-    },
-  );
+  // ⛔ 트렌드 폴 **정지** (2026-09-18 · 불필요 API 정리). 자동 트렌드 수집은 수동 URL 흐름에 안 쓰이고
+  //   다운스트림 검색·태깅 LLM 호출을 유발. 재활성: 아래 removeRepeatable → add 로 되돌리면 됨.
+  await trendPollQueue
+    .removeRepeatable('trend-poll-daily', { pattern: POLL_CRON, tz: 'Asia/Seoul' }, 'trend-poll-daily')
+    .catch(() => {});
 
   // ⛔ 아침 트렌드 다이제스트(08:00 텔레그램 보고서) **정지** (2026-09-16 사용자 방침 · "쓸데없다").
   //   등록 안 함 + 기존 repeatable 제거. 트렌드 수집(poll)·검색(search)은 콘텐츠 소스용이라 유지.
@@ -259,17 +255,15 @@ export async function scheduleTrendJobs(): Promise<void> {
     .removeRepeatable('trend-digest-daily', { pattern: DIGEST_CRON, tz: 'Asia/Seoul' }, 'trend-digest-daily')
     .catch(() => {});
 
-  // daily trend-driven search + auto ingest
-  await trendSearchQueue.add(
-    'trend-search-daily',
-    { topSignals: 5, perPlatformResults: 10, minLikes: 100 },
-    {
-      repeat: { pattern: SEARCH_CRON, tz: 'Asia/Seoul' },
-      jobId: 'trend-search-daily',
-    },
-  );
+  // ⛔ 트렌드 검색+자동 인제스트 **정지** (2026-09-18 · 불필요 API 정리).
+  //   검색→후보 자동수집→LLM 태깅/분류(search-orchestrator·filter·viralfactors-tagger·content-classifier)로
+  //   토큰을 크게 소모. 소스는 수동 URL만 사용하므로 불필요.
+  await trendSearchQueue
+    .removeRepeatable('trend-search-daily', { pattern: SEARCH_CRON, tz: 'Asia/Seoul' }, 'trend-search-daily')
+    .catch(() => {});
 
-  // daily Pipeline B 스하리 해시태그 벤치마크 수집
+  // ✅ 스하리 벤치마크 수집 **유지** (스하리 상대 발견에 필요 · 스크래핑은 Apify라 Anthropic 크레딧 안 씀).
+  //   단 수집된 글의 viralfactors LLM 태깅은 비용 절감 위해 끔(sharing-collector VIRALFACTORS_TAG_ENABLED=false).
   await sharingCollectQueue.add(
     'sharing-collect-daily',
     { triggeredBy: 'scheduler' },
@@ -289,15 +283,11 @@ export async function scheduleTrendJobs(): Promise<void> {
     },
   );
 
-  // daily Pipeline B 스하리 카피 생성 → 승인 카드 (계정별 1건, 하드 dedup 24h)
-  await sharingPublishQueue.add(
-    'sharing-publish-daily',
-    { triggeredBy: 'scheduler' },
-    {
-      repeat: { pattern: SHARING_PUBLISH_CRON, tz: 'Asia/Seoul' },
-      jobId: 'sharing-publish-daily',
-    },
-  );
+  // ⛔ 스하리 자동 카피 생성 **정지** (2026-09-18 · 불필요 API 정리).
+  //   계정별 매일 LLM 카피 생성 = 사람 트리거 없는 백그라운드 토큰 소모. 스하리도 수동 발행으로 전환.
+  await sharingPublishQueue
+    .removeRepeatable('sharing-publish-daily', { pattern: SHARING_PUBLISH_CRON, tz: 'Asia/Seoul' }, 'sharing-publish-daily')
+    .catch(() => {});
 
   // ⛔ 자동 쇼핑 발행 크론 **정지** (2026-09-04 사용자 방침).
   //   이유: 좋아요순 top 벤치마크를 5계정에 동시·동일 콘텐츠로 뿌려 "매일 각 계정 똑같은 쇼핑글" 발생.
@@ -312,38 +302,35 @@ export async function scheduleTrendJobs(): Promise<void> {
   //   같은 상품 금지(크로스계정 DB dedup) · 동시 발행 금지(계정별 다른 slot).
   await scheduleLineBPerAccount();
 
-  // daily Pipeline D 블로그 트렌드 수집 (naver-daily-info 09:00 이전, 08:50)
-  await naverTrendCollectQueue.add(
-    'naver-trend-collect-daily',
-    { triggeredBy: 'scheduler' },
-    {
-      repeat: { pattern: NAVER_TREND_COLLECT_CRON, tz: 'Asia/Seoul' },
-      jobId: 'naver-trend-collect-daily',
-    },
-  );
+  // ⛔ 네이버 블로그 트렌드 수집 **정지** (2026-09-18 · 불필요 API 정리).
+  //   정보글 자동생성을 끄므로 그 전 단계인 트렌드 수집(LLM 분석 포함)도 불필요.
+  await naverTrendCollectQueue
+    .removeRepeatable('naver-trend-collect-daily', { pattern: NAVER_TREND_COLLECT_CRON, tz: 'Asia/Seoul' }, 'naver-trend-collect-daily')
+    .catch(() => {});
 
-  // daily Pipeline D 정보글(INFO) 1건 생성 + 관리자 텔레그램 알림 (수동 발행)
-  await naverDailyInfoQueue.add(
-    'naver-daily-info-daily',
-    { triggeredBy: 'scheduler' },
-    {
-      repeat: { pattern: NAVER_DAILY_INFO_CRON, tz: 'Asia/Seoul' },
-      jobId: 'naver-daily-info-daily',
-    },
-  );
+  // ⛔ 네이버 정보글 자동 생성 **정지** (2026-09-18 · 불필요 API 정리).
+  //   매일 INFO 카피를 LLM으로 생성 = 백그라운드 토큰 소모. 필요 시 수동 트리거로만.
+  await naverDailyInfoQueue
+    .removeRepeatable('naver-daily-info-daily', { pattern: NAVER_DAILY_INFO_CRON, tz: 'Asia/Seoul' }, 'naver-daily-info-daily')
+    .catch(() => {});
 
+  // 2026-09-18 불필요 API 정리: 자동 LLM 크론 전부 정지. 유지되는 유일한 반복 작업 = 계정 메트릭 동기화(LLM 없음).
   logger.info(
     {
-      pollCron: POLL_CRON,
-      digestCron: DIGEST_CRON,
-      searchCron: SEARCH_CRON,
-      sharingCron: SHARING_CRON,
-      sharingPublishCron: SHARING_PUBLISH_CRON,
-      lineBSlots: LINE_B_SLOTS.length,
-      naverDailyInfoCron: NAVER_DAILY_INFO_CRON,
-      naverTrendCollectCron: NAVER_TREND_COLLECT_CRON,
+      kept: ['account-metrics-sync-daily', 'sharing-collect-daily(태깅 OFF)'],
+      stopped: [
+        'trend-poll-daily',
+        'trend-search-daily',
+        'sharing-publish-daily',
+        'shopping-publish-daily',
+        'trend-digest-daily',
+        'naver-trend-collect-daily',
+        'naver-daily-info-daily',
+        'line-b-*',
+      ],
+      accountMetricsCron: ACCOUNT_METRICS_CRON,
     },
-    'trend jobs scheduled (repeat)',
+    'trend jobs: 자동 LLM 크론 정지 · 계정 메트릭만 유지',
   );
 }
 

@@ -12,6 +12,10 @@ import { embedBenchmark } from '../../shared/source-collector/embedder.js';
 import { isVoyageConfigured } from '../../../infra/voyage-client.js';
 import { ContentType, InboundPlatform } from '@prisma/client';
 
+// ⛔ 수집된 스하리 글의 viralfactors LLM 태깅 스위치 (2026-09-18 · Anthropic 비용 절감으로 기본 OFF).
+//   수집(상대 발견)은 태그 없이도 동작. 태그 기반 few-shot 이 다시 필요하면 true.
+const VIRALFACTORS_TAG_ENABLED = false;
+
 /**
  * Pipeline B (팔로워 부스팅) 전용 · 스하리 해시태그 벤치마크 수집기.
  *
@@ -183,9 +187,13 @@ export async function collectSharingBenchmarks(): Promise<SharingCollectSummary>
           summary.totalSaved += 1;
 
           // best-effort 태깅 · 임베딩
-          tagBenchmarkPost(bench.id).catch((err) =>
-            logger.warn({ err, id: bench.id }, 'sharing benchmark tag failed'),
-          );
+          // ⛔ viralfactors LLM 태깅 기본 OFF (2026-09-18 · Anthropic 비용 절감).
+          //   수집(스하리 상대 발견)엔 태그 불필요. 태그 기반 few-shot 이 다시 필요하면 true 로.
+          if (VIRALFACTORS_TAG_ENABLED) {
+            tagBenchmarkPost(bench.id).catch((err) =>
+              logger.warn({ err, id: bench.id }, 'sharing benchmark tag failed'),
+            );
+          }
           if (isVoyageConfigured()) {
             embedBenchmark(bench.id).catch((err) =>
               logger.warn({ err, id: bench.id }, 'sharing benchmark embed failed'),
