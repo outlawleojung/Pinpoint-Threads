@@ -355,16 +355,20 @@ export async function handleApprovalCallback(action: Action, postId: string): Pr
       .catch(() => {});
   }
 
-  // 텔레그램 수동 승인 = 즉시 발행 (사용자님이 지금 발행하려고 승인한 것).
-  // 자동 크론(shopping-publisher)만 계정 시차 스케줄 적용.
+  // 텔레그램 수동 승인 → 계정당 페이싱 규칙으로 발행 예약 (2026-09-18 방침).
+  //   계정당 종류별 하루 1건 + 같은 계정 글끼리 ≥4h. 위반 없으면 즉시, 있으면 다음 유효 시각으로 지연.
+  //   (벤치마크 URL 을 연달아 올려도 카드가 줄서서 하루 하나씩 나감)
   let scheduleNote = '';
   if (action === 'approve') {
     try {
-      await prisma.post.update({ where: { id: postId }, data: { scheduledAt: new Date() } });
-      await publishQueue.add('publish', { postId }, { jobId: `publish-${postId}` });
-      scheduleNote = ' · 즉시 발행';
+      const { computeManualPublishSchedule } = await import('../publisher/scheduler.js');
+      const meta = await prisma.post.findUnique({ where: { id: postId }, select: { accountId: true, kind: true } });
+      const sched = await computeManualPublishSchedule(meta!.accountId, meta!.kind);
+      await prisma.post.update({ where: { id: postId }, data: { scheduledAt: sched.targetTime } });
+      await publishQueue.add('publish', { postId }, { jobId: `publish-${postId}`, delay: sched.delayMs });
+      scheduleNote = sched.delayMs > 60_000 ? ` · ${sched.reason}` : ' · 즉시 발행';
     } catch (err) {
-      logger.error({ postId, err }, 'immediate publish enqueue failed');
+      logger.error({ postId, err }, 'publish schedule/enqueue failed');
       scheduleNote = ` ⚠ 발행 큐 실패: ${(err as Error).message}`;
     }
   }

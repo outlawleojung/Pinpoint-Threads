@@ -197,6 +197,80 @@ function startOfToday(): Date {
   return d;
 }
 
+// 계정당 발행 페이싱 규칙 (2026-09-18 사용자 방침):
+//   · 종류(SHOPPING/DAILY/SHARING)별 하루 1건 (한 계정 하루 최대 쇼핑1·일상1·스하리1)
+//   · 같은 계정 글끼리 최소 4시간 간격
+const MANUAL_MIN_GAP_MS = 4 * 60 * 60 * 1000;
+
+export interface ManualSchedule {
+  targetTime: Date;
+  delayMs: number;
+  reason: string; // 지연 사유 (즉시면 '')
+}
+
+function fmtHm(d: Date): string {
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const now = new Date();
+  const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  if (sameDay) return hm;
+  return `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
+}
+
+/**
+ * 수동 승인 발행 시각 계산 — 계정당 페이싱 규칙 적용.
+ *   위반 없으면 즉시(delay 0). 위반 시 다음 유효 시각으로 지연.
+ */
+export async function computeManualPublishSchedule(accountId: string, kind: string): Promise<ManualSchedule> {
+  const now = new Date();
+  const account = await prisma.account.findUnique({ where: { id: accountId }, select: { activeHourStart: true } });
+
+  const activeStart = account?.activeHourStart ?? 9;
+  const dayKey = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+
+  // 1) 이 계정 마지막 발행/예약 시각 (종류 무관) → 4시간 간격의 기준.
+  //    이미 예약된(APPROVED/PUBLISHING) 카드도 포함 → 여러 카드가 4h씩 줄서서 쌓임.
+  const last = await prisma.post.findFirst({
+    where: {
+      accountId,
+      OR: [
+        { state: 'PUBLISHED', publishedAt: { not: null } },
+        { state: { in: ['APPROVED', 'PUBLISHING'] }, scheduledAt: { not: null } },
+      ],
+    },
+    orderBy: [{ publishedAt: 'desc' }, { scheduledAt: 'desc' }],
+    select: { publishedAt: true, scheduledAt: true },
+  });
+  const lastTime = last?.publishedAt ?? last?.scheduledAt ?? new Date(0);
+
+  // 4시간 간격 적용
+  let target = new Date(Math.max(now.getTime(), lastTime.getTime() + MANUAL_MIN_GAP_MS));
+  let reason = target.getTime() > now.getTime() + 60_000 ? `직전 발행 4h 미달 → ${fmtHm(target)} 예약` : '';
+
+  // 2) 같은 종류가 이미 차지한 '날'은 건너뛴다 (계정당 종류별 하루 1건).
+  //    발행됨 + 예약됨 모두 카운트 → 같은 종류 카드를 연달아 승인해도 하루 하나씩 다음날로 밀림.
+  const sameKind = await prisma.post.findMany({
+    where: {
+      accountId,
+      kind: kind as never,
+      OR: [
+        { state: 'PUBLISHED', publishedAt: { not: null } },
+        { state: { in: ['APPROVED', 'PUBLISHING'] }, scheduledAt: { not: null } },
+      ],
+    },
+    select: { publishedAt: true, scheduledAt: true },
+  });
+  const usedDays = new Set(sameKind.map((p) => dayKey((p.publishedAt ?? p.scheduledAt)!)));
+  while (usedDays.has(dayKey(target))) {
+    const next = new Date(target);
+    next.setDate(next.getDate() + 1);
+    next.setHours(activeStart, Math.floor(Math.random() * 30), 0, 0);
+    target = next;
+    reason = `${kind} 다른 날 예약(계정당 종류별 하루 1건) → ${fmtHm(target)}`;
+  }
+
+  return { targetTime: target, delayMs: Math.max(0, target.getTime() - now.getTime()), reason };
+}
+
 /**
  * 계정별 예정된 발행 스케줄 조회 (Admin UI · 관찰용).
  */
