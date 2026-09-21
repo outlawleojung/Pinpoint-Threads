@@ -234,7 +234,9 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
       const replyDelayMs = hasVideo ? 30_000 : 1_000;
 
       // 재시도 로직: reply 실패 시 지수 백오프 (비디오 후단 처리 대기 · 최대 총 ~3분)
-      const maxAttempts = hasVideo ? 6 : 3;
+      // 비영상도 5회까지(이미지 4회 + 텍스트 1회): 이미지 컨테이너가 첫 시도에 "media not found"로
+      //   실패했다 재시도에서 살아나는 일시 오류가 잦음(2026-09-21 실측 · 최초 발행 3회 전부 실패 사고). 여유를 준다.
+      const maxAttempts = hasVideo ? 6 : 5;
       let lastErr: unknown = null;
       // 답글에 이미지를 첨부하면 미디어 슬롯이 채워져 쿠팡 링크 자동 OG 프리뷰 카드가 억제된다.
       //   (ZWS URL 마스킹은 실제로 안 먹히고 링크만 깨진다 — API 엔 프리뷰 끄는 파라미터 없음.)
@@ -245,7 +247,7 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
       // ★ 이미지를 최대한 유지한다(이미지=프리뷰 억제). 한 번 실패했다고 바로 텍스트로 떨어뜨리면
       //   일시적 오류에도 영구 텍스트 폴백 → OG 프리뷰가 뜬다(실측 MUJI 사고). 이미지로 여러 번 재시도하고,
       //   **마지막 몇 시도에서만** 텍스트로 폴백(리플 자체는 반드시 나가게).
-      const imageMaxAttempt = replyImageUrl ? Math.min(maxAttempts - 1, 3) : 0;
+      const imageMaxAttempt = replyImageUrl ? Math.min(maxAttempts - 1, 4) : 0;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         const wait = attempt === 1 ? replyDelayMs : replyDelayMs * attempt;
         const useImage = attempt <= imageMaxAttempt ? replyImageUrl : undefined;
