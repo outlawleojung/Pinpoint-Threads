@@ -246,11 +246,14 @@ export async function computeManualPublishSchedule(accountId: string, kind: stri
   let target = new Date(Math.max(now.getTime(), lastTime.getTime() + MANUAL_MIN_GAP_MS));
   let reason = target.getTime() > now.getTime() + 60_000 ? `직전 발행 4h 미달 → ${fmtHm(target)} 예약` : '';
 
-  // 2) 같은 종류가 이미 차지한 '날'은 건너뛴다 (계정당 종류별 하루 1건).
+  // 2) 같은 종류가 이미 차지한 '날'은 건너뛴다.
+  //    · 쇼핑(SHOPPING): 도달 우선 전략(2026-09-22) → **전체 계정 합산 하루 1건**만.
+  //    · 일상/스하리(DAILY·SHARING): 계정당 하루 1건.
   //    발행됨 + 예약됨 모두 카운트 → 같은 종류 카드를 연달아 승인해도 하루 하나씩 다음날로 밀림.
+  const shoppingGlobalCap = kind === 'SHOPPING'; // 쇼핑은 계정 무관 글로벌 캡
   const sameKind = await prisma.post.findMany({
     where: {
-      accountId,
+      ...(shoppingGlobalCap ? {} : { accountId }),
       kind: kind as never,
       OR: [
         { state: 'PUBLISHED', publishedAt: { not: null } },
@@ -265,7 +268,9 @@ export async function computeManualPublishSchedule(accountId: string, kind: stri
     next.setDate(next.getDate() + 1);
     next.setHours(activeStart, Math.floor(Math.random() * 30), 0, 0);
     target = next;
-    reason = `${kind} 다른 날 예약(계정당 종류별 하루 1건) → ${fmtHm(target)}`;
+    reason = shoppingGlobalCap
+      ? `쇼핑 전체 하루 1건 → 다른 날 예약 ${fmtHm(target)}`
+      : `${kind} 다른 날 예약(계정당 하루 1건) → ${fmtHm(target)}`;
   }
 
   return { targetTime: target, delayMs: Math.max(0, target.getTime() - now.getTime()), reason };
