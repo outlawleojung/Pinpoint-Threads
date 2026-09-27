@@ -11,6 +11,7 @@
 
 ## 00-overview
 - [vision](00-overview/vision.md) — 프로젝트 목적, 수익 모델, 성공 지표
+- [revenue-playbook](00-overview/revenue-playbook.md) — ★검증된 수익 전술(수강생 실증): 볼륨·꾸준함·재탕·소재·첫줄후킹·캐러셀
 - [glossary](00-overview/glossary.md) — 스하리, 쿠파스, CIB 등 용어 정의
 
 ## 01-pipelines
