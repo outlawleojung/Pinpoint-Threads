@@ -1,4 +1,4 @@
-import { Bot } from 'grammy';
+import { Bot, InlineKeyboard, type Context } from 'grammy';
 import { env } from '../../../config/env.js';
 import { logger } from '../../../config/logger.js';
 import { handleApprovalCallback, sendApprovalRequest, applyCorrection } from './service.js';
@@ -18,6 +18,7 @@ import { InboundSource } from '@prisma/client';
 import { detectPlatform, extractUrls } from '../url-ingester/platform-detector.js';
 import { handleNaverCommand } from './naver-command.js';
 import { addSectionLink } from '../../pipeline-d/relink/index.js';
+import { discoverCandidates, getCandidate, clearCandidate } from '../discovery/index.js';
 
 export const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
 
@@ -34,19 +35,20 @@ bot.use(async (ctx, next) => {
 // /start — 봇 살아있는지 확인용
 bot.command('start', async (ctx) => {
   await ctx.reply(
-    'Pinpoint Threads 승인 봇이 연결되었습니다.\n\n' +
-      '- /ping : 헬스체크\n' +
-      '- /newpost : 더미 승인 요청 발송\n' +
-      '- /classify : Claude 분류 테스트\n' +
-      '- /copy : 게시글 카피 1개 생성\n' +
-      '- /copy3 : 게시글 카피 3개 후보 생성\n' +
-      '- /vision : Claude Vision 이미지 정합성 테스트\n' +
-      '- /lineb : Line B(상품 우선) 자동 큐레이션 카드 생성 · /lineb one = 1건만\n' +
-      '- /published : 계정별 발행+성과 현황\n' +
-      '- /coupang <검색어> : 쿠팡 상품 검색 실 API 테스트\n' +
-      '- /deeplink <쿠팡URL> : 쿠팡 딥링크 생성 실 API 테스트\n' +
-      '- /ingest <URL> : URL 인제스터 수동 테스트 (Threads·TikTok·샤오홍슈·Instagram)\n\n' +
-      '💡 URL만 그대로 메시지에 붙여넣어도 자동 인제스트됩니다.',
+    'Pinpoint Threads 봇이 연결되었습니다.\n\n' +
+      '━━━ 매일 운영 ━━━\n' +
+      '🔎 소재 (또는 /discover) : 정서 맞는 해외 바이럴 발굴 → [일상글] 버튼으로 바로 카드\n' +
+      '🌿 일상 {URL} | 설명 : 일상글 카드\n' +
+      '🛒 {URL} 상품명 : 쇼핑 매칭 카드\n' +
+      '🖊 발행 {URL} | 방향 | 쿠팡링크 : 커스텀 발행\n' +
+      '💬 카드에 답장 : 정정해서 즉시 재생성\n' +
+      '📊 /published : 계정별 발행+성과 현황\n\n' +
+      '━━━ 도구·테스트 ━━━\n' +
+      '- /ping · /classify · /copy · /copy3 · /vision\n' +
+      '- /lineb · /coupang <검색어> · /deeplink <쿠팡URL>\n' +
+      '- /ingest <URL> (Threads·TikTok·샤오홍슈·Instagram·X)\n' +
+      '- /naver <링크> · /naverlink <글ID> <소제목#> <링크>\n\n' +
+      '💡 URL만 붙여넣어도 자동 인제스트. 발굴은 /소재.',
   );
 });
 
@@ -106,6 +108,60 @@ bot.command('daily', async (ctx) => {
   const desc = stripVideoFlag(arg.replace(/https?:\/\/\S+/g, '').replace(/^\s*\|\s*/, '').trim()).trim();
   await runDailyFromUrl(ctx, url, detectVideoFlag(arg), desc.length >= 2 ? desc : undefined);
 });
+
+// /소재 발굴 — 정서 맞는 해외 바이럴 후보 → 후보별 [일상글] 버튼. 발굴~발행 전부 텔레그램 안에서.
+//   ⚠️ 텔레그램은 한글 슬래시 명령을 인식 못 함(영문만). 그래서:
+//     - 영문 슬래시 명령 /discover 로 등록
+//     - 한글 "소재"/"소스"/"발굴" 은 아래 message:text 핸들러에서 텍스트로 받음(일상·발행과 동일 방식)
+//   (docs/08-decisions/2026-09-28-telegram-native-operation.md)
+bot.command('discover', async (ctx) => {
+  const n = Math.min(Math.max(Number((ctx.match ?? '').trim()) || 8, 1), 12);
+  await runDiscovery(ctx, n);
+});
+
+/** 발굴 실행 + 후보 카드 전송. 슬래시 명령·한글 텍스트 트리거 공용. */
+async function runDiscovery(ctx: Context, n: number): Promise<void> {
+  await ctx.reply(`🔎 정서 맞는 해외 바이럴 발굴 중… (일본 동물 X · TikTok) 최대 ${n}건`);
+  try {
+    const { candidates, degraded } = await discoverCandidates({ limit: n });
+    if (degraded.length) {
+      await ctx.reply('ℹ️ 일부 소스 미가동:\n' + degraded.map((d) => `· ${d.adapter}: ${d.reason}`).join('\n'));
+    }
+    if (candidates.length === 0) {
+      await ctx.reply('오늘은 새 후보가 없어요(이미 다룬 것 제외). 잠시 후 다시 하거나 URL 직접 주세요.');
+      return;
+    }
+    for (const c of candidates) await sendDiscoveryCard(ctx, c);
+    await ctx.reply(
+      `✅ 후보 ${candidates.length}건. [🌿 일상글 만들기] 누르면 그 소재로 카드 만들어 승인 요청 올립니다. (24h 후 후보 만료)`,
+    );
+  } catch (err) {
+    logger.error({ err }, '소재 발굴 실패');
+    await ctx.reply(`❌ 발굴 실패: ${(err as Error).message}`);
+  }
+}
+
+/** 발굴 후보 1건을 썸네일 + [일상글/스킵] 버튼 카드로 전송. */
+async function sendDiscoveryCard(
+  ctx: Context,
+  c: import('../discovery/index.js').DiscoveryCandidate,
+): Promise<void> {
+  const kb = new InlineKeyboard()
+    .text('🌿 일상글 만들기', `disc:daily:${c.id}`)
+    .text('⏭ 스킵', `disc:skip:${c.id}`);
+  const mediaLabel = c.hasVideo ? '🎬 영상' : `🖼 이미지 ${c.mediaCount}`;
+  const caption = [
+    `▲${fmtNum(c.score)} · ${mediaLabel} · @${c.authorHandle ?? '?'} (${c.lang ?? '?'})`,
+    c.title,
+    c.sourceUrl,
+  ].join('\n');
+  try {
+    if (c.thumbnailUrl) await ctx.replyWithPhoto(c.thumbnailUrl, { caption, reply_markup: kb });
+    else await ctx.reply(caption, { reply_markup: kb });
+  } catch {
+    await ctx.reply(caption, { reply_markup: kb });
+  }
+}
 
 /**
  * 일상글 URL 하나 → 가장 덜 발행한 계정에 Pipeline C 실행 → 승인 카드.
@@ -573,6 +629,15 @@ bot.on('message:text', async (ctx, next) => {
   }
   const urls = extractUrls(text);
 
+  // 발굴 트리거: "소재"/"소스"/"발굴" (+선택 숫자). 텔레그램이 한글 슬래시 명령을 못 잡아 텍스트로 받음.
+  //   메시지가 딱 그 단어(+숫자)일 때만 → 본문에 우연히 "소재" 들어간 일반 메시지와 충돌 안 함.
+  const discMatch = /^\s*(?:소재|소스|발굴)\s*(\d+)?\s*$/.exec(text);
+  if (discMatch) {
+    const n = Math.min(Math.max(Number(discMatch[1]) || 8, 1), 12);
+    await runDiscovery(ctx, n);
+    return;
+  }
+
   // 방식 0: "일상 {URL}" 태그 → Pipeline C 일상글 (쇼핑과 명시적 구분 · 사용자 방침)
   //   주의: \b 는 한글에 안 먹음 → "일상" 뒤 공백/콜론/끝 으로 판정 (단, "일상복" 같은 단어는 제외)
   if (/^\s*일상(?=[\s:：]|$)/.test(text)) {
@@ -863,6 +928,33 @@ bot.on('message:text', async (ctx, next) => {
     logger.error({ err }, 'ingestUrlsFromText 실패');
     await ctx.reply(`❌ 인제스트 실패: ${(err as Error).message}`);
   }
+});
+
+// 발굴 후보 콜백 — [🌿 일상글] / [⏭ 스킵]. 누르면 기존 일상 파이프라인 실행 → 승인 카드.
+bot.callbackQuery(/^disc:(daily|skip):(.+)$/, async (ctx) => {
+  const action = ctx.match?.[1] as 'daily' | 'skip';
+  const id = ctx.match?.[2] ?? '';
+  const c = await getCandidate(id);
+  if (!c) {
+    await ctx.answerCallbackQuery({ text: '후보 만료(24h) 또는 이미 처리됨' });
+    await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+    return;
+  }
+  if (action === 'skip') {
+    await clearCandidate(id);
+    await ctx.answerCallbackQuery({ text: '스킵' });
+    await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+    return;
+  }
+  await ctx.answerCallbackQuery({ text: '일상글 생성 시작' });
+  await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+  try {
+    await runDailyFromUrl(ctx, c.sourceUrl, c.hasVideo, c.text && c.text.length >= 2 ? c.text : undefined);
+  } catch (err) {
+    logger.error({ err, id }, 'disc:daily 처리 실패');
+    await ctx.reply(`❌ 처리 실패: ${(err as Error).message}`);
+  }
+  await clearCandidate(id);
 });
 
 // 승인/거부 콜백

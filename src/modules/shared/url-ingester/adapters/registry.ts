@@ -3,6 +3,7 @@ import { fetchThreadsPost, type ThreadsAdapterResult } from './threads-adapter.j
 import { fetchTikTokPost, type TikTokAdapterResult } from './tiktok-adapter.js';
 import { fetchInstagramPost, type InstagramAdapterResult } from './instagram-adapter.js';
 import { fetchXhsPost, type XhsAdapterResult } from './xiaohongshu-adapter.js';
+import { fetchXPost, type XAdapterResult } from './x-adapter.js';
 
 /**
  * Adapter Registry — 플랫폼별 fetch 로직 디스패치.
@@ -91,11 +92,27 @@ const xhsAdapter: Adapter = async ({ url }) => {
   };
 };
 
+const xAdapter: Adapter = async ({ url }) => {
+  const r: XAdapterResult = await fetchXPost({ url });
+  return {
+    authorHandle: r.authorHandle,
+    externalPostId: r.tweetId,
+    permalink: r.permalink,
+    text: r.text,
+    mediaUrls: r.mediaUrls,
+    publishedAt: r.publishedAt,
+    language: r.language,
+    engagement: r.engagement,
+    raw: r.raw,
+  };
+};
+
 const registry: Partial<Record<InboundPlatform, Adapter>> = {
   [InboundPlatform.THREADS]: threadsAdapter,
   [InboundPlatform.TIKTOK]: tiktokAdapter,
   [InboundPlatform.INSTAGRAM]: instagramAdapter,
   [InboundPlatform.XIAOHONGSHU]: xhsAdapter,
+  [InboundPlatform.X]: xAdapter,
 };
 
 export function getAdapter(platform: InboundPlatform): Adapter | null {

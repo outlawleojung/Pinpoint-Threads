@@ -14,6 +14,9 @@ const DOMAIN_MAP: Array<{ pattern: RegExp; platform: InboundPlatform }> = [
   { pattern: /(?:^|\.)xhslink\.com$/i, platform: InboundPlatform.XIAOHONGSHU },
   { pattern: /(?:^|\.)instagram\.com$/i, platform: InboundPlatform.INSTAGRAM },
   { pattern: /(?:^|\.)instagr\.am$/i, platform: InboundPlatform.INSTAGRAM },
+  { pattern: /(?:^|\.)x\.com$/i, platform: InboundPlatform.X },
+  { pattern: /(?:^|\.)twitter\.com$/i, platform: InboundPlatform.X },
+  { pattern: /(?:^|\.)t\.co$/i, platform: InboundPlatform.X },
 ];
 
 export function detectPlatform(urlOrHost: string): InboundPlatform {

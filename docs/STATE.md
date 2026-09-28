@@ -6,6 +6,15 @@ status: "active"
 
 # Current State — 프로젝트 스냅샷
 
+### 🆕 2026-09-28 텔레그램 네이티브 운영 — 발굴(/소재) + X 인제스트
+- **목표**: 발굴→발행→정정→승인 전부 텔레그램에서. 이 채팅(Claude Code)은 개발용으로만. (발행·정정·승인은 이미 텔레그램에서 되고 있었고, 빠진 "발굴"을 채움.)
+- **X(트위터) 인제스트 추가**: `InboundPlatform.X` enum(마이그레이션 `20260928020000_add_x_platform` Neon 적용 완료) + detector(x.com·twitter.com·t.co) + **X 어댑터=트위터 syndication JSON**(텍스트·이미지·mp4 한 번에, Playwright/Apify 불필요). registry 등록.
+- **발굴 모듈 `src/modules/shared/discovery/`**: `SourceAdapter`류 어댑터. `jp-animal-x`(검증됨·주력: 일본 동물 X 화제글 매일-갱신 모음 스크랩→syndication enrich→정치/슬픔 필터→좋아요 랭킹) + `tiktok-trend`(실험적: Apify 액터 `APIFY_ACTOR_TIKTOK_TREND_URL` 설정 시 활성, 미설정 시 정직하게 degraded). 이미 인제스트한 URL 제외(재탕 방지). 후보는 Redis에 24h 저장(콜백 조회용).
+- **텔레그램 `/소재`**(별칭 `/discover`·`/소스`): 후보를 썸네일+`[🌿 일상글 만들기]`/`[⏭ 스킵]` 버튼으로. 버튼→기존 Pipeline C→승인 카드. `/start` help 운영 흐름 순으로 재작성.
+- **검증(내 셸)**: X 어댑터 실추출(예: 51,702 likes 트윗 텍스트·미디어), 발굴 15건 스크랩→상위 8 랭킹, X URL→X어댑터 라우팅, prisma+Neon X enum 쿼리, `tsc --noEmit` 0오류. **미검증(사용자 셸)**: Redis 후보저장·라이브 텔레그램 콜백(로컬 Redis·봇 프로세스는 사용자 머신).
+- **주의**: 단일 이미지 후보는 "미디어 2개 이상" 규칙에 걸릴 수 있음 — 영상/다중이미지 후보 우선.
+- 설계: [08-decisions/2026-09-28-telegram-native-operation.md](08-decisions/2026-09-28-telegram-native-operation.md). Phase 2(후속): `/오늘` 대시보드·`/분석` KPI.
+
 ### 2026-09-09 전체 타입 검사·빌드 복구
 - `pnpm typecheck`, `pnpm build` 모두 exit 0. 카피 회귀 테스트 7개 통과. TypeScript 검사 범위/엄격도 및 애플리케이션 코드를 완화하지 않음.
 - 원인: 로컬 Playwright 미설치, 현재 스키마와 다른 구형 Prisma Client, pnpm 9에서 실행을 막는 workspace 설정. frozen lockfile 설치 및 Client 재생성으로 해결.
