@@ -3,6 +3,7 @@ import { logger } from '../../../../config/logger.js';
 import { env } from '../../../../config/env.js';
 import { runActorSync, isApifyConfigured } from '../../../../infra/apify-client.js';
 import { extractThreadsVideoUrls, pickBestMp4s } from '../../../../infra/playwright-threads-video.js';
+import { fetchThreadsPostRelay } from '../../../../infra/threads-relay.js';
 
 export interface ThreadsAdapterInput {
   url: string;
@@ -27,7 +28,7 @@ export interface ThreadsAdapterResult {
     quotes?: number;
   };
   raw: Record<string, unknown>;
-  fetchMethod: 'apify' | 'og-fallback';
+  fetchMethod: 'relay' | 'apify' | 'og-fallback';
 }
 
 const USER_AGENT =
@@ -65,7 +66,34 @@ export async function fetchThreadsPost(input: ThreadsAdapterInput): Promise<Thre
   }
   input = { ...input, url: effectiveUrl };
 
-  // Apify 경로
+  // 1순위: 비로그인 Relay 파싱 (무료 · 2026-09-30). Apify 무료 크레딧 소진으로 9/21부터 미디어 0개 수집되던 문제 해결.
+  if (parsed.postShortcode) {
+    try {
+      const rp = await fetchThreadsPostRelay(input.url, parsed.postShortcode);
+      if (rp && (rp.media.length > 0 || rp.text)) {
+        const result: ThreadsAdapterResult = {
+          authorHandle: rp.username ?? parsed.authorHandle,
+          threadsPostId: rp.code,
+          permalink: input.url,
+          text: rp.text,
+          mediaUrls: rp.media.map((m) => m.url),
+          mediaTypes: rp.media.map((m) => m.kind),
+          publishedAt: rp.takenAt,
+          language: rp.language ?? detectLanguage(rp.text),
+          engagement: { likes: rp.likes, replies: rp.replies, reposts: rp.reposts, quotes: rp.quotes },
+          raw: { relay: rp },
+          fetchMethod: 'relay',
+        };
+        logger.info({ url: input.url, mediaCount: result.mediaUrls.length, likes: rp.likes, method: 'relay' }, 'threads adapter extraction complete');
+        return result;
+      }
+      logger.warn({ url: input.url }, 'threads relay: target post not found, falling back');
+    } catch (err) {
+      logger.warn({ err, url: input.url }, 'threads relay fetch failed, falling back');
+    }
+  }
+
+  // 2순위: Apify (크레딧 있을 때만 의미)
   if (isApifyConfigured() && env.APIFY_ACTOR_THREADS_URL) {
     try {
       return await fetchViaApify(input.url, parsed);

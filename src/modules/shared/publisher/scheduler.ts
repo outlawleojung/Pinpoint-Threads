@@ -198,9 +198,11 @@ function startOfToday(): Date {
 }
 
 // 계정당 발행 페이싱 규칙 (2026-09-18 사용자 방침):
-//   · 종류(SHOPPING/DAILY/SHARING)별 하루 1건 (한 계정 하루 최대 쇼핑1·일상1·스하리1)
+//   · 종류별 하루 상한: 일상 2건(2026-09-30) · 스하리 1건 · 쇼핑 전체 1건
 //   · 같은 계정 글끼리 최소 4시간 간격
 const MANUAL_MIN_GAP_MS = 4 * 60 * 60 * 1000;
+/** 일상글 계정당 하루 상한 (2026-09-30 1→2). 4h 간격은 유지 → 계정당 하루 최대 ~4건(일상2·스하리1·쇼핑). */
+const DAILY_PER_ACCOUNT_CAP = 2;
 
 export interface ManualSchedule {
   targetTime: Date;
@@ -248,7 +250,7 @@ export async function computeManualPublishSchedule(accountId: string, kind: stri
 
   // 2) 같은 종류가 이미 차지한 '날'은 건너뛴다.
   //    · 쇼핑(SHOPPING): 도달 우선 전략(2026-09-22) → **전체 계정 합산 하루 1건**만.
-  //    · 일상/스하리(DAILY·SHARING): 계정당 하루 1건.
+  //    · 일상(DAILY): 계정당 하루 2건 · 스하리(SHARING): 계정당 하루 1건.
   //    발행됨 + 예약됨 모두 카운트 → 같은 종류 카드를 연달아 승인해도 하루 하나씩 다음날로 밀림.
   const shoppingGlobalCap = kind === 'SHOPPING'; // 쇼핑은 계정 무관 글로벌 캡
   const sameKind = await prisma.post.findMany({
@@ -262,7 +264,14 @@ export async function computeManualPublishSchedule(accountId: string, kind: stri
     },
     select: { publishedAt: true, scheduledAt: true },
   });
-  const usedDays = new Set(sameKind.map((p) => dayKey((p.publishedAt ?? p.scheduledAt)!)));
+  // 일상글은 계정당 하루 2건 (2026-09-30 사용자 "일상글을 많이 발행해야" · 링크 없는 도달 엔진). 나머지 1건.
+  const perDayCap = kind === 'DAILY' ? DAILY_PER_ACCOUNT_CAP : 1;
+  const dayCount = new Map<string, number>();
+  for (const p of sameKind) {
+    const k = dayKey((p.publishedAt ?? p.scheduledAt)!);
+    dayCount.set(k, (dayCount.get(k) ?? 0) + 1);
+  }
+  const usedDays = new Set([...dayCount].filter(([, n]) => n >= perDayCap).map(([k]) => k));
   while (usedDays.has(dayKey(target))) {
     const next = new Date(target);
     next.setDate(next.getDate() + 1);
@@ -270,7 +279,7 @@ export async function computeManualPublishSchedule(accountId: string, kind: stri
     target = next;
     reason = shoppingGlobalCap
       ? `쇼핑 전체 하루 1건 → 다른 날 예약 ${fmtHm(target)}`
-      : `${kind} 다른 날 예약(계정당 하루 1건) → ${fmtHm(target)}`;
+      : `${kind} 다른 날 예약(계정당 하루 ${perDayCap}건) → ${fmtHm(target)}`;
   }
 
   return { targetTime: target, delayMs: Math.max(0, target.getTime() - now.getTime()), reason };

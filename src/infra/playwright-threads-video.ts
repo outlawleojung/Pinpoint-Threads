@@ -18,7 +18,7 @@ import { logger } from '../config/logger.js';
 // 브라우저 재사용 (셧다운은 프로세스 종료 시)
 let sharedBrowser: Browser | null = null;
 
-async function getBrowser(): Promise<Browser> {
+export async function getBrowser(): Promise<Browser> {
   if (sharedBrowser && sharedBrowser.isConnected()) return sharedBrowser;
   // ★ 자동재생 강제: Threads 는 영상이 재생되기 전엔 <video> 를 만들지 않아
   //   헤드리스에선 DOM·네트워크 캡처가 둘 다 빈다. no-user-gesture 정책으로

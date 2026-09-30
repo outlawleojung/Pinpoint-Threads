@@ -3,8 +3,7 @@ import { logger } from '../../../config/logger.js';
 import { redisConnection } from '../../../queues/connection.js';
 import { normalizeUrl } from '../url-ingester/platform-detector.js';
 import type { DiscoveryAdapter, DiscoveryCandidate } from './types.js';
-import { jpAnimalXAdapter } from './adapters/jp-animal-x.js';
-import { tiktokTrendAdapter } from './adapters/tiktok-trend.js';
+import { threadsSearchAdapter } from './adapters/threads-search.js';
 
 export type * from './types.js';
 
@@ -17,7 +16,9 @@ export type * from './types.js';
  * → docs/08-decisions/2026-09-28-telegram-native-operation.md
  */
 
-const ADAPTERS: DiscoveryAdapter[] = [jpAnimalXAdapter, tiktokTrendAdapter];
+// 2026-09-30: 해외 스레드 검색(무료 Relay)로 교체. 우리 위너 원본이 전부 해외 스레드였음.
+//   jp-x-viral(buzzweet: 일본어 자막·사건사고 혼입) · tiktok-trend(Apify 미결제) 은 제외 — 파일은 보존.
+const ADAPTERS: DiscoveryAdapter[] = [threadsSearchAdapter];
 
 const REDIS_PREFIX = 'discovery:';
 const TTL_SEC = 24 * 60 * 60;
@@ -51,9 +52,16 @@ export async function discoverCandidates(opts?: { limit?: number; perAdapter?: n
   // 이미 다룬 URL 제외 (InboundLink 존재 = 과거 인제스트). 재탕 방지.
   all = await filterAlreadyHandled(all);
 
-  // 어댑터 교차 랭킹: 점수 내림차순 (플랫폼별 score 스케일이 달라 완벽하진 않지만 근사).
-  all.sort((a, b) => b.score - a.score);
-  const top = all.slice(0, limit);
+  // 종류별(일상·쇼핑) 점수 내림차순 후 번갈아 배치 — 쇼핑은 좋아요 스케일이 작아 전역 정렬하면 묻힘.
+  const byKind = (k: 'daily' | 'shopping') => all.filter((c) => c.kindHint === k).sort((a, b) => b.score - a.score);
+  const d = byKind('daily');
+  const s = byKind('shopping');
+  const mixed: DiscoveryCandidate[] = [];
+  for (let i = 0; i < Math.max(d.length, s.length); i++) {
+    if (d[i]) mixed.push(d[i]!);
+    if (s[i]) mixed.push(s[i]!);
+  }
+  const top = mixed.slice(0, limit);
 
   // Redis 저장 (콜백에서 id 로 조회).
   await Promise.all(

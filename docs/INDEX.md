@@ -12,6 +12,9 @@
 ## 00-overview
 - [vision](00-overview/vision.md) — 프로젝트 목적, 수익 모델, 성공 지표
 - [revenue-playbook](00-overview/revenue-playbook.md) — ★검증된 수익 전술(수강생 실증): 볼륨·꾸준함·재탕·소재·첫줄후킹·캐러셀
+- [course-index](00-overview/course-index.md) — ★강의 시리즈 인덱스: 강의별 정리 문서·전사 파이프라인·코드화 반영 로그
+- [course-codification-map](00-overview/course-codification-map.md) — ★강의→시스템 반영 추적표(규칙별 ✅코드/📄문서/⏳대기/🔜예정)
+- [course-tactics](00-overview/course-tactics.md) — ★강의 전술 전문(3분 스레드 1강 전사 추출): 계정안전·구간별볼륨·재탕빈도·카피7공식·쿠팡수익화
 - [glossary](00-overview/glossary.md) — 스하리, 쿠파스, CIB 등 용어 정의
 
 ## 01-pipelines

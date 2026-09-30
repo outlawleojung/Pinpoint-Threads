@@ -138,6 +138,7 @@ export async function runPipelineC(input: RunPipelineCInput): Promise<PipelineCO
     // 사용자가 준 영상 설명이 있으면 → mediaDescription 으로 넘겨 "반응" 모드 (설명 복붙 X · 그 상황에 대한 반응).
     //   설명이 있으면 캡션·프레임 이미지는 안 넘긴다(엉뚱한 해석·복붙 방지).
     const imageForCopy = (desc || rawText) ? undefined : publicUrls.find((u) => !isVideoUrl(u));
+    let rationale: unknown;
     const body = await generateDailyBody({
       personaPrompt: account.personaPrompt,
       accountSeed: account.id,
@@ -146,6 +147,9 @@ export async function runPipelineC(input: RunPipelineCInput): Promise<PipelineCO
       mediaDescription: desc || undefined,
       sourceLanguage: desc ? 'ko' : inbound.rawLanguage,
       sourceImageUrl: imageForCopy,
+      onRationale: (r) => {
+        rationale = r;
+      },
     });
 
     // 5) Post 업데이트 — 고정댓글(generatedReply) 없음 → 발행부가 본문만 게시.
@@ -155,6 +159,7 @@ export async function runPipelineC(input: RunPipelineCInput): Promise<PipelineCO
         mediaUrl: publicUrls[0],
         mediaUrls: publicUrls,
         generatedBody: body,
+        sourceBrief: { rationale: rationale ?? null } as never, // 생성 근거 — 승인 카드 표시용
       },
     });
 

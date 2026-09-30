@@ -154,6 +154,18 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
     data: { state: 'PUBLISHING' },
   });
 
+  // 안전망: 팔로워 300 미만 계정의 쇼핑 글은 링크(고정댓글) 없이 일상글로 발행.
+  //   강의 11개 공통 최강 금지 + 사용자 결정(2026-09-30). 계정 선택 단계(isShoppingEligible)에서도 막지만,
+  //   수동 지정·재탕 등 어떤 경로로 들어와도 여기서 최종 차단한다.
+  const { LINK_MIN_FOLLOWERS } = await import('../../pipeline-a/reach-health.js');
+  const stripLink = post.kind === 'SHOPPING' && (post.account.followersCount ?? 0) < LINK_MIN_FOLLOWERS;
+  if (stripLink) {
+    logger.warn(
+      { postId: post.id, handle: post.account.handle, followers: post.account.followersCount },
+      '팔로워 300 미만 → 쇼핑 글을 링크 없이 일상글로 발행',
+    );
+  }
+
   let threadsPostId: string;
   let threadsReplyId: string | null = null;
   try {
@@ -225,7 +237,14 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
     threadsPostId = main.threadsPostId;
     logger.info({ postId: post.id, threadsPostId, handle: post.account.handle }, 'main post published');
 
-    if (post.generatedReply) {
+    if (stripLink) {
+      await prisma.post.update({
+        where: { id: post.id },
+        data: { kind: 'DAILY', replyFailureReason: `팔로워 ${post.account.followersCount ?? 0}명 < ${LINK_MIN_FOLLOWERS} → 링크 생략(일상글 강등)` },
+      });
+    }
+
+    if (post.generatedReply && !stripLink) {
       // 비디오 포함 게시글은 Meta 후단 처리가 이어지므로 reply 전 대기 필요.
       // 이미지만이면 즉시 reply 가능.
       const hasVideo = (post.mediaUrls ?? []).some(

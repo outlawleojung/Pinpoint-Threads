@@ -63,3 +63,6 @@ tmp/
 coverage/
 .nyc_output/
 assets/naver/cards/
+
+# 강의 사례 라이브러리(코드가 런타임에 읽음) — 위 data/ 규칙 예외
+!src/modules/shared/copywriter/data/

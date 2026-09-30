@@ -20,7 +20,6 @@ import {
   decayOldSignals,
   type TrendSourceAdapter,
 } from '../modules/shared/trend-signals/index.js';
-import { generatePostableTopics } from '../modules/shared/trend-signals/topic-generator.js';
 import { NaverDatalabAdapter } from '../modules/shared/trend-signals/adapters/naver-datalab.js';
 import { GoogleTrendsAdapter } from '../modules/shared/trend-signals/adapters/google-trends.js';
 import { CoupangRankingAdapter } from '../modules/shared/trend-signals/adapters/coupang-ranking.js';
@@ -45,7 +44,8 @@ import { collectNaverTrends } from '../modules/pipeline-d/trend-collect/index.js
  */
 
 const POLL_CRON = '0 7 * * *'; // 매일 07:00 KST (하루 1회. 이전 6h → 하루 1회로 축소)
-const DIGEST_CRON = '0 8 * * *'; // 매일 08:00 KST
+const DIGEST_CRON = '0 8 * * *'; // 매일 08:00 KST (발굴 후보 카드 푸시 · LLM 없음)
+const DISCOVERY_PUSH_LIMIT = 10;
 const SEARCH_CRON = '30 8 * * *'; // 매일 08:30 KST (다이제스트 이후)
 const SHARING_CRON = '0 8 * * *';  // 매일 08:00 KST (Pipeline B 스하리 벤치마크 수집 · publish 1h 전)
 const SHARING_PUBLISH_CRON = '0 9 * * *'; // 매일 09:00 KST (Pipeline B 계정별 스하리 카피 생성 → 승인 카드)
@@ -88,35 +88,27 @@ export function startTrendWorkers(): Worker[] {
     new Worker(
       QUEUE_NAMES.TREND_DIGEST,
       async (job) => {
-        const perBucket = job.data.perBucket ?? job.data.limit ?? 6;
-        logger.info({ jobId: job.id, perBucket }, 'trend-digest start');
-
-        // 원시 신호가 아니라 **발행 가능한 주제(앵글)** 로 변환 (topic-generator).
-        //   - shopping[]: 트렌드 상품/카테고리 → 비교·최저가·추천 앵글 (Line B)
-        //   - engagement[]: 일상·공감 훅 (인물·정치·스포츠 하드 드롭)
-        const topics = await generatePostableTopics({ perBucket });
-
-        if (topics.shopping.length === 0 && topics.engagement.length === 0) {
-          await sendDigestMessage('📊 오늘의 트렌드 주제\n\n(발행 가능한 주제 없음 — 신호 부족)');
-          return { shopping: 0, engagement: 0 };
+        // 2026-09-30: LLM 트렌드 주제(엉뚱해서 폐기) → **해외 스레드 발굴 후보 카드**로 교체. LLM 0원.
+        //   카드의 [🌿 일상글]/[🛍 쇼핑글]을 누를 때만 카피 LLM 호출.
+        const limit = job.data.limit ?? DISCOVERY_PUSH_LIMIT;
+        logger.info({ jobId: job.id, limit }, 'discovery-push start');
+        const { discoverCandidates } = await import('../modules/shared/discovery/index.js');
+        const { sendDiscoveryCards } = await import('../modules/shared/approval-gate/notifier.js');
+        const { candidates, degraded } = await discoverCandidates({ limit });
+        if (candidates.length === 0) {
+          await sendDigestMessage(
+            '🌅 오늘의 소재: 새 후보 없음' + (degraded.length ? `
+(${degraded.map((d) => d.reason).join(' / ')})` : ''),
+          );
+          return { sent: 0 };
         }
-
-        const fmt = (t: (typeof topics.shopping)[number], i: number) =>
-          `${i + 1}. ${t.title}\n   └ ${t.angle} · 근거: ${t.basis}\n   💬 "${t.hook}"`;
-
-        const sections: string[] = ['📊 오늘의 트렌드 발행 주제'];
-        if (topics.shopping.length) {
-          sections.push('🛒 쇼핑 앵글 (비교·최저가·추천)\n' + topics.shopping.map(fmt).join('\n'));
-        }
-        if (topics.engagement.length) {
-          sections.push('💬 일상·공감 훅\n' + topics.engagement.map(fmt).join('\n'));
-        }
-        sections.push(
-          '💡 마음에 드는 주제로 각 플랫폼에서 좋은 게시글 URL을 찾아 붙여넣으면 자동 처리됩니다.',
+        const nDaily = candidates.filter((c) => c.kindHint === 'daily').length;
+        await sendDiscoveryCards(
+          candidates,
+          `🌅 오늘의 소재 ${candidates.length}건 (일상 ${nDaily} · 쇼핑 ${candidates.length - nDaily})
+해외 스레드에서 댓글 반응 있는 것만. 버튼 누르면 승인 카드가 올라옵니다. (24h 만료)`,
         );
-
-        await sendDigestMessage(sections.join('\n\n'));
-        return { shopping: topics.shopping.length, engagement: topics.engagement.length };
+        return { sent: candidates.length };
       },
       { connection: redisConnection, concurrency: 1 },
     ),
@@ -249,8 +241,8 @@ export async function scheduleTrendJobs(): Promise<void> {
     .removeRepeatable('trend-poll-daily', { pattern: POLL_CRON, tz: 'Asia/Seoul' }, 'trend-poll-daily')
     .catch(() => {});
 
-  // ⛔ 아침 트렌드 다이제스트(08:00 텔레그램 보고서) **정지** (2026-09-16 사용자 방침 · "쓸데없다").
-  //   등록 안 함 + 기존 repeatable 제거. 트렌드 수집(poll)·검색(search)은 콘텐츠 소스용이라 유지.
+  // ⛔ 아침 발굴 카드 푸시 **정지** (2026-09-30 사용자: 자동으로 가져온 소재 품질 불가 — "한숨만 나온다").
+  //   소재 선정은 사람(사용자 URL). 자동 발굴은 buzzweet·스레드 검색 두 번 다 실패. 재가동 금지(사용자 요청 전까지).
   await trendDigestQueue
     .removeRepeatable('trend-digest-daily', { pattern: DIGEST_CRON, tz: 'Asia/Seoul' }, 'trend-digest-daily')
     .catch(() => {});
@@ -317,13 +309,13 @@ export async function scheduleTrendJobs(): Promise<void> {
   // 2026-09-18 불필요 API 정리: 자동 LLM 크론 전부 정지. 유지되는 유일한 반복 작업 = 계정 메트릭 동기화(LLM 없음).
   logger.info(
     {
-      kept: ['account-metrics-sync-daily', 'sharing-collect-daily(태깅 OFF)'],
+      kept: ['account-metrics-sync-daily', 'sharing-collect-daily(태깅 OFF · Relay)'],
       stopped: [
         'trend-poll-daily',
         'trend-search-daily',
+        'trend-digest-daily(발굴 푸시)',
         'sharing-publish-daily',
         'shopping-publish-daily',
-        'trend-digest-daily',
         'naver-trend-collect-daily',
         'naver-daily-info-daily',
         'line-b-*',

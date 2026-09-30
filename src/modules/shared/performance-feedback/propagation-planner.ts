@@ -49,8 +49,8 @@ function inferGender(productName: string): 'male' | 'female' | null {
 function genderOk(productGender: 'male' | 'female' | null, accGender: string): boolean {
   if (productGender === 'male') return accGender === 'male' || accGender === 'unisex';
   if (productGender === 'female') return accGender === 'female' || accGender === 'unisex';
-  // 애매(상품명에 성별 없음) → 남성 계정 제외 (오발행 방지)
-  return accGender !== 'male';
+  // 애매(상품명에 성별 없음) → 전 계정 허용 (강의: 버티컬 알고리즘 · 계정 성별 통일 불필요)
+  return true;
 }
 
 async function evalTargets(
@@ -60,9 +60,10 @@ async function evalTargets(
 ): Promise<PropagationTarget[]> {
   const accounts = await prisma.account.findMany({
     where: { isActive: true },
-    select: { id: true, handle: true, audienceGender: true },
+    select: { id: true, handle: true, audienceGender: true, followersCount: true },
     orderBy: { handle: 'asc' },
   });
+  const { isShoppingEligible } = await import('../../pipeline-a/reach-health.js');
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const dupSince = new Date(Date.now() - DUP_LOOKBACK_DAYS * 864e5);
@@ -71,6 +72,11 @@ async function evalTargets(
   for (const a of accounts) {
     if (a.id === originAccountId) {
       out.push({ accountId: a.id, handle: a.handle, eligible: false, reason: '원본 계정(발행처)' });
+      continue;
+    }
+    const elig = await isShoppingEligible(a.id, a.followersCount);
+    if (!elig.ok) {
+      out.push({ accountId: a.id, handle: a.handle, eligible: false, reason: elig.reason });
       continue;
     }
     if (!genderOk(productGender, a.audienceGender)) {

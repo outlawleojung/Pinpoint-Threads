@@ -19,6 +19,7 @@ import { detectPlatform, extractUrls } from '../url-ingester/platform-detector.j
 import { handleNaverCommand } from './naver-command.js';
 import { addSectionLink } from '../../pipeline-d/relink/index.js';
 import { discoverCandidates, getCandidate, clearCandidate } from '../discovery/index.js';
+import { discoveryCardContent } from './notifier.js';
 
 export const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
 
@@ -37,6 +38,7 @@ bot.command('start', async (ctx) => {
   await ctx.reply(
     'Pinpoint Threads 봇이 연결되었습니다.\n\n' +
       '━━━ 매일 운영 ━━━\n' +
+      '♻️ 재탕 (또는 /repost) : 조회·비율 좋은 위너를 원문 그대로 재발행 (텀 지난 것만)\n' +
       '🔎 소재 (또는 /discover) : 정서 맞는 해외 바이럴 발굴 → [일상글] 버튼으로 바로 카드\n' +
       '🌿 일상 {URL} | 설명 : 일상글 카드\n' +
       '🛒 {URL} 상품명 : 쇼핑 매칭 카드\n' +
@@ -119,9 +121,48 @@ bot.command('discover', async (ctx) => {
   await runDiscovery(ctx, n);
 });
 
+// 재탕(재발행) — 위너(조회·비율 좋은 글)를 텀 지나면 원문 그대로 재발행. 강의 핵심 수익 엔진.
+//   한글 "재탕" 텍스트 트리거 + /repost. 후보별 [♻️ 재발행] → 복제 카드(승인·페이싱 그대로).
+bot.command('repost', async (ctx) => {
+  await runRepostList(ctx);
+});
+
+async function runRepostList(ctx: Context): Promise<void> {
+  try {
+    const { planReposts } = await import('../performance-feedback/repost-planner.js');
+    const cands = await planReposts();
+    if (cands.length === 0) {
+      await ctx.reply('♻️ 지금 재탕할 후보가 없어요 (위너 없음 또는 재탕 텀 미경과).');
+      return;
+    }
+    const kindKo = (k: string) => (k === 'SHOPPING' ? '쇼핑' : k === 'SHARING' ? '스하리' : '일상');
+    await ctx.reply(
+      `♻️ 재탕 후보 ${cands.length}개 (위너 + 텀 경과). [재발행] 누르면 원문 그대로 승인 카드가 올라옵니다.\n기준: 조회 1천+ 또는 비율(쇼핑 댓글조회 10%·일상/스하리 좋아요 8%) · 텀 쇼핑3일/일상7일/스하리1일`,
+    );
+    for (const c of cands.slice(0, 10)) {
+      const stats = `👁${fmtNum(c.views)} ❤${fmtNum(c.likes)}${c.replyViews != null ? ` 💬${fmtNum(c.replyViews)}` : ''}`;
+      const text = [
+        `[${kindKo(c.kind)}] @${c.originHandle} · ${stats} · 재탕 ${c.repostCount}회`,
+        `"${c.bodyPreview}…"`,
+        `근거: ${c.basis}`,
+        c.targetHandle ? `→ 올릴 계정: ${c.targetHandle} (${c.targetReason})` : `→ ${c.targetReason}`,
+      ].join('\n');
+      if (c.targetAccountId) {
+        const kb = new InlineKeyboard().text('♻️ 재발행', `rp:${c.rootPostId}:${c.targetAccountId}`);
+        await ctx.reply(text, { reply_markup: kb });
+      } else {
+        await ctx.reply(text);
+      }
+    }
+  } catch (err) {
+    logger.error({ err }, '재탕 목록 실패');
+    await ctx.reply(`❌ 재탕 목록 실패: ${(err as Error).message}`);
+  }
+}
+
 /** 발굴 실행 + 후보 카드 전송. 슬래시 명령·한글 텍스트 트리거 공용. */
 async function runDiscovery(ctx: Context, n: number): Promise<void> {
-  await ctx.reply(`🔎 정서 맞는 해외 바이럴 발굴 중… (일본 동물 X · TikTok) 최대 ${n}건`);
+  await ctx.reply(`🔎 해외 스레드(일본·대만) 발굴 중… 동물·웃긴 영상 + 구매후기 상품 · 최대 ${n}건 (1~2분)`);
   try {
     const { candidates, degraded } = await discoverCandidates({ limit: n });
     if (degraded.length) {
@@ -133,7 +174,7 @@ async function runDiscovery(ctx: Context, n: number): Promise<void> {
     }
     for (const c of candidates) await sendDiscoveryCard(ctx, c);
     await ctx.reply(
-      `✅ 후보 ${candidates.length}건. [🌿 일상글 만들기] 누르면 그 소재로 카드 만들어 승인 요청 올립니다. (24h 후 후보 만료)`,
+      `✅ 후보 ${candidates.length}건. [🌿 일상글] / [🛍 쇼핑글](상품 자동 식별→쿠팡 매칭) 누르면 승인 카드가 올라옵니다. (24h 후 만료)`,
     );
   } catch (err) {
     logger.error({ err }, '소재 발굴 실패');
@@ -146,21 +187,82 @@ async function sendDiscoveryCard(
   ctx: Context,
   c: import('../discovery/index.js').DiscoveryCandidate,
 ): Promise<void> {
-  const kb = new InlineKeyboard()
-    .text('🌿 일상글 만들기', `disc:daily:${c.id}`)
-    .text('⏭ 스킵', `disc:skip:${c.id}`);
-  const mediaLabel = c.hasVideo ? '🎬 영상' : `🖼 이미지 ${c.mediaCount}`;
-  const caption = [
-    `▲${fmtNum(c.score)} · ${mediaLabel} · @${c.authorHandle ?? '?'} (${c.lang ?? '?'})`,
-    c.title,
-    c.sourceUrl,
-  ].join('\n');
+  const { caption, keyboard: kb } = discoveryCardContent(c);
   try {
     if (c.thumbnailUrl) await ctx.replyWithPhoto(c.thumbnailUrl, { caption, reply_markup: kb });
     else await ctx.reply(caption, { reply_markup: kb });
   } catch {
     await ctx.reply(caption, { reply_markup: kb });
   }
+}
+
+/**
+ * 발굴 쇼핑 후보 → 인제스트 → 원문·이미지로 상품 자동 식별 → 쿠팡 매칭(Vision) → 승인 카드.
+ * 상품명 없이 돈다(LLM 비용은 버튼 누를 때만). 매칭 실패 시 "URL + 상품명"으로 다시 보내라고 안내.
+ */
+async function runShoppingFromDiscovery(ctx: { reply: (t: string) => Promise<unknown> }, url: string): Promise<void> {
+  const pick = await pickAccountForShoppingCandidate();
+  if (!pick) {
+    await ctx.reply('⚠️ 오늘 배정 가능한 계정 없음 (링크 계정은 오늘 쇼핑 완료 · 나머지는 일상 슬롯 소진)');
+    return;
+  }
+  const { acc, linkless, why } = pick;
+  await ctx.reply(
+    linkless
+      ? `🧪 [${acc.handle}] 링크 없는 테스트 글로 생성 (${why}) · 반응 좋으면 링크 계정에서 고정댓글 달고 재탕`
+      : `🛍 [${acc.handle}] 링크 쇼핑글로 생성 (${why})`,
+  );
+  const { ingestUrl } = await import('../url-ingester/index.js');
+  const { ensureBenchmarkVideo } = await import('../../pipeline-a/video-rescue.js');
+  const ing = await ingestUrl({ url, source: InboundSource.MANUAL_TELEGRAM });
+  const src = ing.inboundLinkId
+    ? await prisma.inboundLink.findUnique({ where: { id: ing.inboundLinkId }, select: { rawText: true, mediaUrls: true, url: true } })
+    : null;
+  if (!src || src.mediaUrls.length === 0) {
+    await ctx.reply(`❌ 소스 확보 실패: ${ing.message ?? '미디어 없음'}`);
+    return;
+  }
+  const media = await ensureBenchmarkVideo(null, src.url, src.mediaUrls, undefined);
+  const outcome = await runPipelineA({ accountId: acc.id, sourceMediaUrls: media, sourceText: src.rawText ?? '', sourceUrl: src.url, linkless });
+  if (outcome.status === 'PENDING_APPROVAL') {
+    await ctx.reply(`✅ [${acc.handle}] ${outcome.matchedProductName?.slice(0, 40)} · 승인 카드 확인 (상품이 틀리면 리젝)`);
+  } else {
+    await ctx.reply(`❌ 자동 식별/매칭 실패 (${outcome.stage}: ${outcome.reason})
+→ 상품명을 알면 이렇게 보내주세요:
+${url} 상품명`);
+  }
+}
+
+/**
+ * 쇼핑 후보 계정 배정 (순환 ②·④ · 강의: 300 미만은 링크 빼고 일상글처럼).
+ *  1) 오늘 링크 쇼핑글이 아직 없고 링크 적격 계정이 있으면 → 그 계정에 링크 글.
+ *  2) 아니면 링크 부적격 계정 중 오늘 일상글이 가장 적은(캡 미만) 계정 → 링크 없는 테스트 글(일상 슬롯).
+ */
+async function pickAccountForShoppingCandidate(): Promise<{ acc: { id: string; handle: string }; linkless: boolean; why: string } | null> {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const live = { notIn: [PostState.REJECTED, PostState.FAILED] as PostState[] };
+  const accounts = await prisma.account.findMany({
+    where: { isActive: true },
+    select: { id: true, handle: true, followersCount: true },
+    orderBy: { handle: 'asc' },
+  });
+  const eligible: typeof accounts = [];
+  const others: typeof accounts = [];
+  for (const a of accounts) ((await isShoppingEligible(a.id, a.followersCount)).ok ? eligible : others).push(a);
+
+  const shoppingToday = await prisma.post.count({ where: { kind: PostKind.SHOPPING, createdAt: { gte: today }, state: live } });
+  if (shoppingToday === 0 && eligible.length > 0) {
+    return { acc: eligible[0]!, linkless: false, why: '링크 적격 · 오늘 첫 쇼핑' };
+  }
+  let best: { a: (typeof accounts)[number]; n: number } | null = null;
+  for (const a of others) {
+    const n = await prisma.post.count({ where: { accountId: a.id, kind: PostKind.DAILY, createdAt: { gte: today }, state: live } });
+    if (n >= 2) continue; // 일상 하루 2건 캡(scheduler DAILY_PER_ACCOUNT_CAP)
+    if (!best || n < best.n) best = { a, n };
+  }
+  if (!best) return null;
+  return { acc: best.a, linkless: true, why: `팔로워 ${best.a.followersCount ?? 0} · 링크 부적격 → 테스트` };
 }
 
 /**
@@ -638,6 +740,12 @@ bot.on('message:text', async (ctx, next) => {
     return;
   }
 
+  // 재탕 트리거: 메시지가 딱 "재탕"(또는 "재발행")일 때만.
+  if (/^\s*(?:재탕|재발행)\s*$/.test(text)) {
+    await runRepostList(ctx);
+    return;
+  }
+
   // 방식 0: "일상 {URL}" 태그 → Pipeline C 일상글 (쇼핑과 명시적 구분 · 사용자 방침)
   //   주의: \b 는 한글에 안 먹음 → "일상" 뒤 공백/콜론/끝 으로 판정 (단, "일상복" 같은 단어는 제외)
   if (/^\s*일상(?=[\s:：]|$)/.test(text)) {
@@ -931,8 +1039,8 @@ bot.on('message:text', async (ctx, next) => {
 });
 
 // 발굴 후보 콜백 — [🌿 일상글] / [⏭ 스킵]. 누르면 기존 일상 파이프라인 실행 → 승인 카드.
-bot.callbackQuery(/^disc:(daily|skip):(.+)$/, async (ctx) => {
-  const action = ctx.match?.[1] as 'daily' | 'skip';
+bot.callbackQuery(/^disc:(daily|shop|skip):(.+)$/, async (ctx) => {
+  const action = ctx.match?.[1] as 'daily' | 'shop' | 'skip';
   const id = ctx.match?.[2] ?? '';
   const c = await getCandidate(id);
   if (!c) {
@@ -946,6 +1054,18 @@ bot.callbackQuery(/^disc:(daily|skip):(.+)$/, async (ctx) => {
     await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
     return;
   }
+  if (action === 'shop') {
+    await ctx.answerCallbackQuery({ text: '쇼핑글 생성 시작' });
+    await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+    try {
+      await runShoppingFromDiscovery(ctx, c.sourceUrl);
+    } catch (err) {
+      logger.error({ err, id }, 'disc:shop 처리 실패');
+      await ctx.reply(`❌ 처리 실패: ${(err as Error).message}`);
+    }
+    await clearCandidate(id);
+    return;
+  }
   await ctx.answerCallbackQuery({ text: '일상글 생성 시작' });
   await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
   try {
@@ -955,6 +1075,23 @@ bot.callbackQuery(/^disc:(daily|skip):(.+)$/, async (ctx) => {
     await ctx.reply(`❌ 처리 실패: ${(err as Error).message}`);
   }
   await clearCandidate(id);
+});
+
+// 재탕 콜백 — 원본을 그대로 복제한 새 카드(PENDING_APPROVAL) 생성 → 기존 승인 카드 발송.
+bot.callbackQuery(/^rp:([^:]+):([^:]+)$/, async (ctx) => {
+  const rootId = ctx.match?.[1] ?? '';
+  const targetAccountId = ctx.match?.[2] ?? '';
+  await ctx.answerCallbackQuery({ text: '재탕 카드 생성 중' });
+  await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+  try {
+    const { createRepost } = await import('../performance-feedback/repost-planner.js');
+    const newId = await createRepost(rootId, targetAccountId);
+    await sendApprovalRequest(newId);
+    await ctx.reply('♻️ 재탕 승인 카드 올렸습니다 (원문 그대로 · 승인하면 페이싱 규칙대로 예약 발행).');
+  } catch (err) {
+    logger.error({ err, rootId }, '재탕 생성 실패');
+    await ctx.reply(`❌ 재탕 실패: ${(err as Error).message}`);
+  }
 });
 
 // 승인/거부 콜백
@@ -1035,11 +1172,9 @@ async function pickLeastUsedAccount(gender?: 'male' | 'female' | null) {
     accounts = accounts.filter((a) => a.audienceGender === 'male' || a.audienceGender === 'unisex');
   } else if (gender === 'female') {
     accounts = accounts.filter((a) => a.audienceGender === 'female' || a.audienceGender === 'unisex');
-  } else {
-    // 성별 애매(상품명에 남성/여성 단어 없음) → **남성 계정 제외**.
-    // 남성 상품은 "남성" 명시된 경우만 · 애매한 건 여성/유니섹스 계정으로 (남성 오발행 방지).
-    accounts = accounts.filter((a) => a.audienceGender !== 'male');
   }
+  // 성별 애매(상품명에 남성/여성 단어 없음) → **전 계정 허용** (강의: 버티컬 알고리즘 = 게시글마다 노출,
+  //   계정 컨셉·성별 통일 불필요. docs/00-overview/course-feedback-1.md). 명시적 성별 상품만 톤 일치 유지.
   if (accounts.length === 0) return null;
   // 오늘 전체 발행/카드 수 기준(종류 무관) → 한 계정에 쇼핑·일상 겹쳐 몰리는 것 방지.
   const counts = await Promise.all(

@@ -16,6 +16,17 @@ type PostWithRelations = Post & {
   commerceProduct: CommerceProduct | null;
 };
 
+/** 생성 근거 (원본 상황 · 반응 포인트 · 참고한 강의 사례 틀) — 승인 버튼 메시지에 붙인다(사진 캡션 1024자 보호). */
+function buildRationale(post: PostWithRelations): string {
+  const r = (post.sourceBrief as { rationale?: { situation?: string; point?: string; pattern?: string } | null } | null)?.rationale;
+  if (!r || !(r.situation || r.point || r.pattern)) return '';
+  const out = ['🧭 근거'];
+  if (r.situation) out.push(`상황: ${r.situation}`);
+  if (r.point) out.push(`포인트: ${r.point}`);
+  if (r.pattern) out.push(`강의 사례: ${r.pattern}`);
+  return out.join('\n') + '\n\n';
+}
+
 function buildPreviewCaption(post: PostWithRelations, hasProductThumb: boolean): string {
   const lines: string[] = [];
   lines.push('🧵 승인 요청');
@@ -30,6 +41,18 @@ function buildPreviewCaption(post: PostWithRelations, hasProductThumb: boolean):
   lines.push('━━━ 본문 ━━━');
   lines.push(post.generatedBody ?? '(비어있음)');
   lines.push('');
+  // 링크 없는 테스트 글(상품 붙은 DAILY) — 순환 ② : 반응 좋으면 재탕 엔진이 링크 계정에서 승격
+  if (post.kind === 'DAILY' && post.commerceProduct) {
+    lines.push('━━━ 고정 댓글 ━━━');
+    lines.push('없음 — 링크 없이 올려 반응만 봅니다. 반응이 좋으면 "재탕"에서 링크 달 수 있는 계정이 고정댓글(링크)을 달고 다시 올립니다.');
+    return lines.join('\n');
+  }
+  // 팔로워 300 미만 쇼핑 = 발행기가 링크(고정댓글)를 떼고 일상글로 발행 (course-strategy §5)
+  if (post.kind === 'SHOPPING' && (post.account.followersCount ?? 0) < 300) {
+    lines.push('━━━ 고정 댓글 ━━━');
+    lines.push(`🚫 발행 안 함 — 팔로워 ${post.account.followersCount ?? 0}명 < 300 → 링크 없이 일상글로 발행`);
+    return lines.join('\n');
+  }
   lines.push('━━━ 고정 댓글 ━━━');
   lines.push(post.generatedReply ?? '(비어있음)');
   return lines.join('\n');
@@ -129,9 +152,10 @@ export async function sendApprovalRequest(
   }
 
   // 승인 버튼 카드는 항상 전송. 프리뷰가 나갔으면 결정만, 못 나갔으면 캡션까지 담아 보낸다.
+  const rationaleBlock = buildRationale(post);
   const decisionText = previewSent
-    ? `Post: ${post.id}\n승인 결정:`
-    : `${caption}\n\n⚠️ 미디어 프리뷰 표시 실패(발행엔 영향 없음)\nPost: ${post.id}\n승인 결정:`;
+    ? `${rationaleBlock}Post: ${post.id}\n승인 결정:`
+    : `${caption}\n\n${rationaleBlock}⚠️ 미디어 프리뷰 표시 실패(발행엔 영향 없음)\nPost: ${post.id}\n승인 결정:`;
   const decisionMsg = await bot.api.sendMessage(env.TELEGRAM_ADMIN_CHAT_ID, decisionText, {
     reply_markup: keyboard,
   });
@@ -163,7 +187,8 @@ async function regenerateCopyAndResend(postId: string, correctionText?: string):
   if (!post) throw new Error('post not found');
 
   // 일상글(DAILY): 상품·링크 없음 → generateDailyBody 로 본문만 재생성.
-  if (post.kind === 'DAILY') {
+  //   (상품 붙은 DAILY = 링크 없는 테스트 글 → 아래 쇼핑 경로로 재생성하되 고정댓글은 비운다)
+  if (post.kind === 'DAILY' && !post.commerceProductId) {
     // ★ 일상글은 sourceItem 이 없어 rawText 가 빌 수 있음 → 소스 없이 생성하면 엉뚱한 글을 지어낸다.
     //   sourceMediaUrls 로 원본 inbound 를 찾아 캡션(rawText)을 회수. 그래도 없으면 헛것 대신 안내.
     let srcText = post.sourceItem?.rawText?.trim() || undefined;
@@ -178,14 +203,21 @@ async function regenerateCopyAndResend(postId: string, correctionText?: string):
     if (!srcText) {
       throw new Error('원본 내용을 못 찾아 재생성 불가 · "일상 {URL} | 설명" 으로 다시 보내주세요');
     }
+    let dailyRationale: unknown;
     const body = await generateDailyBody({
       personaPrompt: post.account.personaPrompt,
       accountSeed: `${post.accountId}:regen:${post.retryCount + 1}`, // 다른 변형 유도
       accountId: post.accountId,
       sourceText: srcText,
       correctionInstruction: correctionText,
+      onRationale: (r) => {
+        dailyRationale = r;
+      },
     });
-    await prisma.post.update({ where: { id: postId }, data: { generatedBody: body, retryCount: { increment: 1 } } });
+    await prisma.post.update({
+      where: { id: postId },
+      data: { generatedBody: body, retryCount: { increment: 1 }, sourceBrief: { rationale: dailyRationale ?? null } as never },
+    });
     await sendApprovalRequest(postId);
     return;
   }
@@ -245,7 +277,11 @@ async function regenerateCopyAndResend(postId: string, correctionText?: string):
   });
   await prisma.post.update({
     where: { id: postId },
-    data: { generatedBody: copy.body, generatedReply: reply.text },
+    data: {
+      generatedBody: copy.body,
+      generatedReply: post.kind === 'DAILY' ? null : reply.text,
+      sourceBrief: { ...(copy.sourceBrief as object), rationale: copy.rationale ?? null } as never,
+    },
   });
   // sendApprovalRequest 가 state → PENDING_APPROVAL 로 되돌리고 새 카드 발송 (경고도 함께)
   const warnings = [...(copy.warnings ?? []), ...(reply.warning ? [reply.warning] : [])];

@@ -6,7 +6,7 @@
  * 자동 발행 아님 · 사람이 텔레그램에서 선택. → docs/08-decisions/2026-09-28-telegram-native-operation.md
  */
 
-export type DiscoveryPlatform = 'x' | 'tiktok';
+export type DiscoveryPlatform = 'x' | 'tiktok' | 'threads';
 
 export interface DiscoveryCandidate {
   /** 콜백 조회용 짧은 id (Redis 키). */
@@ -26,8 +26,11 @@ export interface DiscoveryCandidate {
   lang?: string;
   /** 재생산 시 어느 파이프라인으로 보낼지 힌트. */
   kindHint: 'daily' | 'shopping';
-  /** 랭킹용 점수(대개 좋아요 수). */
+  /** 랭킹용 점수(일상=원본 댓글 수 · 쇼핑=좋아요 수). */
   score: number;
+  /** 원본 좋아요·댓글 (카드 표시용). */
+  likes?: number;
+  replies?: number;
   foundAt: string;
 }
 

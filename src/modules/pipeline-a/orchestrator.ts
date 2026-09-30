@@ -1,4 +1,4 @@
-import { PostState } from '@prisma/client';
+import { PostKind, PostState } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { prisma } from '../../db/prisma.js';
 import { logger } from '../../config/logger.js';
@@ -46,6 +46,12 @@ export interface RunPipelineAInput {
    * 원문·이미지에 안 드러나는 셀링포인트(특히 아이디어 상품)를 신뢰 가능한 사실로 카피·고정댓글에 반영.
    */
   productNote?: string;
+  /**
+   * ★ 링크 없는 테스트 발행 (강의: 300 미만 계정은 쿠파스 글을 링크만 빼고 일상글처럼).
+   * 도달 게이트 스킵 · 고정댓글(링크) 생성 X · kind=DAILY(일상 슬롯). 상품 매칭은 그대로(commerceProductId 보존)
+   * → 반응 좋으면 재탕 엔진이 링크 가능 계정에서 **고정댓글 붙여 쇼핑글로 승격**. (순환 ②→④)
+   */
+  linkless?: boolean;
 }
 
 export type PipelineAOutcome =
@@ -71,7 +77,7 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
   // 쇼핑 콘텐츠는 **실제 피드 도달**이 낮은 계정에서 발행 금지 (팔로워 수 아님 · 2026-09 실측 근거).
   //   팔로워 최다 계정이 쇼핑 도달 19뷰였다 — 스하리 팔로워는 죽은 계정이라 도달을 보장 못 함.
   //   DAILY+SHOPPING 도달 중앙값으로 판정 · 이력 부족 계정은 팔로워>100 폴백. (reach-health.ts)
-  const eligibility = await isShoppingEligible(account.id, account.followersCount);
+  const eligibility = input.linkless ? { ok: true as const, reason: 'linkless test' } : await isShoppingEligible(account.id, account.followersCount);
   if (!eligibility.ok) {
     return {
       status: 'REJECTED',
@@ -200,6 +206,12 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
       return finishRejected(post.id, 'matcher', matchedOutcome.reason);
     }
     matchedResult = matchedOutcome.result;
+    // ★ 브랜드 일치 검사 (자동 매칭일 때만 · 사용자 상품명은 신뢰). 무인양품→두발로 양말 사고 방지. LLM 호출 전에 중단.
+    if (!input.productNameHint) {
+      const { brandMismatch } = await import('./brand-guard.js');
+      const mismatch = brandMismatch(input.sourceText ?? '', matchedResult.product.productName);
+      if (mismatch) return finishRejected(post.id, 'brand', mismatch);
+    }
   }
   const matched = { success: true as const, result: matchedResult };
 
@@ -260,8 +272,8 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
     factCheckEnabled: true,
   });
 
-  // 11. Reply Composer (AI 기반 감초 톤 리드 생성)
-  const reply = await composeReply({
+  // 11. Reply Composer (AI 기반 감초 톤 리드 생성) — 링크 없는 테스트면 생략(승격 시 생성)
+  const reply = input.linkless ? { text: '', lead: '', warning: undefined as string | undefined } : await composeReply({
     body: copy.body,
     sourceBrief: copy.sourceBrief,
     sourceText: input.sourceText,
@@ -282,8 +294,11 @@ export async function runPipelineA(input: RunPipelineAInput): Promise<PipelineAO
       mediaUrl: media.publicUrls[0],   // 하위 호환용 첫 URL
       mediaUrls: media.publicUrls,
       generatedBody: copy.body,
-      generatedReply: reply.text,
+      generatedReply: input.linkless ? null : reply.text,
+      // 생성 근거(원본 상황·포인트·참고 강의 사례) — 승인 카드 표시용
+      sourceBrief: { ...(copy.sourceBrief as object), rationale: copy.rationale ?? null } as never,
       visionMatchScore: matched.result.visionScore,
+      ...(input.linkless ? { kind: PostKind.DAILY } : {}),
     },
   });
 

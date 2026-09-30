@@ -16,7 +16,7 @@ import { prisma } from '../../db/prisma.js';
 //   ∴ "중앙값 낮음 AND 한 번도 못 터짐"만 억제로 보고 쇼핑 배제. 터질 수 있는 계정은 콘텐츠(카피)로 개선.
 const REACH_FLOOR = 150;        // 중앙값 최소선 (억제 32 ↔ 콘텐츠 152 사이에서 깨끗이 갈림)
 const BREAKOUT_PROOF = 1000;    // 최근 한 번이라도 이 이상 도달 = 계정 억제 아님(분배 가능) 증거
-const FOLLOWER_FALLBACK = 100;  // 도달 이력 부족(신생)할 때만 쓰는 폴백
+const FOLLOWER_FALLBACK = 300;  // 도달 이력 부족(신생)할 때만 쓰는 폴백. 강의 정본: 수익화글은 팔로워 300+부터(신생 계정 조기 수익화=정지 리스크). docs/00-overview/course-tactics.md §3
 const WINDOW_DAYS = 21;
 const MIN_SAMPLE = 3;
 
@@ -103,10 +103,24 @@ export interface ShoppingEligibility {
  *   억제 = 둘 다 아님(중앙값 낮고 한 번도 못 터짐). → 쇼핑 배제, 일상글로 워밍업.
  *   이력 부족(신생) = 팔로워>100 폴백.
  */
+/**
+ * 링크(수익화) 글 하드 바닥: 팔로워 300명. 강의 11개 전부가 가장 강하게 금지 —
+ * "300명 전 수익화 글 올린 계정은 한 달 뒤 아이디가 사라져 있다". 도달이 좋아도 예외 없음.
+ * 300 미만은 링크 없이 일상글로 (사용자 결정 2026-09-30 · docs/00-overview/course-strategy.md §5).
+ */
+export const LINK_MIN_FOLLOWERS = 300;
+
 export async function isShoppingEligible(
   accountId: string,
   followersCount: number | null | undefined,
 ): Promise<ShoppingEligibility> {
+  if ((followersCount ?? 0) < LINK_MIN_FOLLOWERS) {
+    return {
+      ok: false,
+      median: null,
+      reason: `팔로워 ${followersCount ?? 0}명 < ${LINK_MIN_FOLLOWERS} → 링크(수익화) 금지 · 일상글로`,
+    };
+  }
   const stats = await feedReachStats(accountId);
   if (stats == null) {
     const ok = (followersCount ?? 0) > FOLLOWER_FALLBACK;

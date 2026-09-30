@@ -1,12 +1,6 @@
 import { createHash } from 'node:crypto';
 import { prisma } from '../../../db/prisma.js';
 import { logger } from '../../../config/logger.js';
-import { env } from '../../../config/env.js';
-import {
-  runActorSync,
-  isApifyConfigured,
-  ApifyNotConfiguredError,
-} from '../../../infra/apify-client.js';
 import { tagBenchmarkPost } from '../../shared/source-collector/viralfactors-tagger.js';
 import { embedBenchmark } from '../../shared/source-collector/embedder.js';
 import { isVoyageConfigured } from '../../../infra/voyage-client.js';
@@ -26,7 +20,7 @@ const VIRALFACTORS_TAG_ENABLED = false;
  *
  * 흐름:
  *   1) 대상 해시태그 리스트 (HASHTAGS) 순회
- *   2) themineworks/threads-scraper mode=search 로 게시글 수집
+ *   2) 스레드 검색(비로그인 Relay 파싱 · 무료)으로 게시글 수집
  *   3) reply_count ≥ MIN_REPLIES 필터
  *   4) 자기 계정 handle · 이미 수집된 externalPostId 제외
  *   5) BenchmarkPost 로 저장 (contentType=SHARING) → viralFactors 태깅 · 임베딩
@@ -51,8 +45,8 @@ const HASHTAGS = [
 /** 댓글 수 최소 임계값 (사용자 확정: 20). */
 const MIN_REPLIES = 20;
 
-/** 해시태그당 Apify에서 가져올 게시글 상한. */
-const MAX_POSTS_PER_TAG = 50;
+/** 검색 페이지 추가 로드 스크롤 횟수 (1회당 ~6~10건 추가). */
+const SEARCH_SCROLLS = 3;
 
 export interface SharingCollectSummary {
   hashtagsProcessed: number;
@@ -68,13 +62,10 @@ export interface SharingCollectSummary {
 }
 
 export async function collectSharingBenchmarks(): Promise<SharingCollectSummary> {
-  if (!isApifyConfigured()) throw new ApifyNotConfiguredError();
-  const actorId = env.APIFY_ACTOR_THREADS_KEYWORD;
-  if (!actorId) {
-    throw new Error('APIFY_ACTOR_THREADS_KEYWORD 미설정 (themineworks/threads-scraper)');
-  }
+  // 2026-09-30: Apify(미결제로 9/21~ 중단) → 비로그인 Relay 파싱(무료)으로 교체. 실측: 태그당 댓글20+ 3~11건.
+  const { scrapeThreadsPage } = await import('../../../infra/threads-relay.js');
 
-  // 우리 4개 자체 계정 handle · 자기 참조 방지
+  // 우리 자체 계정 handle · 자기 참조 방지
   const selfAccounts = await prisma.account.findMany({ select: { handle: true } });
   const selfHandles = new Set(selfAccounts.map((a) => a.handle.toLowerCase()));
 
@@ -84,6 +75,7 @@ export async function collectSharingBenchmarks(): Promise<SharingCollectSummary>
     totalSaved: 0,
   };
 
+  // 순차 실행(동시 X) — 차단 위험↓
   for (const tag of HASHTAGS) {
     const bucket = {
       hashtag: tag,
@@ -96,57 +88,27 @@ export async function collectSharingBenchmarks(): Promise<SharingCollectSummary>
     summary.perHashtag.push(bucket);
 
     try {
-      const items = await runActorSync<Record<string, unknown>>({
-        actorId,
-        input: {
-          mode: 'search',
-          searchQuery: tag,
-          maxPosts: MAX_POSTS_PER_TAG,
-          includeReplies: false,
-          includeReposts: false,
-          proxyConfiguration: { useApifyProxy: true },
-        },
-        timeoutSecs: 240,
-      });
-
-      const posts = items.filter((it) => it._type !== 'info');
+      const posts = await scrapeThreadsPage(
+        `https://www.threads.com/search?q=${encodeURIComponent(tag)}&serp_type=default`,
+        { scrolls: SEARCH_SCROLLS, locale: 'ko-KR' },
+      );
       bucket.fetched = posts.length;
 
       for (const post of posts) {
         try {
-          const replies = toNum(post.reply_count) ?? toNum(post.replies_count) ?? 0;
-          if (replies < MIN_REPLIES) continue;
+          if (post.replies < MIN_REPLIES) continue;
           bucket.passedThreshold += 1;
 
-          const authorHandleRaw =
-            (post.username as string | undefined) ??
-            (post.author as string | undefined) ??
-            (post.user_handle as string | undefined) ??
-            null;
-          if (!authorHandleRaw) continue;
-          const authorHandle = authorHandleRaw.replace(/^@/, '').toLowerCase();
+          if (!post.username) continue;
+          const authorHandle = post.username.toLowerCase();
           if (selfHandles.has(authorHandle)) continue; // 자기 계정 제외
 
-          const permalink =
-            (post.url as string | undefined) ??
-            (post.postUrl as string | undefined) ??
-            (post.permalink as string | undefined);
-          if (!permalink) continue;
-
-          const externalPostId =
-            (post.code as string | undefined) ??
-            (post.pk as string | undefined) ??
-            (post.id as string | undefined) ??
-            derivePostIdFromUrl(permalink);
-          if (!externalPostId) continue;
-
-          const text =
-            (post.text as string | undefined) ??
-            (post.caption as string | undefined) ??
-            '';
+          const externalPostId = post.code;
+          const permalink = post.permalink;
+          const text = post.text;
           if (text.trim().length < 3) continue;
 
-          const mediaUrls = extractMediaUrls(post);
+          const mediaUrls = post.media.map((m) => m.url);
           const contentHash = computeContentHash(text, mediaUrls);
 
           // dedup: platform+externalPostId 또는 contentHash
@@ -164,8 +126,6 @@ export async function collectSharingBenchmarks(): Promise<SharingCollectSummary>
             continue;
           }
 
-          const publishedAt = parseDate(post.posted_at ?? post.taken_at ?? post.timestamp);
-
           const bench = await prisma.benchmarkPost.create({
             data: {
               platform: InboundPlatform.THREADS,
@@ -176,11 +136,11 @@ export async function collectSharingBenchmarks(): Promise<SharingCollectSummary>
               text,
               mediaUrls,
               contentType: ContentType.SHARING,
-              likesCount: toNum(post.like_count) ?? 0,
-              repliesCount: replies,
-              repostsCount: toNum(post.repost_count) ?? 0,
-              quotesCount: toNum(post.quote_count) ?? 0,
-              publishedAt,
+              likesCount: post.likes,
+              repliesCount: post.replies,
+              repostsCount: post.reposts,
+              quotesCount: post.quotes,
+              publishedAt: post.takenAt,
             },
           });
           bucket.saved += 1;
@@ -188,7 +148,6 @@ export async function collectSharingBenchmarks(): Promise<SharingCollectSummary>
 
           // best-effort 태깅 · 임베딩
           // ⛔ viralfactors LLM 태깅 기본 OFF (2026-09-18 · Anthropic 비용 절감).
-          //   수집(스하리 상대 발견)엔 태그 불필요. 태그 기반 few-shot 이 다시 필요하면 true 로.
           if (VIRALFACTORS_TAG_ENABLED) {
             tagBenchmarkPost(bench.id).catch((err) =>
               logger.warn({ err, id: bench.id }, 'sharing benchmark tag failed'),
@@ -216,13 +175,9 @@ export async function collectSharingBenchmarks(): Promise<SharingCollectSummary>
 }
 
 /**
- * 크론 등에서 안전 호출용. Apify 미설정 시 skip.
+ * 크론 등에서 안전 호출용. 실패해도 throw 안 함.
  */
 export async function safeCollectSharingBenchmarks(): Promise<SharingCollectSummary | null> {
-  if (!isApifyConfigured() || !env.APIFY_ACTOR_THREADS_KEYWORD) {
-    logger.info('sharing collector skip: Apify 또는 threads keyword actor 미설정');
-    return null;
-  }
   try {
     return await collectSharingBenchmarks();
   } catch (err) {
@@ -232,40 +187,6 @@ export async function safeCollectSharingBenchmarks(): Promise<SharingCollectSumm
 }
 
 // ---------- helpers ----------
-
-function toNum(v: unknown): number | undefined {
-  if (typeof v === 'number') return v;
-  if (typeof v === 'string') {
-    const n = Number(v);
-    if (!Number.isNaN(n)) return n;
-  }
-  return undefined;
-}
-
-function extractMediaUrls(post: Record<string, unknown>): string[] {
-  const arr =
-    (post.media_urls as unknown[] | undefined) ??
-    (post.image_urls as unknown[] | undefined) ??
-    (post.media as unknown[] | undefined) ??
-    [];
-  return arr.filter((u): u is string => typeof u === 'string');
-}
-
-function parseDate(v: unknown): Date | null {
-  if (!v) return null;
-  if (v instanceof Date) return v;
-  if (typeof v === 'number') return new Date(v * (v > 1e12 ? 1 : 1000));
-  if (typeof v === 'string') {
-    const d = new Date(v);
-    if (!Number.isNaN(d.getTime())) return d;
-  }
-  return null;
-}
-
-function derivePostIdFromUrl(url: string): string | null {
-  const m = url.match(/\/post\/([A-Za-z0-9_-]+)/) ?? url.match(/\/([A-Za-z0-9_-]{6,})\/?$/);
-  return m?.[1] ?? null;
-}
 
 function computeContentHash(text: string, mediaUrls: string[]): string {
   const primary = mediaUrls[0] ?? '';

@@ -7,6 +7,7 @@ import { isVoyageConfigured } from '../../../infra/voyage-client.js';
 import { prisma } from '../../../db/prisma.js';
 import { analyzeSource, renderSourceBrief, type SourceBrief } from './source-brief.js';
 import { renderWinningStyle } from './winning-style.js';
+import { findLectureExamples, renderLectureExamples, type CopyRationale } from './lecture-examples.js';
 
 /**
  * Copywriter — 원본을 참고해 계정별 페르소나로 완전 재창조하는 카피 노드.
@@ -32,6 +33,8 @@ export type CopywriteResult = {
   sourceBrief: SourceBrief;
   /** 자동 완화된 우려사항(예: 사실검사 최종 실패 후 통과시킴). 승인 카드에 경고로 표시. */
   warnings?: string[];
+  /** 생성 근거 (원본 상황 · 반응 포인트 · 참고한 강의 사례 틀) — 승인 카드에 표시. */
+  rationale?: CopyRationale;
 };
 
 export interface CopywriteInput {
@@ -188,7 +191,12 @@ ${persona}
 페르소나의 어투·이모지 규칙은 위 공통 원칙 안에서 적용한다. 없는 체험은 추가하지 않는다. ${input.shopping ? '과거 페르소나의 감탄사·브랜드·추천 일괄 금지나 담백함 지시가 쇼핑 지침과 충돌하면 쇼핑 지침을 우선한다. 계정의 말투는 유지하되 상품의 매력과 소장 욕구를 충분히 표현한다.' : '상품 장점 설명을 추가하지 않는다.'}${langHint}`;
 }
 
-async function generateBody(input: CopywriteInput & { sourceBrief: SourceBrief }, seedIndex: number, extraAvoid?: string): Promise<string> {
+async function generateBody(
+  input: CopywriteInput & { sourceBrief: SourceBrief },
+  seedIndex: number,
+  extraAvoid?: string,
+  sink?: { rationale?: CopyRationale },
+): Promise<string> {
   const system = buildSystemPrompt({
     personaPrompt: input.personaPrompt,
     accountSeed: input.accountSeed,
@@ -201,6 +209,18 @@ async function generateBody(input: CopywriteInput & { sourceBrief: SourceBrief }
   userParts.push({ type: 'text', text: renderSourceBrief(input.sourceBrief) });
   // 목표 스타일 주입 — 사용자 계정 실제 고반응 글에서 역설계한 하입/FOMO/무심한 툭툭 공식.
   userParts.push({ type: 'text', text: renderWinningStyle() });
+
+  // ★ 강의 실전 사례 본보기 (전사 원문 전수 추출 1,007건 중 이 원본과 비슷한 성공 5 · 실패 2).
+  try {
+    const ex = await findLectureExamples({
+      kind: 'shopping',
+      query: [input.productName, input.productCategory, input.sourceBrief?.situation, input.sourceText].filter(Boolean).join('\n'),
+    });
+    if (ex.good.length) userParts.push({ type: 'text', text: renderLectureExamples(ex) });
+    logger.info({ method: ex.method, picked: ex.good.map((c) => c.id) }, 'lecture examples (shopping)');
+  } catch (err) {
+    logger.warn({ err: (err as Error).message }, 'lecture examples 실패 — 없이 진행');
+  }
 
   // 사용자 정정 지시 (정정 학습 루프) — 이번 재생성에 반드시 반영. 최우선.
   if (input.correctionInstruction?.trim()) {
@@ -308,6 +328,10 @@ async function generateBody(input: CopywriteInput & { sourceBrief: SourceBrief }
       type: 'object',
       properties: {
         body: { type: 'string', description: 'Threads 게시글 본문 문장, 6~200자' },
+        rationale: {
+          type: 'object',
+          properties: { situation: { type: 'string' }, point: { type: 'string' }, pattern: { type: 'string' } },
+        },
       },
       required: ['body'],
     },
@@ -315,6 +339,7 @@ async function generateBody(input: CopywriteInput & { sourceBrief: SourceBrief }
 
   const parsed = extractJson(response.text);
   const { body } = BodyResultSchema.parse(parsed);
+  if (sink) sink.rationale = (parsed as { rationale?: CopyRationale })?.rationale;
   return body;
 }
 
@@ -418,7 +443,8 @@ export async function generateCopy(input: CopywriteInput): Promise<CopywriteResu
   const factCheck = input.factCheckEnabled ?? Boolean(input.productName); // 상품 있으면 기본 ON
   const maxRetries = input.factCheckMaxRetries ?? 1; // 비용 절감: 2→1 (최대 2회 생성)
 
-  let body = await generateBody(groundedInput, 0, input.regenAvoid);
+  const sink: { rationale?: CopyRationale } = {};
+  let body = await generateBody(groundedInput, 0, input.regenAvoid, sink);
   let lastReason: string | undefined;
 
   if (factCheck) {
@@ -442,12 +468,12 @@ export async function generateCopy(input: CopywriteInput): Promise<CopywriteResu
         warnings.push(`카피 자동점검 우려: ${check.reason ?? '사실 오류 가능'}`);
         break;
       }
-      body = await generateBody(groundedInput, attempt + 1, check.reason);
+      body = await generateBody(groundedInput, attempt + 1, check.reason, sink);
     }
   }
 
   const reply = buildReply(input.deeplinkUrl);
-  const result: CopywriteResult = { body, reply, sourceBrief, warnings: warnings.length ? warnings : undefined };
+  const result: CopywriteResult = { body, reply, sourceBrief, warnings: warnings.length ? warnings : undefined, rationale: sink.rationale };
   logger.debug({ result, factCheck, lastReason }, 'generateCopy');
   return result;
 }
@@ -719,6 +745,8 @@ export interface DailyCopyInput {
    */
   mediaDescription?: string;
   correctionInstruction?: string; // 사용자 정정 지시 — 반드시 반영(정정 학습 루프)
+  /** 생성 근거(상황·포인트·참고 강의 사례) 받기 — 승인 카드 표시용. */
+  onRationale?: (r: CopyRationale | undefined) => void;
 }
 
 export async function generateDailyBody(input: DailyCopyInput): Promise<string> {
@@ -751,7 +779,20 @@ export async function generateDailyBody(input: DailyCopyInput): Promise<string> 
 - 소재 확장: 귀여운/재밌는 것뿐 아니라 **화제가 된 사건·논란이 된 사건도 OK. 단 정치는 제외.**
 - ★**논란·화제는 강하게 편들지 마라.** "이게 맞다/틀리다" 단정 X → **중립인 척 애매하게** 던져라: "이게 맞나 싶다가도 또 그럴 수도 있겠다 싶고", "보는 사람마다 다르겠더라", "뭐가 맞는 건지 은근 갈리던데", 사실만 툭 + "글쎄…". 그래야 양쪽이 댓글로 갈리고(engagement) 계정도 안전(편들다 욕먹기·명예훼손 회피).
 - ★**대놓고 "이거 봤어?/어떻게 생각해?/너넨 어때?" 물어보지 마라(하수·티남).** 사실·의견을 툭 던지면 알아서 반응한다: "~했더라", "~가 말이 되나", "~는 좀 아니지".
-- ★**특정 문구 남발 금지:** "실화냐 / 말이 되나 / 미쳤다"를 시그니처처럼 반복하지 마라. 같은 감정도 매번 다른 결로("~하는 게 가능한 일이냐", "~ 반칙 아니냐", "~보고 헛웃음 나옴", 담백하게 "~하더라").`;
+- ★**특정 문구 남발 금지:** "실화냐 / 말이 되나 / 미쳤다"를 시그니처처럼 반복하지 마라. 같은 감정도 매번 다른 결로("~하는 게 가능한 일이냐", "~ 반칙 아니냐", "~보고 헛웃음 나옴", 담백하게 "~하더라").
+== ★★ 우리 실측 (2026-09-30 · 일상글 20건) — 이게 최우선 ==
+- ✅ 터진 글(8천~2만뷰) = **영상 속 그 순간에 대한 짧은 즉각 반응**: "계속 툭툭 건드리니까 고양이가 뒷발로 툭 쳐내는 거ㅋㅋ", "역시 남자들이란....ㅋㅋ", "저거 타는 순간 다리 풀릴 듯ㅋㅋ", "버스 옆자리 상자에서 작은 손 나온 거 ㅋㅋ 나였으면 소리 질렀을듯". → 구체적 장면 + 내 반응(웃음·놀람·어이없음) + (선택) "나였으면~" 한 줄.
+- ⛔ 망한 글(3~100뷰) = **감성·힐링·교훈 멘트**: "이런 거 보면 하루 피로가 그냥 녹음", "강아지도 곰인형 가질 권리 있지", "다정한 사람일수록 자기 아픈 건 티 안 내더라", "너무 순수하다 진심". → 장면 대신 감상·명언·위로로 빠지면 아무도 댓글 안 단다. 절대 쓰지 마라.
+- 공감 = "나도 저래/우리 집 애도 저래/나였으면 저랬다"처럼 **독자가 자기 경험을 꺼내게** 만드는 것. 좋은 말·따뜻한 말이 공감이 아니다.
+== 카피 공식 (강의 정본 · 댓글=조회 엔진) ==
+- ★**두괄식:** 결론·킬포인트·후킹포인트를 **첫 줄에**. 첫 줄이 썸네일/인트로라 여기서 스크롤이 멈춘다. 첫 줄은 짧게.
+- ★★**밸런스게임(A vs B):** 소재에 맞으면 "A랑 B 중 뭐?" 양자택일을 자연스럽게 던져라 — 자기 선택을 댓글로 남긴다(가장 강력한 댓글 유도). ⛔ 선택지는 **2개만**. 셋 이상이면 이탈.
+- ★**질문은 딱 1개:** 댓글 유도 질문·양자택일은 마지막에 하나만. 여러 개면 이탈.
+- ★**가독성:** 2줄이면 안 띄워도 됨 · 3줄 이상이면 줄 사이 띄우기 · 4줄 이상이면 2줄+2줄로 분리. 다 띄우지 말고 붙일 건 붙여 강약(리듬감).
+- ★**공감(성공보다 실패):** 스레드는 공감의 장. 잘난 자랑보다 실패·삽질·공감 포인트가 응원·댓글을 부른다(단 지어내진 마라).
+- ⛔ 이모지·GIF·설문·스포일러 자체는 조회수에 영향 없다 — 장식에 기대지 말고 "사람들이 반응할 내용"이 핵심.
+- ★검증된 첫 줄 후킹 결(강의 실증, 소재 맞으면 우선 시도·정형 반복은 X): "나 잘한 걸까?" · "소심발언합니다" · "제발 ~하지마" · "얘들아 이거 알았어?" · "나 좀 도와줘" · "나 진짜 궁금해서 묻는다" · "와 나 지금 소름끼침" · "이거 진짜야?" · "둘 중 뭐가 좋아?" · 대상 지목형("~하는 사람한테 경고한다").
+- ★사족 금지: 끝에 설명·마무리 2~3줄 덧붙이지 마라. "여기까지만 딱" — 마지막은 참여 유도 한 줄로 끝.`;
   const system = `${baseSystem}
 
 ${specialRules}
@@ -760,6 +801,20 @@ ${dailyToneRules}`;
 
   // 정정 학습 재사용 (Phase 3): 과거 승인된 일상글 정정을 미리 반영 (한 번만 조회).
   const priorCorrections = await loadRecentCorrections('DAILY');
+
+  // ★ 강의 실전 사례 본보기 (일상·스하리 사례 중 이 원본과 비슷한 성공 5 · 실패 2). 한 번만 조회.
+  let lectureBlock = '';
+  try {
+    const ex = await findLectureExamples({
+      kind: 'daily',
+      query: [input.mediaDescription, input.sourceText].filter(Boolean).join('\n'),
+    });
+    if (ex.good.length) lectureBlock = renderLectureExamples(ex);
+    logger.info({ method: ex.method, picked: ex.good.map((c) => c.id) }, 'lecture examples (daily)');
+  } catch (err) {
+    logger.warn({ err: (err as Error).message }, 'lecture examples 실패 — 없이 진행');
+  }
+  let lastRationale: CopyRationale | undefined;
 
   const buildOnce = async (idx: number, avoid?: string): Promise<string> => {
     const parts: LlmContentPart[] = [];
@@ -790,6 +845,7 @@ ${dailyToneRules}`;
           priorCorrections.map((c, i) => `${i + 1}. ${c}`).join('\n'),
       });
     }
+    if (lectureBlock) parts.push({ type: 'text', text: lectureBlock });
     if (avoid) parts.push({ type: 'text', text: `⛔ 방금 실패 사유 · 이번엔 반드시 회피: ${avoid}` });
     parts.push({ type: 'text', text: '일상 공감 글 문장 1개를 JSON으로만 반환.' });
     if (parts.length === 0) throw new Error('generateDailyBody needs sourceText or sourceImageUrl');
@@ -802,9 +858,18 @@ ${dailyToneRules}`;
       temperature: 0.9 + idx * 0.05,
       jsonMode: true,
       thinking: 'disabled',
-      jsonSchema: { type: 'object', properties: { body: { type: 'string' } }, required: ['body'] },
+      jsonSchema: {
+        type: 'object',
+        properties: {
+          body: { type: 'string' },
+          rationale: { type: 'object', properties: { situation: { type: 'string' }, point: { type: 'string' }, pattern: { type: 'string' } } },
+        },
+        required: ['body'],
+      },
     });
-    return BodyResultSchema.parse(extractJson(response.text)).body;
+    const parsed = extractJson(response.text);
+    lastRationale = (parsed as { rationale?: CopyRationale })?.rationale;
+    return BodyResultSchema.parse(parsed).body;
   };
 
   let body = await buildOnce(0);
@@ -814,6 +879,7 @@ ${dailyToneRules}`;
     logger.warn({ attempt, body, reason: check.reason }, 'daily copy 개인정보/정책 위반 → 재생성');
     body = await buildOnce(attempt + 1, check.reason);
   }
+  input.onRationale?.(lastRationale);
   return body;
 }
 
