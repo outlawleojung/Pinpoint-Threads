@@ -16,6 +16,8 @@ import { sendApprovalRequest } from '../shared/approval-gate/service.js';
  * 미디어 룰: 2장 이상. 소스가 영상 1개뿐이면 **프레임 캡처 JPG 1장을 추가**해 2장으로 (사용자 방침).
  */
 
+import { videoFrameUrls } from '../../infra/video-frames.js';
+
 const isVideoUrl = (u: string) => /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/');
 
 /** Cloudinary 영상 URL → 첫 프레임 JPG 변환 URL (미디어 2장 충족용 캡처). */
@@ -139,6 +141,7 @@ export async function runPipelineC(input: RunPipelineCInput): Promise<PipelineCO
     //   설명이 있으면 캡션·프레임 이미지는 안 넘긴다(엉뚱한 해석·복붙 방지).
     const imageForCopy = (desc || rawText) ? undefined : publicUrls.find((u) => !isVideoUrl(u));
     let rationale: unknown;
+    const copyWarnings: string[] = [];
     const body = await generateDailyBody({
       personaPrompt: account.personaPrompt,
       accountSeed: account.id,
@@ -147,8 +150,16 @@ export async function runPipelineC(input: RunPipelineCInput): Promise<PipelineCO
       mediaDescription: desc || undefined,
       sourceLanguage: desc ? 'ko' : inbound.rawLanguage,
       sourceImageUrl: imageForCopy,
+      // 영상이면 시점별 프레임 3장을 이해용으로 (캡션만 보고 장면 오해 방지)
+      frameImageUrls: (() => {
+        const v = publicUrls.find((u) => isVideoUrl(u));
+        return v ? videoFrameUrls(v) : undefined;
+      })(),
       onRationale: (r) => {
         rationale = r;
+      },
+      onWarning: (w) => {
+        copyWarnings.push(w);
       },
     });
 
@@ -163,7 +174,7 @@ export async function runPipelineC(input: RunPipelineCInput): Promise<PipelineCO
       },
     });
 
-    await sendApprovalRequest(post.id);
+    await sendApprovalRequest(post.id, copyWarnings.length ? { warnings: copyWarnings } : undefined);
     logger.info({ postId: post.id, handle: account.handle }, 'Pipeline C 일상글 승인 카드 발송');
     return { status: 'PENDING_APPROVAL', postId: post.id, body };
   } catch (err) {

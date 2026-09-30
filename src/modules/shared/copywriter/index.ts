@@ -149,10 +149,11 @@ export const UNIVERSAL_PRINCIPLES = `너는 원본 콘텐츠를 보고 한국 �
 - 진부한 찬사·스펙: 최고의 제품, 완벽한, 압도적, 필수 아이템, 고성능, OO% 함유, 특허, 가성비/혜자.
 - 설명조 종결어미: "~에 좋습니다 / ~해보세요 / ~을 자랑합니다 / ~에 효과적입니다" (상세페이지 말투 = 스크롤 넘김).
 - **허용(오히려 권장): 미쳤네/미쳤나, 실화?, 사고 쳤네, 소름, 대박, 진심, 종결, 원탑 템, 갓템, 소장각/소장 욕구, 장난 아님, ㄷㄷ, 순삭.** 반응 강하면 절제 말고 그대로.
-- **독자를 부를 땐 "님들"보다 "스친들"**(스레드 친구)을 쓴다. (질문·의견 유도 시: "스친들은 어때?", "스친들 뭐 골라?")
+- **독자를 부를 땐 "님들"보다 "스친들"**(스레드 친구)을 쓴다. (단 독자에게 대놓고 묻지 마라 — "스친들은 어때?" 류 X)
 
 **개인정보·가족·직업 노출 절대 금지**:
-- 자녀·아이·아기·학부모·육아·유치원·학교 관련 언급 X
+- **게시자 본인의** 자녀·육아·학부모·유치원·학교 노출 X ("우리 애", "내 아기", "육아 중인데" 등 내 아이가 있는 것처럼 쓰기 금지)
+  ★ 단 **영상·사진 속 아기/아이를 3인칭으로 가리키는 건 OK**("아기 손목 살", "애기 표정") — 원본 주인공이 아기면 아기를 빼면 글이 성립 안 한다. 커플 소재와 같은 원칙: 관찰은 OK, 내 가족으로 옮기기 X.
 - **특정 직업·직종 식별** (간호사·교사·나이트 근무·3교대·야간 근무·워킹맘 등) X
 - 결혼·남편·아내·시댁·친정 언급 X
 - 나이·연령대 (30대·40대 등) 명시 X
@@ -473,6 +474,18 @@ export async function generateCopy(input: CopywriteInput): Promise<CopywriteResu
     }
   }
 
+  // 사용자 스타일 규칙 강제 (장면 서술·대놓고 묻기·사족·감성멘트·정황 재연). 최대 2회 재생성, 그래도면 경고.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const style = await styleCheckCopy({ body, sourceText: input.sourceText, kind: 'shopping' });
+    if (style.ok) break;
+    logger.warn({ attempt, body, reason: style.reason }, 'shopping copy 규칙 위반 → 재생성');
+    if (attempt === 2) {
+      warnings.push(`규칙 위반 우려: ${style.reason}`);
+      break;
+    }
+    body = await generateBody(groundedInput, attempt + 10, style.reason, sink);
+  }
+
   const reply = buildReply(input.deeplinkUrl);
   const result: CopywriteResult = { body, reply, sourceBrief, warnings: warnings.length ? warnings : undefined, rationale: sink.rationale };
   logger.debug({ result, factCheck, lastReason }, 'generateCopy');
@@ -483,6 +496,61 @@ export async function generateCopy(input: CopywriteInput): Promise<CopywriteResu
  * Haiku 사실검증: 카피에 상품 종류·사용처·성분 관련 명백한 오류가 있는지 판정.
  * 예: 열무김치 → 김치찌개 (X), 스킨케어 → 먹는다 (X), 여성 상품 → 남성 언급 (X).
  */
+/**
+ * ★ 사용자 스타일 규칙 강제 검사 (2026-09-30).
+ * 규칙을 프롬프트에 "부탁"만 해서는 생성기가 무시함(모기 영상 장면 서술 · "스친들 뭐임?" 대놓고 묻기 등).
+ * 생성 후 이 검사로 위반을 잡아 사유와 함께 재생성한다. 사실·개인정보는 factCheckCopy 담당.
+ */
+export async function styleCheckCopy(args: {
+  body: string;
+  sourceText?: string;
+  kind: 'daily' | 'shopping';
+  /** 영상이 실제로 보여주는 상황(이해 단계 결과) — 글이 이걸 묘사하면 장면 서술 위반. */
+  situation?: string;
+}): Promise<{ ok: boolean; reason?: string }> {
+  const system = `너는 한국 Threads 게시글이 **운영자가 정한 스타일 규칙**을 지켰는지 판정하는 검사기다.
+아래 위반이 있으면 ok=false, reason에 어떤 규칙을 어떤 문구가 어겼는지 한 줄로. (1번 장면 서술은 엄격하게 · 나머지는 명확할 때만)
+
+1) 장면 서술: 영상·사진에 보이는 장면을 글이 설명한다. (예: "아기 손목 살 틈에 모기가 끼어서 못 나가고 죽어있는 거", "그림자로 개구리 잡는다고 손 움직이는 거 봐")
+   → 보는 사람은 영상을 본다. 원문처럼 비유·한마디 반응이어야 한다. (OK: "모닝빵 틈에 낀 모기ㅋㅋ", "역시 남자들이란....ㅋㅋ")
+   ★ 영상 속 **표정·동작·모양을 묘사하는 구절이 하나라도** 있으면 위반 (예: "눈이 스르르 감기는 거 실화냐", "동그래져서 눈 감고 있는 거", "스텝까지 따라감"). "저 표정 봐"처럼 가리키기만 하는 건 OK.
+   ★ 원문에 없는 장면 디테일을 지어내 덧붙인 것도 위반 (예: 원문 "이가 있으면 제대로 닦아야지🪥"뿐인데 "슬리퍼에 이빨 그려놓고 칫솔질 해주는 거 보고" → 원문에 없는 '그려놓고'를 지어냄 + 장면 서술)
+2) 대놓고 묻기: 독자에게 의견·경험·선택을 직접 묻는다. (예: "스친들은 어때?", "뭐임?", "어느 쪽?", "해본 사람?", "너넨?", "A vs B 뭐 고름?")
+   ※ 수사적 감탄·반어는 허용: "천재 아님?", "실화냐", "말이 되나", "이게 가능한 일이냐", "일 제대로 안 하냐"
+3) 사족: 핵심 한마디 뒤에 설명·감상·교훈·다짐을 덧붙인다.${args.kind === 'daily' ? ' (일상글: 원문보다 눈에 띄게 길어졌으면 사족)' : ''}
+4) 감성·힐링·교훈 멘트: "하루 피로가 녹음", "~할 권리 있지", "다정한 사람일수록", "마음이 따뜻해짐" 류.
+5) 원작자 정황 재연: 원문 작성자의 매장 방문·여행·가족/연인 관계·구매 경위를 게시자 '나'의 일처럼 씀.${args.kind === 'daily' ? `
+6) 원문 이탈: 원문이 주어졌는데 글이 원문의 뜻·웃음 포인트와 무관한 다른 얘기를 한다. (예: 원문 "너무 행복해, 하루 종일 만져도 안 질려" → 글 "저 표정 보고 안 웃는 사람 있으면 나와봐" ✗ / "하루 종일 만져도 안 질릴 듯" ✓)
+7) 번역투: 한국 사람이 안 쓰는 직역 문장. (예: "전시회에서 제일 오래 머문 곳" ✗ → "전시회 가서 결국 이거 앞에서 제일 오래 놀다 옴" ✓)` : ''}
+
+JSON만: {"ok": boolean, "reason": "..."}`;
+  const user = [
+    args.sourceText?.trim() ? `원문: "${args.sourceText.trim().slice(0, 400)}"` : '',
+    args.situation ? `영상이 보여주는 상황(글이 이 내용을 묘사·재서술하면 1번 위반): ${args.situation}` : '',
+    `게시글: "${args.body}"`,
+    '',
+    '판정 JSON:',
+  ].filter((x, idx) => x || idx >= 3).join('\n');
+  try {
+    const res = await llm().complete({
+      tier: 'fast',
+      system,
+      userParts: [{ type: 'text', text: user }],
+      maxOutputTokens: 200,
+      thinking: 'disabled',
+      temperature: 0.1,
+      jsonMode: true,
+      jsonSchema: { type: 'object', properties: { ok: { type: 'boolean' }, reason: { type: 'string' } }, required: ['ok'] },
+    });
+    const parsed = extractJson(res.text) as { ok?: boolean; reason?: string };
+    const ok = parsed.ok !== false;
+    return { ok, reason: ok ? undefined : (parsed.reason ?? '스타일 규칙 위반') };
+  } catch (err) {
+    logger.warn({ err: (err as Error).message }, 'styleCheckCopy 실패 — 통과 처리');
+    return { ok: true };
+  }
+}
+
 export async function factCheckCopy(args: {
   body: string;
   productName?: string;
@@ -511,7 +579,8 @@ export async function factCheckCopy(args: {
   ※ 허용(ok=true): 주관적 취향·분위기 비교("크록스 대신 이런 느낌")·"~일 듯" 추측·감탄·소장 욕구. 브랜드·제품 정체성만 틀리지 않으면 됨.
 
 2) 개인정보·가족·직업 노출 (정책 위반):
-- 자녀·아이·학부모·육아·유치원·학교 관련 언급
+- **게시자 본인의** 자녀·육아·학부모·유치원·학교 노출 ("우리 애", "내 아기", "육아하다가" 등)
+  ※ 영상·사진 속 아기/아이를 3인칭으로 말하는 것("아기 손목 살에 모기 낌")은 개인정보 아님 → ok=true
 - **특정 직업·직종 식별** (간호사·교사·나이트 근무·3교대·워킹맘 등 · 직업을 특정하는 표현)
 - 결혼·남편·아내·시댁·친정 언급
 - 나이·연령대 (30대·40대 등) 명시
@@ -748,6 +817,54 @@ export interface DailyCopyInput {
   correctionInstruction?: string; // 사용자 정정 지시 — 반드시 반영(정정 학습 루프)
   /** 생성 근거(상황·포인트·참고 강의 사례) 받기 — 승인 카드 표시용. */
   onRationale?: (r: CopyRationale | undefined) => void;
+  /** 영상 시점별 프레임(이해용) — 캡션만 보고 장면을 오해하지 않게. 서술 금지 규칙은 그대로. */
+  frameImageUrls?: string[];
+  /** 규칙 검사를 끝내 통과 못 했을 때 경고(승인 카드에 표시). */
+  onWarning?: (w: string) => void;
+}
+
+/**
+ * 최소 프롬프트 현지화 — 원문 한마디의 웃음 포인트를 한국 사람 말투 한 줄로. (일상글 규칙 위반 시 폴백)
+ * 긴 규칙·페르소나 없이 낮은 temperature 로 안정적으로.
+ */
+async function transcreateCaption(
+  sourceText: string,
+  understanding: { situation: string; joke: string } | null,
+  avoid?: string,
+  temperature = 0.4,
+): Promise<string> {
+  const res = await llm().complete({
+    tier: 'main',
+    system:
+      `해외 SNS 영상 캡션을 한국 Threads 글 한 줄로 옮긴다.
+- 원문의 뜻과 웃음 포인트를 유지한다. 다른 얘기로 바꾸지 않는다.
+- 직역 금지: 한국 사람이 실제로 쓰는 말투로(~임, ~함, ~듯, ㅋㅋ). 번역투·밋밋한 직역이면 실패.
+  예) "展示会でほとんどの時間を過ごした場所" → ✗ "전시회에서 시간을 제일 많이 보낸 곳"(밋밋한 직역) / ✓ "입장료 내고 제일 오래 있던 곳ㅋㅋ"(한국식 말맛으로 같은 웃음)
+- 비유는 비유로만: 비유가 가리키는 실제 대상을 풀어 설명하지 않는다(✗ "모닝빵처럼 갈라진 팔뚝 틈" → ✓ "모닝빵 틈").
+- 영상 장면을 설명하지 않는다. "영상 상황"에 적힌 내용을 글에 쓰지 않는다(영상이 보여준다). 원문이 말한 것만 옮긴다.
+- 원문에 없는 내용을 덧붙이지 않는다. 독자에게 질문하지 않는다.
+- 한국에 딱 맞는 말이 있으면 그걸 쓴다(예: "매운 거 못 먹는 나" → "맵찔이인 나", ちぎりパン → 모닝빵).
+- 원문처럼 짧게(한 줄, 길어야 두 줄).
+JSON만: {"body": "..."}`,
+    userParts: [
+      {
+        type: 'text',
+        text:
+          `원문: "${sourceText.slice(0, 400)}"` +
+          (understanding ? `
+영상 상황(참고만, 글에 쓰지 말 것): ${understanding.situation}
+원문의 포인트: ${understanding.joke}` : '') +
+          (avoid ? `
+직전 실패 사유(반복 금지): ${avoid}` : ''),
+      },
+    ],
+    maxOutputTokens: 200,
+    temperature,
+    jsonMode: true,
+    thinking: 'disabled',
+    jsonSchema: { type: 'object', properties: { body: { type: 'string' } }, required: ['body'] },
+  });
+  return BodyResultSchema.parse(extractJson(res.text)).body;
 }
 
 export async function generateDailyBody(input: DailyCopyInput): Promise<string> {
@@ -781,19 +898,25 @@ export async function generateDailyBody(input: DailyCopyInput): Promise<string> 
 - ★**논란·화제는 강하게 편들지 마라.** "이게 맞다/틀리다" 단정 X → **중립인 척 애매하게** 던져라: "이게 맞나 싶다가도 또 그럴 수도 있겠다 싶고", "보는 사람마다 다르겠더라", "뭐가 맞는 건지 은근 갈리던데", 사실만 툭 + "글쎄…". 그래야 양쪽이 댓글로 갈리고(engagement) 계정도 안전(편들다 욕먹기·명예훼손 회피).
 - ★**대놓고 "이거 봤어?/어떻게 생각해?/너넨 어때?" 물어보지 마라(하수·티남).** 사실·의견을 툭 던지면 알아서 반응한다: "~했더라", "~가 말이 되나", "~는 좀 아니지".
 - ★**특정 문구 남발 금지:** "실화냐 / 말이 되나 / 미쳤다"를 시그니처처럼 반복하지 마라. 같은 감정도 매번 다른 결로("~하는 게 가능한 일이냐", "~ 반칙 아니냐", "~보고 헛웃음 나옴", 담백하게 "~하더라").
+== ★★★ 기본 방식 = 원문 캡션 현지화 (창작 아님) — 최우선 ==
+- 원문은 해외에서 이미 터진 글이다. 그 **한마디를 한국 사람이 쓴 것처럼 자연스럽게 옮긴다.** 새 반응을 지어내지 않는다.
+- **길이 유지**: 원문이 한 줄이면 한 줄. 원문보다 길게 쓰지 마라(덧붙인 설명·감상·질문 = 사족).
+- **톤·비유 유지**: 원문의 농담·비유·말장난을 한국식 대응어로(ちぎりパン→모닝빵, 男人的腦→역시 남자들이란). 원문의 웃음 포인트가 한국어로도 웃겨야 한다.
+- 직역체 금지: 일본어/중국어 어순·표현이 보이면 실패. 한국 스레드 말투(ㅋㅋ, ~임, ~함, 실화냐)로.
+- 원문에 없는 장면 설명 추가 금지(영상이 보여준다).
 == ★★ 우리 실측 (2026-09-30 · 일상글 20건) — 이게 최우선 ==
-- ✅ 터진 글(8천~2만뷰) = **영상 속 그 순간에 대한 짧은 즉각 반응**: "계속 툭툭 건드리니까 고양이가 뒷발로 툭 쳐내는 거ㅋㅋ", "역시 남자들이란....ㅋㅋ", "저거 타는 순간 다리 풀릴 듯ㅋㅋ", "버스 옆자리 상자에서 작은 손 나온 거 ㅋㅋ 나였으면 소리 질렀을듯". → 구체적 장면 + 내 반응(웃음·놀람·어이없음) + (선택) "나였으면~" 한 줄.
-- ⛔ 망한 글(3~100뷰) = **감성·힐링·교훈 멘트**: "이런 거 보면 하루 피로가 그냥 녹음", "강아지도 곰인형 가질 권리 있지", "다정한 사람일수록 자기 아픈 건 티 안 내더라", "너무 순수하다 진심". → 장면 대신 감상·명언·위로로 빠지면 아무도 댓글 안 단다. 절대 쓰지 마라.
-- 공감 = "나도 저래/우리 집 애도 저래/나였으면 저랬다"처럼 **독자가 자기 경험을 꺼내게** 만드는 것. 좋은 말·따뜻한 말이 공감이 아니다.
+- ⛔★ **영상·사진이 보여주는 장면을 글로 다시 설명하지 마라.** 보는 사람은 영상을 본다. "~가 ~해서 ~하고 있는 거" 식 장면 서술 = 사족. 원문처럼 **비유·한마디 반응만** 짧게.
+  예) 원문 "ちぎりパンの隙間に挟まった蚊…逃げ場なくて笑った" → ✅ "모닝빵 사이에 낀 모기ㅋㅋ 빠져나갈 데가 없음" / ⛔ "아기 손목 살 틈에 모기가 끼어서 못 나가고 죽어있는 거ㅋㅋ"(장면 설명)
+  예) 원문 "男人的腦🤣" → ✅ "역시 남자들이란....ㅋㅋㅋㅋ"(1.4만뷰, 한 줄)
+- 원문이 비유·말장난이면 그 비유를 한국식으로 살려라(ちぎりパン=아기 통통 팔 → 모닝빵·찐빵). 원문이 한 줄이면 우리도 한 줄.
+- ⛔ 감성·힐링·교훈 멘트 금지: "하루 피로가 그냥 녹음", "곰인형 가질 권리 있지", "다정한 사람일수록…" (실측 3~100뷰).
 == 카피 공식 (강의 정본 · 댓글=조회 엔진) ==
 - ★**두괄식:** 결론·킬포인트·후킹포인트를 **첫 줄에**. 첫 줄이 썸네일/인트로라 여기서 스크롤이 멈춘다. 첫 줄은 짧게.
-- ★★**밸런스게임(A vs B):** 소재에 맞으면 "A랑 B 중 뭐?" 양자택일을 자연스럽게 던져라 — 자기 선택을 댓글로 남긴다(가장 강력한 댓글 유도). ⛔ 선택지는 **2개만**. 셋 이상이면 이탈.
-- ★**질문은 딱 1개:** 댓글 유도 질문·양자택일은 마지막에 하나만. 여러 개면 이탈.
 - ★**가독성:** 2줄이면 안 띄워도 됨 · 3줄 이상이면 줄 사이 띄우기 · 4줄 이상이면 2줄+2줄로 분리. 다 띄우지 말고 붙일 건 붙여 강약(리듬감).
 - ★**공감(성공보다 실패):** 스레드는 공감의 장. 잘난 자랑보다 실패·삽질·공감 포인트가 응원·댓글을 부른다(단 지어내진 마라).
 - ⛔ 이모지·GIF·설문·스포일러 자체는 조회수에 영향 없다 — 장식에 기대지 말고 "사람들이 반응할 내용"이 핵심.
-- ★검증된 첫 줄 후킹 결(강의 실증, 소재 맞으면 우선 시도·정형 반복은 X): "나 잘한 걸까?" · "소심발언합니다" · "제발 ~하지마" · "얘들아 이거 알았어?" · "나 좀 도와줘" · "나 진짜 궁금해서 묻는다" · "와 나 지금 소름끼침" · "이거 진짜야?" · "둘 중 뭐가 좋아?" · 대상 지목형("~하는 사람한테 경고한다").
-- ★사족 금지: 끝에 설명·마무리 2~3줄 덧붙이지 마라. "여기까지만 딱" — 마지막은 참여 유도 한 줄로 끝.`;
+- ★검증된 첫 줄 결(강의 실증, 소재 맞으면 시도·정형 반복은 X): "소심발언합니다" · "제발 ~하지마" · "와 나 지금 소름끼침" · 대상 지목형("~하는 사람한테 경고한다", "영포티 무시하지 마라").
+- ★사족 금지: 끝에 설명·마무리 2~3줄 덧붙이지 마라. "여기까지만 딱" — 핵심 한마디에서 끝낸다(참여를 대놓고 요청하는 마무리 X).`;
   const system = `${baseSystem}
 
 ${specialRules}
@@ -817,9 +940,56 @@ ${dailyToneRules}`;
   }
   let lastRationale: CopyRationale | undefined;
 
+  // ★ 1단계 이해 (2026-09-30): 영상 프레임+원문으로 상황·원문 포인트만 파악(내부용).
+  //   쓰기 단계는 이미지를 안 본다 → 본 걸 글로 풀어쓰는 장면 서술 방지 + 캡션만 보고 지어내는 오해 방지.
+  let understanding: { situation: string; joke: string } | null = null;
+  if (input.frameImageUrls?.length) {
+    try {
+      const ures = await llm().complete({
+        tier: 'main',
+        system:
+          '너는 짧은 SNS 영상을 이해하는 분석기다. 영상 시점별 장면과 원문 캡션을 보고 JSON으로만 답한다: ' +
+          '{"situation": "영상이 무슨 상황인지 한 줄(물건이 원래 그런 모양인지, 누가 무엇을 하는지 정확히)", ' +
+          '"joke": "원문 캡션이 노리는 웃음·포인트가 무엇인지 한 줄(예: 덤덤한 한 줄로 반전을 영상에 맡김 / 비유 / 반어)"}',
+        userParts: [
+          ...input.frameImageUrls.slice(0, 4).map((u) => ({ type: 'image' as const, url: u })),
+          { type: 'text' as const, text: `원문 캡션: "${(input.sourceText ?? '').slice(0, 400)}"` },
+        ],
+        maxOutputTokens: 300,
+        temperature: 0.2,
+        jsonMode: true,
+        thinking: 'disabled',
+        jsonSchema: { type: 'object', properties: { situation: { type: 'string' }, joke: { type: 'string' } }, required: ['situation', 'joke'] },
+      });
+      const u = extractJson(ures.text) as { situation?: string; joke?: string };
+      if (u?.situation) understanding = { situation: u.situation, joke: u.joke ?? '' };
+      logger.info({ understanding }, 'daily: 영상 이해');
+    } catch (err) {
+      logger.warn({ err: (err as Error).message }, 'daily: 영상 이해 실패 — 원문만으로 진행');
+    }
+  }
+
   const buildOnce = async (idx: number, avoid?: string): Promise<string> => {
     const parts: LlmContentPart[] = [];
     if (input.sourceImageUrl) parts.push({ type: 'image', url: input.sourceImageUrl });
+    if (understanding) {
+      parts.push({
+        type: 'text',
+        text:
+          `영상 이해 (내부 참고용 — 이 내용을 글에 쓰지 마라. 보는 사람은 영상을 직접 본다):
+` +
+          `- 상황: ${understanding.situation}
+- 원문의 웃음/포인트: ${understanding.joke}
+` +
+          `★ 할 일: 위 "웃음/포인트"를 살려, **한국 사람이 이 영상에 실제로 붙일 법한 자연스러운 한마디**로 다시 쓴다.
+` +
+          `- 직역 금지: 원문 문장 구조를 옮기면 번역투가 된다(예: "전시회에서 제일 오래 머문 곳" ✗ → "입장료 내고 제일 오래 있던 곳ㅋㅋ" ✓).
+` +
+          `- 한국식 말맛·관용 표현으로(예: ちぎりパン → 모닝빵). 원문처럼 짧게(한두 줄), 농담 방식(덤덤함·비유·반어)은 유지.
+` +
+          `- 장면 설명·덧붙임 금지 — 영상이 보여준다.`,
+      });
+    }
     if (input.mediaDescription) {
       parts.push({
         type: 'text',
@@ -856,7 +1026,7 @@ ${dailyToneRules}`;
       system: system.replace('variant=0', `variant=${idx}`),
       userParts: parts,
       maxOutputTokens: 400,
-      temperature: 0.9 + idx * 0.05,
+      temperature: 0.6 + idx * 0.05, // 0.9 → 0.6 (2026-09-30: 들쭉날쭉 — 같은 입력에 원문 이탈 글이 나감)
       jsonMode: true,
       thinking: 'disabled',
       jsonSchema: {
@@ -873,13 +1043,49 @@ ${dailyToneRules}`;
     return BodyResultSchema.parse(parsed).body;
   };
 
-  let body = await buildOnce(0);
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const check = await factCheckCopy({ body }); // 상품 없음 → 개인정보·정책만 검사
-    if (check.ok) break;
-    logger.warn({ attempt, body, reason: check.reason }, 'daily copy 개인정보/정책 위반 → 재생성');
-    body = await buildOnce(attempt + 1, check.reason);
+  const verify = async (b: string): Promise<{ ok: boolean; reason?: string }> => {
+    const check = await factCheckCopy({ body: b }); // 상품 없음 → 개인정보·정책만 검사
+    // 사용자 스타일 규칙(장면 서술·대놓고 묻기·사족·감성멘트·정황 재연·원문 이탈·번역투) 강제 — 부탁이 아니라 검사
+    return check.ok
+      ? styleCheckCopy({ body: b, sourceText: input.sourceText ?? input.mediaDescription, kind: 'daily', situation: understanding?.situation })
+      : check;
+  };
+  let body = '';
+  let passed = false;
+  let lastReason: string | undefined;
+  // ★ 원문 캡션이 있으면 "원문 한마디 현지화"가 기본 경로 (2026-09-30).
+  //   긴 규칙 프롬프트 경로는 영상 이해 내용을 글에 끌어다 써 장면 서술이 반복됨(불닭 "우주까지 가는 거").
+  //   사용자 규칙은 아래 verify(사실·스타일 검사)로 그대로 강제된다.
+  const captionMode = Boolean(input.sourceText?.trim()) && !input.mediaDescription;
+  if (captionMode) {
+    for (let attempt = 0; attempt < 3 && !passed; attempt++) {
+      try {
+        body = await transcreateCaption(input.sourceText!, understanding, lastReason, 0.4 + attempt * 0.1);
+        const v = await verify(body);
+        if (v.ok) passed = true;
+        else {
+          lastReason = v.reason;
+          logger.warn({ attempt, body, reason: v.reason }, 'daily 현지화 규칙 위반 → 재시도');
+        }
+      } catch (err) {
+        logger.warn({ err: (err as Error).message }, 'daily 현지화 실패');
+        break;
+      }
+    }
   }
+  if (!passed) body = await buildOnce(0, lastReason);
+  for (let attempt = 0; attempt < 3 && !passed; attempt++) {
+    const v = await verify(body);
+    if (v.ok) {
+      passed = true;
+      break;
+    }
+    lastReason = v.reason;
+    logger.warn({ attempt, body, reason: v.reason }, 'daily copy 규칙 위반 → 재생성');
+    if (attempt === 2) break;
+    body = await buildOnce(attempt + 1, v.reason);
+  }
+  if (!passed) input.onWarning?.(`규칙 위반 우려(자동 수정 실패): ${lastReason ?? '사유 미상'}`);
   input.onRationale?.(lastRationale);
   return body;
 }

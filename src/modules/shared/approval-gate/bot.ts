@@ -320,9 +320,21 @@ async function pickLeastUsedDailyAccount() {
       }),
     })),
   );
-  // 1순위: 회복 대상(막힌 계정) 먼저 → 2순위: 오늘 적게 쓴 계정. (막힌 계정을 일상글로 워밍업)
-  counts.sort((x, y) => Number(y.rec) - Number(x.rec) || x.c - y.c);
-  return counts[0]!.a;
+  // 1순위: 오늘 적게 쓴 계정 → 2순위: 마지막 글이 오래된 계정 (순수 돌려막기).
+  //   (2026-09-30 버그: 회복 대상을 1순위로 둬서 sookck 에 일상글이 연달아 몰림 — 사용자 지적)
+  const last = await Promise.all(
+    counts.map(async (x) => {
+      const p = await prisma.post.findFirst({
+        where: { accountId: x.a.id, state: { notIn: [PostState.REJECTED, PostState.FAILED] } },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+      });
+      return { ...x, t: p?.createdAt.getTime() ?? 0 };
+    }),
+  );
+  // 회복 대상 우선(rec)은 뺀다 — 계정이 5개뿐이라 동률이 잦고 그때마다 sookck 로 몰림(사용자 지적 2회).
+  last.sort((x, y) => x.c - y.c || x.t - y.t);
+  return last[0]!.a;
 }
 
 // Claude 분류 테스트

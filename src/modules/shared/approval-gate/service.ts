@@ -9,6 +9,7 @@ import { assertTransition } from '../../../state/post-state-machine.js';
 import { publishQueue } from '../../../queues/queues.js';
 import { generateCopy, generateDailyBody } from '../copywriter/index.js';
 import { composeReply } from '../../pipeline-a/reply-composer/index.js';
+import { videoFrameUrls } from '../../../infra/video-frames.js';
 
 type PostWithRelations = Post & {
   account: Account;
@@ -210,6 +211,10 @@ async function regenerateCopyAndResend(postId: string, correctionText?: string):
       accountId: post.accountId,
       sourceText: srcText,
       correctionInstruction: correctionText,
+      frameImageUrls: (() => {
+        const v = post.mediaUrls.find((u) => u.includes('/video/upload/'));
+        return v ? videoFrameUrls(v) : undefined;
+      })(),
       onRationale: (r) => {
         dailyRationale = r;
       },
