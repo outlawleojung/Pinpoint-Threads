@@ -7,7 +7,7 @@ import { isVoyageConfigured } from '../../../infra/voyage-client.js';
 import { prisma } from '../../../db/prisma.js';
 import { analyzeSource, renderSourceBrief, type SourceBrief } from './source-brief.js';
 import { renderWinningStyle } from './winning-style.js';
-import { findLectureExamples, renderLectureExamples, type CopyRationale } from './lecture-examples.js';
+import { findLectureExamples, renderLectureExamples, LECTURE_EXAMPLES_ENABLED, RATIONALE_INSTRUCTION, type CopyRationale } from './lecture-examples.js';
 
 /**
  * Copywriter — 원본을 참고해 계정별 페르소나로 완전 재창조하는 카피 노드.
@@ -210,8 +210,9 @@ async function generateBody(
   // 목표 스타일 주입 — 사용자 계정 실제 고반응 글에서 역설계한 하입/FOMO/무심한 툭툭 공식.
   userParts.push({ type: 'text', text: renderWinningStyle() });
 
-  // ★ 강의 실전 사례 본보기 (전사 원문 전수 추출 1,007건 중 이 원본과 비슷한 성공 5 · 실패 2).
-  try {
+  // 강의 실전 사례 본보기 — ⛔ OFF (LECTURE_EXAMPLES_ENABLED · 전후 비교 개선 없음). 근거 출력 지시만 유지.
+  if (!LECTURE_EXAMPLES_ENABLED) userParts.push({ type: 'text', text: RATIONALE_INSTRUCTION });
+  else try {
     const ex = await findLectureExamples({
       kind: 'shopping',
       query: [input.productName, input.productCategory, input.sourceBrief?.situation, input.sourceText].filter(Boolean).join('\n'),
@@ -802,9 +803,9 @@ ${dailyToneRules}`;
   // 정정 학습 재사용 (Phase 3): 과거 승인된 일상글 정정을 미리 반영 (한 번만 조회).
   const priorCorrections = await loadRecentCorrections('DAILY');
 
-  // ★ 강의 실전 사례 본보기 (일상·스하리 사례 중 이 원본과 비슷한 성공 5 · 실패 2). 한 번만 조회.
-  let lectureBlock = '';
-  try {
+  // 강의 실전 사례 본보기 — ⛔ OFF (LECTURE_EXAMPLES_ENABLED · 전후 비교 개선 없음). 근거 출력 지시만 유지.
+  let lectureBlock = LECTURE_EXAMPLES_ENABLED ? '' : RATIONALE_INSTRUCTION;
+  if (LECTURE_EXAMPLES_ENABLED) try {
     const ex = await findLectureExamples({
       kind: 'daily',
       query: [input.mediaDescription, input.sourceText].filter(Boolean).join('\n'),

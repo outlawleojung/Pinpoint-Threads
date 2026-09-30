@@ -15,6 +15,17 @@ import { embedOne, isVoyageConfigured, VOYAGE_DIM } from '../../../infra/voyage-
  *   Voyage 실패/미설정 시 글자 2-gram 겹침으로 폴백 (생성은 멈추지 않는다).
  */
 
+/**
+ * ⛔ 생성기 본보기 주입 OFF (2026-09-30 사용자 결정).
+ *   전후 12쌍 비교에서 개선 없음(2~3건 약간↑·2건 악화: 오역 "소몰이 슬리퍼" 등) → 병목은 카피가 아니라 소재.
+ *   라이브러리(data/lecture-cases.json)는 참고 자료로 보존. 다시 켜려면 true.
+ */
+export const LECTURE_EXAMPLES_ENABLED = false;
+
+/** 본보기 없이도 승인 카드 근거(상황·포인트)를 받기 위한 출력 지시. */
+export const RATIONALE_INSTRUCTION =
+  '출력 JSON에 rationale 도 채워라: situation(원본이 무슨 상황인지 한 줄), point(한국 독자가 반응할 포인트 한 줄), pattern(어떤 첫 줄 틀·구조로 썼는지 한 줄).';
+
 export interface LectureCase {
   id: string;
   lecture: string;
