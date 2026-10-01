@@ -202,6 +202,9 @@ function startOfToday(): Date {
 //   · 종류별 하루 상한: 일상 2건(2026-09-30) · 스하리 1건 · 쇼핑 전체 1건
 //   · 같은 계정 글끼리 최소 4시간 간격
 const MANUAL_MIN_GAP_MS = 4 * 60 * 60 * 1000;
+/** 계정 간 최소 시차 30분 + 랜덤 0~30분 (2026-10-01 사용자 결정: 1~2h는 너무 느림 → 30분~1h). */
+const CROSS_ACCOUNT_MIN_GAP_MS = 30 * 60 * 1000;
+const CROSS_ACCOUNT_JITTER_MS = 30 * 60 * 1000;
 /** 일상글 계정당 하루 상한 (2026-09-30 1→2). 4h 간격은 유지 → 계정당 하루 최대 ~4건(일상2·스하리1·쇼핑). */
 const DAILY_PER_ACCOUNT_CAP = 2;
 
@@ -282,6 +285,32 @@ export async function computeManualPublishSchedule(accountId: string, kind: stri
       ? `쇼핑 전체 하루 1건 → 다른 날 예약 ${fmtHm(target)}`
       : `${kind} 다른 날 예약(계정당 하루 ${perDayCap}건) → ${fmtHm(target)}`;
   }
+
+  // 3) ★ 계정 간 시차 · 동시 발행 금지 (사용자 결정 30분~1h 랜덤).
+  //    2026-10-01 버그: 스케줄러가 같은 계정 간격만 봐서 스하리 5건이 1분 안에 동시 발행 → 조직적 행위 신호·도달 저하.
+  //    다른 계정의 발행/예약 시각과 최소 (30분 + 0~30분 랜덤) 떨어지게 민다.
+  const crossGapMs = CROSS_ACCOUNT_MIN_GAP_MS + Math.floor(Math.random() * CROSS_ACCOUNT_JITTER_MS);
+  const others = await prisma.post.findMany({
+    where: {
+      accountId: { not: accountId },
+      OR: [
+        { state: 'PUBLISHED', publishedAt: { gte: new Date(now.getTime() - CROSS_ACCOUNT_MIN_GAP_MS - CROSS_ACCOUNT_JITTER_MS) } },
+        { state: { in: ['APPROVED', 'PUBLISHING'] }, scheduledAt: { not: null } },
+      ],
+    },
+    select: { publishedAt: true, scheduledAt: true },
+  });
+  const otherTimes = others
+    .map((p) => (p.publishedAt ?? p.scheduledAt)!.getTime())
+    .sort((a, b) => a - b);
+  let moved = false;
+  for (let guard = 0; guard < 50; guard++) {
+    const clash = otherTimes.find((t) => Math.abs(target.getTime() - t) < crossGapMs);
+    if (clash == null) break;
+    target = new Date(clash + crossGapMs);
+    moved = true;
+  }
+  if (moved) reason = `${reason ? reason + ' · ' : ''}다른 계정과 시차 ${Math.round(crossGapMs / 60000)}분 → ${fmtHm(target)} 예약`;
 
   return { targetTime: target, delayMs: Math.max(0, target.getTime() - now.getTime()), reason };
 }
