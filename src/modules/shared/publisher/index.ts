@@ -123,7 +123,9 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
     );
     throw new PublisherError('본문에 커머스 링크 포함 — 발행 차단', 'INVALID_STATE');
   }
-  if (!post.account.isActive) {
+  // 쉬는 계정이라도 회복 확인용으로 명시 허용된 글(sourceBrief.allowInactive)은 발행 (2026-10-01 _blanchatt_ 테스트)
+  const allowInactive = Boolean((post.sourceBrief as { allowInactive?: boolean } | null)?.allowInactive);
+  if (!post.account.isActive && !allowInactive) {
     throw new PublisherError(
       `Account ${post.account.handle} is inactive`,
       'ACCOUNT_INACTIVE',

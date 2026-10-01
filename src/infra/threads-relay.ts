@@ -54,7 +54,8 @@ function mediaOf(o: any): { url: string; kind: RelayMediaKind }[] {
   if (own.length > 0) return own;
   // 텍스트 글(media_type 19)이 다른 글의 영상/사진을 끼워 넣은 경우 — 그 미디어를 쓴다.
   const info = o?.text_post_app_info ?? {};
-  for (const inner of [info.linked_inline_media, info.share_info?.quoted_post]) {
+  // 끼워 넣은 영상 · 인용글 · 인용 첨부(quoted_attachment_post — 다른 사람 영상 글을 인용한 텍스트 글, 2026-10-01 실측)
+  for (const inner of [info.linked_inline_media, info.share_info?.quoted_post, info.share_info?.quoted_attachment_post]) {
     if (inner && typeof inner === 'object') {
       const m = ownMedia(inner);
       if (m.length > 0) return m;
@@ -80,7 +81,7 @@ function ownMedia(o: any): { url: string; kind: RelayMediaKind }[] {
 
 function thumbOf(o: any): string | null {
   const info = o?.text_post_app_info ?? {};
-  for (const x of [o, o?.carousel_media?.[0], info.linked_inline_media, info.share_info?.quoted_post, info.share_info?.quoted_post?.carousel_media?.[0]]) {
+  for (const x of [o, o?.carousel_media?.[0], info.linked_inline_media, info.share_info?.quoted_post, info.share_info?.quoted_post?.carousel_media?.[0], info.share_info?.quoted_attachment_post]) {
     const i = x ? bestImage(x) : null;
     if (i) return i;
   }

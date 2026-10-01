@@ -40,6 +40,10 @@ export interface RunPipelineCInput {
    * 무캡션·반응만 있는 영상은 AI가 내용을 모르므로, 이 설명을 내용 기준으로 카피 생성.
    */
   description?: string;
+  /** 쉬는 계정(isActive=false) 허용 — 회복 확인용 단발 발행(예: _blanchatt_ 도달 회복 테스트). */
+  allowInactive?: boolean;
+  /** true면 승인 카드를 보내지 않고 PENDING_APPROVAL 로만 저장(사람이 본문 확인 후 직접 발송). */
+  holdApproval?: boolean;
 }
 
 export type PipelineCOutcome =
@@ -52,7 +56,7 @@ export async function runPipelineC(input: RunPipelineCInput): Promise<PipelineCO
     select: { id: true, handle: true, isActive: true, personaPrompt: true },
   });
   if (!account) return { status: 'FAILED', stage: 'account', reason: 'account not found' };
-  if (!account.isActive) return { status: 'FAILED', stage: 'account', reason: 'account inactive' };
+  if (!account.isActive && !input.allowInactive) return { status: 'FAILED', stage: 'account', reason: 'account inactive' };
 
   // 1) 소스 인제스트 (벤치마크 승격 X — 일상글은 쇼핑 풀과 분리)
   const ing = await ingestUrl({
@@ -170,10 +174,14 @@ export async function runPipelineC(input: RunPipelineCInput): Promise<PipelineCO
         mediaUrl: publicUrls[0],
         mediaUrls: publicUrls,
         generatedBody: body,
-        sourceBrief: { rationale: rationale ?? null } as never, // 생성 근거 — 승인 카드 표시용
+        sourceBrief: { rationale: rationale ?? null, ...(input.allowInactive ? { allowInactive: true } : {}) } as never, // 생성 근거 — 승인 카드 표시용 · 쉬는 계정 허용 표시
       },
     });
 
+    if (input.holdApproval) {
+      await prisma.post.update({ where: { id: post.id }, data: { state: PostState.PENDING_APPROVAL } });
+      return { status: 'PENDING_APPROVAL', postId: post.id, body };
+    }
     await sendApprovalRequest(post.id, copyWarnings.length ? { warnings: copyWarnings } : undefined);
     logger.info({ postId: post.id, handle: account.handle }, 'Pipeline C 일상글 승인 카드 발송');
     return { status: 'PENDING_APPROVAL', postId: post.id, body };

@@ -61,7 +61,8 @@ export async function scheduleApprovedPost(postId: string): Promise<ScheduleResu
       'POST_INVALID_STATE',
     );
   }
-  if (!post.account.isActive) {
+  const allowInactive = Boolean((post.sourceBrief as { allowInactive?: boolean } | null)?.allowInactive);
+  if (!post.account.isActive && !allowInactive) {
     throw new SchedulerError(`Account ${post.account.handle} inactive`, 'ACCOUNT_INACTIVE');
   }
 
