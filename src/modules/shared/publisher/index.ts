@@ -159,12 +159,22 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
   // 안전망: 팔로워 300 미만 계정의 쇼핑 글은 링크(고정댓글) 없이 일상글로 발행.
   //   강의 11개 공통 최강 금지 + 사용자 결정(2026-09-30). 계정 선택 단계(isShoppingEligible)에서도 막지만,
   //   수동 지정·재탕 등 어떤 경로로 들어와도 여기서 최종 차단한다.
-  const { LINK_MIN_FOLLOWERS } = await import('../../pipeline-a/reach-health.js');
-  const stripLink = post.kind === 'SHOPPING' && (post.account.followersCount ?? 0) < LINK_MIN_FOLLOWERS;
+  //   + 링크 비율 상한(최근 5개 중 1개 · 2026-10-02 링크 과다 계정 도달 붕괴): 넘으면 같은 방식으로 링크 생략.
+  const { LINK_MIN_FOLLOWERS, linkRatioBlock } = await import('../../pipeline-a/reach-health.js');
+  const ratioBlock = post.kind === 'SHOPPING' ? await linkRatioBlock(post.accountId, post.id) : null;
+  const stripReason =
+    post.kind !== 'SHOPPING'
+      ? null
+      : (post.account.followersCount ?? 0) < LINK_MIN_FOLLOWERS
+        ? `팔로워 ${post.account.followersCount ?? 0}명 < ${LINK_MIN_FOLLOWERS} → 링크 생략(일상글 강등)`
+        : ratioBlock
+          ? `${ratioBlock} → 링크 생략(일상글 강등)`
+          : null;
+  const stripLink = stripReason != null;
   if (stripLink) {
     logger.warn(
-      { postId: post.id, handle: post.account.handle, followers: post.account.followersCount },
-      '팔로워 300 미만 → 쇼핑 글을 링크 없이 일상글로 발행',
+      { postId: post.id, handle: post.account.handle, followers: post.account.followersCount, reason: stripReason },
+      '링크 금지 조건 → 쇼핑 글을 링크 없이 일상글로 발행',
     );
   }
 
@@ -242,7 +252,7 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
     if (stripLink) {
       await prisma.post.update({
         where: { id: post.id },
-        data: { kind: 'DAILY', replyFailureReason: `팔로워 ${post.account.followersCount ?? 0}명 < ${LINK_MIN_FOLLOWERS} → 링크 생략(일상글 강등)` },
+        data: { kind: 'DAILY', replyFailureReason: stripReason },
       });
     }
 

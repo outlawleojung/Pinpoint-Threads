@@ -110,6 +110,27 @@ export interface ShoppingEligibility {
  */
 export const LINK_MIN_FOLLOWERS = 300;
 
+/**
+ * 링크 글 비율 상한: 계정의 최근 글 LINK_RATIO_WINDOW 개(이번 글 포함) 중 링크 글은 1개까지.
+ *   근거(2026-10-02 실측): 9월 이후 링크 비율 45%(pikkseetem)·46%(kle0) 계정이 도달 붕괴,
+ *   33%·27%·0% 계정은 정상. 표본 작음(가설) — 사용자 결정으로 강제.
+ *   = 직전 발행 (WINDOW-1)개에 링크 글(고정댓글 발행됨)이 하나라도 있으면 이번엔 링크 금지.
+ */
+export const LINK_RATIO_WINDOW = 5;
+
+export async function linkRatioBlock(accountId: string, excludePostId?: string): Promise<string | null> {
+  const recent = await prisma.post.findMany({
+    where: { accountId, state: 'PUBLISHED', ...(excludePostId ? { id: { not: excludePostId } } : {}) },
+    orderBy: { publishedAt: 'desc' },
+    take: LINK_RATIO_WINDOW - 1,
+    select: { kind: true },
+  });
+  // 링크 생략된 쇼핑 글은 발행기가 DAILY 로 강등하므로, 남아 있는 SHOPPING = 링크 의도 글 (threadsReplyId 는 댓글 실패 시 비어 과소집계)
+  const links = recent.filter((p) => p.kind === 'SHOPPING').length;
+  if (links === 0) return null;
+  return `최근 ${recent.length}개 글 중 링크 글 ${links}개 → 링크 비율 상한(${LINK_RATIO_WINDOW}개 중 1개) · 일상글을 더 올린 뒤에`;
+}
+
 export async function isShoppingEligible(
   accountId: string,
   followersCount: number | null | undefined,
@@ -120,6 +141,12 @@ export async function isShoppingEligible(
       median: null,
       reason: `팔로워 ${followersCount ?? 0}명 < ${LINK_MIN_FOLLOWERS} → 링크(수익화) 금지 · 일상글로`,
     };
+  }
+  const ratio = await linkRatioBlock(accountId);
+  if (ratio) return { ok: false, median: null, reason: ratio };
+  // 3주 중앙값은 최근 며칠의 붕괴를 못 잡음(2026-10-02 pikkseetem: 중앙값 295 "건강"인데 최근 14·13·6뷰) → 붕괴 먼저 배제.
+  if (await isCollapsedAccount(accountId)) {
+    return { ok: false, median: null, reason: `도달 붕괴 (최근 ${COLLAPSE_SAMPLE}건 모두 ${COLLAPSE_MAX}뷰 미만) → 링크 금지 · 휴식 권장` };
   }
   const stats = await feedReachStats(accountId);
   if (stats == null) {
