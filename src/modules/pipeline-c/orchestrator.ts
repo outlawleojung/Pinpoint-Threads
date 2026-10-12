@@ -44,6 +44,12 @@ export interface RunPipelineCInput {
   allowInactive?: boolean;
   /** true면 승인 카드를 보내지 않고 PENDING_APPROVAL 로만 저장(사람이 본문 확인 후 직접 발송). */
   holdApproval?: boolean;
+  /**
+   * 문구를 사람이 직접 줄 때(2026-10-08): LLM 카피 생성·검사 루프를 건너뛰고 이 본문을 그대로 쓴다.
+   * 짧은 반응 한마디는 사람이 쓰는 게 낫고, 생성 루프가 한 건에 5분+ 걸려서(대부분 버려짐) 시간·비용 낭비.
+   * 빈 문자열이면 미디어만 확보하고 본문은 비워 둔다(프레임 본 뒤 나중에 채움 · holdApproval 과 함께 사용).
+   */
+  bodyOverride?: string;
 }
 
 export type PipelineCOutcome =
@@ -66,6 +72,12 @@ export async function runPipelineC(input: RunPipelineCInput): Promise<PipelineCO
   });
   if (ing.status !== InboundStatus.FETCHED) {
     return { status: 'FAILED', stage: 'ingest', reason: ing.message };
+  }
+  // 사용자가 보낸 일상 URL 작성자 → 소재 감시 목록에 자동 추가 (2026-10-12 · 감시 계정 계속 늘리기)
+  {
+    const { addWatch, handleFromThreadsUrl } = await import('./source-watch.js');
+    const h = handleFromThreadsUrl(input.sourceUrl);
+    if (h) await addWatch(h, 'user_url').catch(() => {});
   }
   const inbound = await prisma.inboundLink.findUnique({
     where: { id: ing.inboundLinkId },
@@ -146,7 +158,7 @@ export async function runPipelineC(input: RunPipelineCInput): Promise<PipelineCO
     const imageForCopy = (desc || rawText) ? undefined : publicUrls.find((u) => !isVideoUrl(u));
     let rationale: unknown;
     const copyWarnings: string[] = [];
-    const body = await generateDailyBody({
+    const body = input.bodyOverride !== undefined ? input.bodyOverride : await generateDailyBody({
       personaPrompt: account.personaPrompt,
       accountSeed: account.id,
       accountId: account.id,

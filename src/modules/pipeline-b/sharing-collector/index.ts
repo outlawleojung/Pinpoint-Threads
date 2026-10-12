@@ -21,7 +21,7 @@ const VIRALFACTORS_TAG_ENABLED = false;
  * 흐름:
  *   1) 대상 해시태그 리스트 (HASHTAGS) 순회
  *   2) 스레드 검색(비로그인 Relay 파싱 · 무료)으로 게시글 수집
- *   3) reply_count ≥ MIN_REPLIES 필터
+ *   3) 올라온 지 MAX_AGE_DAYS(3일) 이내 + reply_count ≥ MIN_REPLIES(5) 필터 (최신글만)
  *   4) 자기 계정 handle · 이미 수집된 externalPostId 제외
  *   5) BenchmarkPost 로 저장 (contentType=SHARING) → viralFactors 태깅 · 임베딩
  */
@@ -42,8 +42,13 @@ const HASHTAGS = [
   '스레드친구',
 ];
 
-/** 댓글 수 최소 임계값 (사용자 확정: 20). */
-const MIN_REPLIES = 20;
+/**
+ * 최신글만 수집 (2026-10-06 사용자 결정 "최신글만 수집해").
+ *   기존 "댓글 20+"는 새 글이 댓글 쌓이기 전에 다 걸러져 몇 달 묵은 인기글만 남았음(상위 10개 중 이번 주 글 2개).
+ *   → 올라온 지 MAX_AGE_DAYS 이내 글만, 죽은 글 거르기용 최소 댓글 MIN_REPLIES.
+ */
+const MAX_AGE_DAYS = 3;
+const MIN_REPLIES = 5;
 
 /** 검색 페이지 추가 로드 스크롤 횟수 (1회당 ~6~10건 추가). */
 const SEARCH_SCROLLS = 3;
@@ -96,6 +101,7 @@ export async function collectSharingBenchmarks(): Promise<SharingCollectSummary>
 
       for (const post of posts) {
         try {
+          if (!post.takenAt || Date.now() - post.takenAt.getTime() > MAX_AGE_DAYS * 864e5) continue;
           if (post.replies < MIN_REPLIES) continue;
           bucket.passedThreshold += 1;
 

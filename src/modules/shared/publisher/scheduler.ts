@@ -335,3 +335,31 @@ export async function getSchedulesByAccount() {
     body: p.generatedBody?.slice(0, 80) ?? '',
   }));
 }
+
+/**
+ * 스하리 연속 금지 (2026-10-04 사용자 결정): 계정의 **직전 글이 스하리면 다음 스하리 X** — 사이에 일상글(또는 쇼핑)이 있어야 함.
+ *   includeQueued=true(승인·계획 단계): 이미 예약된(APPROVED/PUBLISHING) 글까지 "직전"으로 본다.
+ *   includeQueued=false(발행 직전): 실제 나간 글(PUBLISHED/PUBLISHING)만.
+ * 위반이면 사유 문자열, 아니면 null.
+ */
+export async function consecutiveSharingBlock(
+  accountId: string,
+  opts: { excludePostId?: string; includeQueued: boolean },
+): Promise<string | null> {
+  const states = opts.includeQueued ? (['PUBLISHED', 'PUBLISHING', 'APPROVED'] as const) : (['PUBLISHED', 'PUBLISHING'] as const);
+  const rows = await prisma.post.findMany({
+    where: {
+      accountId,
+      state: { in: [...states] },
+      ...(opts.excludePostId ? { id: { not: opts.excludePostId } } : {}),
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 20,
+    select: { kind: true, publishedAt: true, scheduledAt: true, createdAt: true },
+  });
+  const t = (p: (typeof rows)[number]) => (p.publishedAt ?? p.scheduledAt ?? p.createdAt).getTime();
+  const last = rows.sort((a, b) => t(b) - t(a))[0];
+  if (!last || last.kind !== 'SHARING') return null;
+  const when = new Date(t(last)).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+  return `직전 글(${when})이 스하리 → 스하리 연속 금지 · 일상글 먼저`;
+}

@@ -131,6 +131,16 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
       'ACCOUNT_INACTIVE',
     );
   }
+  // 안전망: 스하리 연속 금지 — 직전에 실제 나간 글이 스하리면 발행 안 하고 카드 상태로 되돌림 (2026-10-04)
+  if (post.kind === 'SHARING') {
+    const { consecutiveSharingBlock } = await import('./scheduler.js');
+    const block = await consecutiveSharingBlock(post.accountId, { excludePostId: post.id, includeQueued: false });
+    if (block) {
+      await prisma.post.update({ where: { id: post.id }, data: { state: 'PENDING_APPROVAL', scheduledAt: null } }).catch(() => {});
+      await notifyAdmin(`⏸ 스하리 발행 보류 (${post.account.handle}): ${block}.\nPost: ${post.id} — 일상글이 나간 뒤 카드에서 다시 승인하세요.`);
+      throw new PublisherError(`consecutive sharing blocked: ${block}`, 'INVALID_STATE');
+    }
+  }
   if (!post.account.accessToken || !post.account.tokenExpiresAt) {
     throw new PublisherError(
       `Account ${post.account.handle} has no valid token`,

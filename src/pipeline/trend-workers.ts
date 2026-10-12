@@ -12,6 +12,7 @@ import {
   lineBPublishQueue,
   naverDailyInfoQueue,
   naverTrendCollectQueue,
+  sourceWatchQueue,
 } from '../queues/queues.js';
 import { prisma } from '../db/prisma.js';
 import { logger } from '../config/logger.js';
@@ -47,6 +48,7 @@ const POLL_CRON = '0 7 * * *'; // 매일 07:00 KST (하루 1회. 이전 6h → �
 const DIGEST_CRON = '0 8 * * *'; // 매일 08:00 KST (발굴 후보 카드 푸시 · LLM 없음)
 const DISCOVERY_PUSH_LIMIT = 10;
 const SEARCH_CRON = '30 8 * * *'; // 매일 08:30 KST (다이제스트 이후)
+const SOURCE_WATCH_CRON = '20 8 * * *'; // 매일 08:20 KST (소재 계정 감시 → 일상 후보 카드 · 2026-10-12)
 const SHARING_CRON = '0 8 * * *';  // 매일 08:00 KST (Pipeline B 스하리 벤치마크 수집 · publish 1h 전)
 const SHARING_PUBLISH_CRON = '0 9 * * *'; // 매일 09:00 KST (Pipeline B 계정별 스하리 카피 생성 → 승인 카드)
 const ACCOUNT_METRICS_CRON = '30 7 * * *'; // 매일 07:30 KST (계정 팔로워·나이 갱신 · publish 1.5h 전)
@@ -126,6 +128,20 @@ export function startTrendWorkers(): Worker[] {
         });
         logger.info({ jobId: job.id, summary }, 'trend-search done');
         return summary ?? { skipped: true };
+      },
+      { connection: redisConnection, concurrency: 1 },
+    ),
+  );
+
+  workers.push(
+    new Worker(
+      QUEUE_NAMES.SOURCE_WATCH,
+      async (job) => {
+        logger.info({ jobId: job.id, data: job.data }, 'source-watch start');
+        const { runSourceWatch, sourceWatchReport } = await import('../modules/pipeline-c/source-watch.js');
+        const summary = await runSourceWatch();
+        await sendDigestMessage(sourceWatchReport(summary)).catch(() => {});
+        return summary;
       },
       { connection: redisConnection, concurrency: 1 },
     ),
@@ -263,6 +279,13 @@ export async function scheduleTrendJobs(): Promise<void> {
       repeat: { pattern: SHARING_CRON, tz: 'Asia/Seoul' },
       jobId: 'sharing-collect-daily',
     },
+  );
+
+  // ✅ 소재 계정 감시 → 일상 후보 카드 (2026-10-12 사용자 결정 · 카드 승인 후에만 발행)
+  await sourceWatchQueue.add(
+    'source-watch-daily',
+    { triggeredBy: 'scheduler' },
+    { repeat: { pattern: SOURCE_WATCH_CRON, tz: 'Asia/Seoul' }, jobId: 'source-watch-daily' },
   );
 
   // daily 계정 metrics (팔로워·나이) 갱신 (publish 전 필수)

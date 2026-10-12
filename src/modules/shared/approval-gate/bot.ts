@@ -137,7 +137,7 @@ async function runRepostList(ctx: Context): Promise<void> {
     }
     const kindKo = (k: string) => (k === 'SHOPPING' ? '쇼핑' : k === 'SHARING' ? '스하리' : '일상');
     await ctx.reply(
-      `♻️ 재탕 후보 ${cands.length}개 (위너 + 텀 경과). [재발행] 누르면 원문 그대로 승인 카드가 올라옵니다.\n기준: 조회 1천+ 또는 비율(쇼핑 댓글조회 10%·일상/스하리 좋아요 8%) · 텀 쇼핑3일/일상7일/스하리1일`,
+      `♻️ 재탕 후보 ${cands.length}개 (위너 + 텀 경과). [재발행] 누르면 원문 그대로 승인 카드가 올라옵니다.\n기준: 조회 1천+ 또는 비율(쇼핑 댓글조회 10%·일상/스하리 좋아요 8%) · 텀 전 종류 7일+ · 스하리 위너 조회300+ 또는 100+&좋아요8%`,
     );
     for (const c of cands.slice(0, 10)) {
       const stats = `👁${fmtNum(c.views)} ❤${fmtNum(c.likes)}${c.replyViews != null ? ` 💬${fmtNum(c.replyViews)}` : ''}`;
@@ -1107,6 +1107,28 @@ bot.callbackQuery(/^rp:([^:]+):([^:]+)$/, async (ctx) => {
 });
 
 // 승인/거부 콜백
+// 소재 감시 카드: 한마디 후보 ①/② 중 고른 문구로 본문 바꾸고 바로 승인 (2026-10-12)
+bot.callbackQuery(/^alt:(\d):(.+)$/, async (ctx) => {
+  const idx = Number(ctx.match?.[1] ?? 0);
+  const postId = ctx.match?.[2] ?? '';
+  try {
+    const post = await prisma.post.findUniqueOrThrow({ where: { id: postId }, select: { sourceBrief: true, state: true } });
+    const alts = (post.sourceBrief as { altBodies?: string[] } | null)?.altBodies ?? [];
+    const chosen = alts[idx];
+    if (!chosen) throw new Error('문구 후보 없음');
+    if (post.state === PostState.PENDING_APPROVAL) {
+      await prisma.post.update({ where: { id: postId }, data: { generatedBody: chosen } });
+    }
+    const label = await handleApprovalCallback('approve', postId);
+    await ctx.answerCallbackQuery({ text: label.slice(0, 190) });
+    if (!label.startsWith('⛔')) await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
+    await ctx.reply(`처리됨: ${label}\n문구: ${chosen}\nPost: \`${postId}\``, { parse_mode: 'Markdown' });
+  } catch (err) {
+    logger.error({ err, postId }, 'alt callback failed');
+    await ctx.answerCallbackQuery({ text: `실패: ${(err as Error).message}`, show_alert: true });
+  }
+});
+
 bot.callbackQuery(/^(approve|regen-text|regen-product|reject):(.+)$/, async (ctx) => {
   const match = ctx.match;
   if (!match) return;

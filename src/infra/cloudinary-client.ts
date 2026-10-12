@@ -123,3 +123,16 @@ export async function uploadBufferToCloudinary(buffer: Buffer, mimeType: string)
   logger.debug({ publicId: result.public_id, bytes: result.bytes }, 'cloudinary buffer upload done');
   return result.secure_url;
 }
+
+/** 폴더(prefix) 안의 업로드 리소스 목록 (이미지·영상). 스하리 첨부 보관함 조회용. */
+export async function listFolderResources(prefix: string): Promise<Array<{ url: string; kind: 'image' | 'video'; createdAt: Date }>> {
+  ensureConfigured();
+  const out: Array<{ url: string; kind: 'image' | 'video'; createdAt: Date }> = [];
+  for (const kind of ['image', 'video'] as const) {
+    const res = (await cloudinary.api.resources({ type: 'upload', prefix, resource_type: kind, max_results: 500 })) as {
+      resources: Array<{ secure_url: string; created_at: string }>;
+    };
+    for (const r of res.resources) out.push({ url: r.secure_url, kind, createdAt: new Date(r.created_at) });
+  }
+  return out;
+}

@@ -20,6 +20,7 @@ export const QUEUE_NAMES = {
   PERFORMANCE_COLLECT: 'performance-collect',
   NAVER_DAILY_INFO: 'naver-daily-info',
   NAVER_TREND_COLLECT: 'naver-trend-collect',
+  SOURCE_WATCH: 'source-watch',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
@@ -242,4 +243,16 @@ export const queueEvents: Record<QueueName, QueueEvents> = {
   [QUEUE_NAMES.NAVER_TREND_COLLECT]: new QueueEvents(QUEUE_NAMES.NAVER_TREND_COLLECT, {
     connection: redisConnection,
   }),
+  [QUEUE_NAMES.SOURCE_WATCH]: new QueueEvents(QUEUE_NAMES.SOURCE_WATCH, { connection: redisConnection }),
 };
+
+/** 소재 계정 감시 → 일상 후보 카드 (2026-10-12). */
+export type SourceWatchJob = { triggeredBy: 'scheduler' | 'manual' };
+export const sourceWatchQueue = new Queue<SourceWatchJob>(QUEUE_NAMES.SOURCE_WATCH, {
+  connection: redisConnection,
+  defaultJobOptions: {
+    attempts: 1, // LLM·스크랩 비용 → 자동 재시도 X
+    removeOnComplete: { age: 7 * 24 * 3600, count: 30 },
+    removeOnFail: { age: 7 * 24 * 3600, count: 30 },
+  },
+});

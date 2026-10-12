@@ -60,6 +60,11 @@ export async function runSharingPipeline(input: SharingRunInput): Promise<Sharin
     };
   }
 
+  // 스하리 연속 금지: 직전 글(예약 포함)이 스하리면 이번엔 건너뜀 (2026-10-04)
+  const { consecutiveSharingBlock } = await import('../../shared/publisher/scheduler.js');
+  const consecutive = await consecutiveSharingBlock(acc.id, { includeQueued: true });
+  if (consecutive) return { status: 'skipped_recent', reason: consecutive };
+
   // 카피 생성
   const copy = await generateSharingCopy({
     accountId: acc.id,

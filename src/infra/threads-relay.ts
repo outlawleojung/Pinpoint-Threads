@@ -16,6 +16,8 @@ export type RelayMediaKind = 'image' | 'video';
 export interface RelayPost {
   code: string;
   username: string | null;
+  /** 인용·첨부한 원본 글의 작성자 (감시 계정 확장용 · 2026-10-12). */
+  quotedUsername: string | null;
   text: string;
   likes: number;
   replies: number;
@@ -94,6 +96,11 @@ function toRelayPost(o: any): RelayPost {
   return {
     code: o.code,
     username,
+    quotedUsername:
+      info.share_info?.quoted_post?.user?.username ??
+      info.share_info?.quoted_attachment_post?.user?.username ??
+      info.linked_inline_media?.user?.username ??
+      null,
     text: o.caption?.text ?? '',
     likes: Number(o.like_count ?? 0),
     replies: Number(info.direct_reply_count ?? 0),

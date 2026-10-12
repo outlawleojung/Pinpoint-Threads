@@ -1,5 +1,5 @@
 import type { Post, Account, CommerceProduct, SourceItem } from '@prisma/client';
-import { PostState } from '@prisma/client';
+import { PostKind, PostState } from '@prisma/client';
 import { bot } from './bot.js';
 import { approvalKeyboard } from './keyboards.js';
 import { env } from '../../../config/env.js';
@@ -69,7 +69,8 @@ export async function sendApprovalRequest(
   });
   if (!post) throw new Error(`Post ${postId} not found`);
 
-  const keyboard = approvalKeyboard(post.id);
+  const altBodies = ((post.sourceBrief as { altBodies?: string[] } | null)?.altBodies ?? []).filter(Boolean);
+  const keyboard = approvalKeyboard(post.id, altBodies.length);
 
   const allMediaUrls = post.mediaUrls.length > 0
     ? post.mediaUrls
@@ -153,7 +154,8 @@ export async function sendApprovalRequest(
   }
 
   // 승인 버튼 카드는 항상 전송. 프리뷰가 나갔으면 결정만, 못 나갔으면 캡션까지 담아 보낸다.
-  const rationaleBlock = buildRationale(post);
+  const altBlock = altBodies.length > 1 ? `✍️ 문구 후보\n${altBodies.map((b, i) => `${'①②③'[i]} ${b}`).join('\n')}\n\n` : '';
+  const rationaleBlock = buildRationale(post) + altBlock;
   const decisionText = previewSent
     ? `${rationaleBlock}Post: ${post.id}\n승인 결정:`
     : `${caption}\n\n${rationaleBlock}⚠️ 미디어 프리뷰 표시 실패(발행엔 영향 없음)\nPost: ${post.id}\n승인 결정:`;
@@ -377,6 +379,13 @@ export async function handleApprovalCallback(action: Action, postId: string): Pr
   }
   assertTransition(post.state, nextState);
 
+  // 스하리 연속 금지: 직전 글(예약 포함)이 스하리면 승인하지 않고 카드 유지 (2026-10-04)
+  if (action === 'approve' && post.kind === PostKind.SHARING) {
+    const { consecutiveSharingBlock } = await import('../publisher/scheduler.js');
+    const block = await consecutiveSharingBlock(post.accountId, { excludePostId: postId, includeQueued: true });
+    if (block) return `⛔ 승인 보류: ${block}. 이 계정에 일상글이 나간 뒤 다시 승인하세요`;
+  }
+
   await prisma.post.update({
     where: { id: postId },
     data: {
@@ -387,6 +396,13 @@ export async function handleApprovalCallback(action: Action, postId: string): Pr
   });
 
   logger.info({ postId, action, from: post.state, to: nextState }, 'post state transitioned');
+
+  // 소재 감시에서 온 카드면 그 감시 계정 승인/리젝 통계 반영 (감시 목록 정리 기준)
+  const watchHandle = (post.sourceBrief as { watch?: string } | null)?.watch;
+  if (watchHandle) {
+    const { recordWatchOutcome } = await import('../../pipeline-c/source-watch.js');
+    await recordWatchOutcome(watchHandle, action === 'approve' ? 'approved' : 'rejected').catch(() => {});
+  }
 
   // 정정 학습 루프: 승인 시 이 게시물의 정정들을 "최종 승인본"으로 확정 (학습 재사용의 정답 데이터).
   if (action === 'approve') {

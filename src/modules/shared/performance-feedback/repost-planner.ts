@@ -1,6 +1,7 @@
 import { PostKind, PostState } from '@prisma/client';
 import { prisma } from '../../../db/prisma.js';
 import { logger } from '../../../config/logger.js';
+import { NEW_ACCOUNT_CLAIM, tenureClaimOk } from '../../pipeline-b/sharing-repost.js';
 
 /**
  * Repost Planner — 재탕(재발행) 엔진.
@@ -31,6 +32,13 @@ const REPLY_VIEWS_ALWAYS = 1000;
 const LOW_REPOST_RATIO = 0.3;
 /** 낮게 나온 재탕 1회당 텀 배수 ×2, 최대 이 배수. */
 const MAX_COOLDOWN_MULT = 8;
+/**
+ * 스하리 위너 (2026-10-03 사용자 결정 "반응 좋았던 스하리 글 재탕").
+ *   스하리는 태그 검색 노출이라 1천 넘는 글이 없음(최대 891) → 일반 기준(1천 / 300+&8%)이면 후보 0.
+ *   스하리 안에서 상위권 = 조회 300+ 또는 (조회 100+ & 좋아요/조회 8%+).
+ */
+const SHARING_VIEWS_GOOD = 300;
+const SHARING_RATIO_MIN_VIEWS = 100;
 
 /**
  * 1인칭 관계어로 화자 성별 추정 (4강: 계정 페르소나와 화자 일치 — 여성 계정에 "와이프한테" X).
@@ -50,11 +58,15 @@ function speakerFits(body: string, accGender: string): boolean {
   return sp === accGender;
 }
 
-/** 재탕 텀(일) — 계보(원본+재탕들)의 마지막 발행 이후. 강의: 쿠팡 3일·일상 7일·스하리 하루. */
+/**
+ * 재탕 텀(일) — 계보(원본+재탕들)의 마지막 발행 이후. **전 종류 최소 7일.**
+ *   강의 피드백1강: "재탕 7일+, 초대박은 1개월/6개월". 2강: 텀은 계정 보호용(팔로워 2~3천급은 텀 없이도 OK) → 작은 계정은 길게.
+ *   사용자 결정(2026-10-03): 쇼핑·일상·스하리 모두 일주일 이상 지난 글만.
+ */
 export const REPOST_COOLDOWN_DAYS: Record<PostKind, number> = {
-  [PostKind.SHOPPING]: 3,
+  [PostKind.SHOPPING]: 7,
   [PostKind.DAILY]: 7,
-  [PostKind.SHARING]: 1,
+  [PostKind.SHARING]: 7,
 };
 
 /** CLAUDE.md 하드룰: 계정별 14일 이내 동일 상품 금지 → 쇼핑 재탕은 이 안이면 다른 계정으로. */
@@ -89,6 +101,12 @@ function winnerBasis(
   if (s.views >= VIEWS_ALWAYS) return `조회 ${s.views} ≥ ${VIEWS_ALWAYS}`;
   if (kind === PostKind.SHOPPING && s.replyViews != null && s.replyViews >= REPLY_VIEWS_ALWAYS) {
     return `댓글조회 ${s.replyViews} ≥ ${REPLY_VIEWS_ALWAYS}`;
+  }
+  if (kind === PostKind.SHARING) {
+    if (s.views >= SHARING_VIEWS_GOOD) return `스하리 조회 ${s.views} ≥ ${SHARING_VIEWS_GOOD}`;
+    if (s.views < SHARING_RATIO_MIN_VIEWS) return null;
+    const r = s.likes / s.views;
+    return r >= LIKE_RATIO ? `스하리 좋아요/조회 ${(r * 100).toFixed(1)}% ≥ 8%` : null;
   }
   if (s.views < VIEWS_MIN_FOR_RATIO) return null;
   if (kind === PostKind.SHOPPING) {
@@ -133,6 +151,8 @@ export async function planReposts(now = new Date()): Promise<RepostCandidate[]> 
     const snap = p.insightSnapshots.find((s) => s.hoursAfterPublish >= MIN_SNAPSHOT_HOURS);
     if (!snap) continue;
     const basis = winnerBasis(p.kind, snap);
+    // 스하리 "계정 처음 만들었어" 류 신생 주장은 숫자 보정으로 못 고침 → 재탕 후보 제외
+    if (p.kind === PostKind.SHARING && NEW_ACCOUNT_CLAIM.test(p.generatedBody ?? '')) continue;
     if (!basis) continue;
 
     // 진행 중(승인 대기·예약·발행 중) 재탕이 있으면 중복 생성 X
@@ -149,7 +169,7 @@ export async function planReposts(now = new Date()): Promise<RepostCandidate[]> 
       return r.state === PostState.PUBLISHED && s && s.hoursAfterPublish >= MIN_SNAPSHOT_HOURS && s.views < snap.views * LOW_REPOST_RATIO;
     }).length;
     const mult = Math.min(2 ** lowCount, MAX_COOLDOWN_MULT);
-    // 테스트 위너 승격은 쇼핑 재탕 텀(3일)으로 — 링크 달고 빨리 수익화
+    // 테스트 위너 승격도 쇼핑 재탕 텀(7일)
     const cooldownMs = REPOST_COOLDOWN_DAYS[isLinklessTest(p) ? PostKind.SHOPPING : p.kind] * mult * 864e5;
     if (now.getTime() - lastPublishedAt.getTime() < cooldownMs) continue;
 
@@ -183,6 +203,7 @@ export async function planReposts(now = new Date()): Promise<RepostCandidate[]> 
  */
 async function pickTarget(
   p: {
+    id: string;
     accountId: string;
     kind: PostKind;
     commerceProductId: string | null;
@@ -236,7 +257,7 @@ async function pickTarget(
     return null;
   }
 
-  if (p.account.isActive && (!needsProductRule || !(await hasRecentSameProduct(p.accountId)))) {
+  if (p.kind !== PostKind.SHARING && p.account.isActive && (!needsProductRule || !(await hasRecentSameProduct(p.accountId)))) {
     if (!needsProductRule) return { id: p.accountId, handle: p.account.handle, reason: '원 계정' };
     const origin = await prisma.account.findUnique({ where: { id: p.accountId }, select: { followersCount: true } });
     const elig = await isShoppingEligible(p.accountId, origin?.followersCount);
@@ -247,7 +268,45 @@ async function pickTarget(
     }
     // 300+인데 도달 억제 → 원 계정 링크 X, 다른 적격 계정 탐색
   }
-  if (!needsProductRule) return null; // 일상·스하리는 원 계정 비활성이면 스킵(계정 고유 글)
+  // 스하리: 원 계정이 쉬고 있으면 **다른 활성 계정이 그 글을 다시 써본다** (2026-10-03 사용자 결정).
+  //   스하리 글은 계정 고유 사연이 아니라 소통 멘트 → 이관 가능. 팔로워 숫자는 createRepost 에서 대상 계정 기준으로 보정.
+  //   대상 = 화자 성별 맞고, 오늘 스하리 아직 없고, 최근 7일 안에 같은 계보 글을 안 올린 계정 중 스하리가 가장 오래된 곳.
+  if (p.kind === PostKind.SHARING) {
+    const { consecutiveSharingBlock } = await import('../publisher/scheduler.js');
+    // 원 계정이 활성인데 직전 글이 스하리면 원 계정 대신 다른 계정 탐색 (스하리 연속 금지 · 2026-10-04)
+    if (p.account.isActive && !(await consecutiveSharingBlock(p.accountId, { includeQueued: true }))) {
+      return { id: p.accountId, handle: p.account.handle, reason: '원 계정' };
+    }
+    const dayStart = new Date(now);
+    dayStart.setHours(0, 0, 0, 0);
+    const week = new Date(now.getTime() - 7 * 864e5);
+    const others = await prisma.account.findMany({
+      where: { isActive: true, id: { not: p.accountId } },
+      select: { id: true, handle: true, audienceGender: true, threadsCreatedAt: true },
+    });
+    let best: { id: string; handle: string; last: number } | null = null;
+    for (const a of others) {
+      if (!speakerFits(body, a.audienceGender)) continue;
+      if (!tenureClaimOk(body, a.threadsCreatedAt, now)) continue; // 신생 계정에 "몇 달째" 글 X
+      if (await consecutiveSharingBlock(a.id, { includeQueued: true })) continue; // 직전 글이 스하리면 X
+      const live = { notIn: [PostState.REJECTED, PostState.FAILED] as PostState[] };
+      const today = await prisma.post.count({ where: { accountId: a.id, kind: PostKind.SHARING, createdAt: { gte: dayStart }, state: live } });
+      if (today > 0) continue;
+      const sameLine = await prisma.post.count({
+        where: { accountId: a.id, state: live, createdAt: { gte: week }, OR: [{ id: p.id }, { repostOfId: p.id }] },
+      });
+      if (sameLine > 0) continue;
+      const last = await prisma.post.findFirst({
+        where: { accountId: a.id, kind: PostKind.SHARING, state: live },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true },
+      });
+      const t = last?.createdAt.getTime() ?? 0;
+      if (!best || t < best.last) best = { id: a.id, handle: a.handle, last: t };
+    }
+    return best ? { id: best.id, handle: best.handle, reason: `원 계정(${p.account.handle}) 휴식 → 다른 계정이 다시 써봄` } : null;
+  }
+  if (!needsProductRule) return null; // 일상은 원 계정 비활성이면 스킵(영상 소재 계정 고유)
 
   const others = await prisma.account.findMany({
     where: { isActive: true, id: { not: p.accountId } },
@@ -311,6 +370,21 @@ export async function createRepost(rootPostId: string, targetAccountId: string):
     }
   }
 
+  // 스하리 재탕: 팔로워 숫자 현재값으로 보정 + 첨부는 보관함 소재로 교체(어그로용 · 글과 무관) — 2026-10-03 사용자 결정
+  let generatedBody = root.generatedBody;
+  let mediaUrls = root.mediaUrls;
+  if (root.kind === PostKind.SHARING) {
+    const { refreshFollowerClaims, pickSharingAsset } = await import('../../pipeline-b/sharing-repost.js');
+    const target = await prisma.account.findUniqueOrThrow({ where: { id: targetAccountId }, select: { followersCount: true, threadsCreatedAt: true } });
+    const fixed = await refreshFollowerClaims(root.generatedBody ?? '', target.followersCount ?? 0);
+    if (fixed == null) throw new Error('스하리 재탕: 팔로워 숫자 보정 실패 → 재탕 보류');
+    if (!tenureClaimOk(fixed, target.threadsCreatedAt)) throw new Error('스하리 재탕: "몇 달째" 류 주장인데 대상 계정이 60일 미만 → 재탕 보류');
+    generatedBody = fixed;
+    const asset = await pickSharingAsset();
+    if (asset) mediaUrls = [asset];
+    else if (mediaUrls.length === 0) throw new Error('스하리 재탕: 첨부 보관함이 비어 있음 → 소재 추가 후 재시도');
+  }
+
   const created = await prisma.post.create({
     data: {
       state: PostState.PENDING_APPROVAL,
@@ -318,10 +392,10 @@ export async function createRepost(rootPostId: string, targetAccountId: string):
       accountId: targetAccountId,
       sourceItemId: root.sourceItemId,
       commerceProductId: root.commerceProductId,
-      generatedBody: root.generatedBody,
+      generatedBody,
       generatedReply,
       sourceBrief: root.sourceBrief ?? undefined,
-      mediaUrls: root.mediaUrls,
+      mediaUrls,
       sourceMediaUrls: root.sourceMediaUrls,
       replyVariantUsed: root.replyVariantUsed,
       repostOfId: root.repostOfId ?? rootPostId, // 항상 원본(root)을 가리키게
