@@ -61,17 +61,29 @@ export async function runSharingPipeline(input: SharingRunInput): Promise<Sharin
   }
 
   // 스하리 연속 금지: 직전 글(예약 포함)이 스하리면 이번엔 건너뜀 (2026-10-04)
-  const { consecutiveSharingBlock } = await import('../../shared/publisher/scheduler.js');
-  const consecutive = await consecutiveSharingBlock(acc.id, { includeQueued: true });
+  // 스하리는 다음 아침 창(08:00~09:30)에 나감 → 그 예약 시각 직전 글이 스하리면 X (2026-10-12)
+  const { consecutiveSharingBlock, computeManualPublishSchedule } = await import('../../shared/publisher/scheduler.js');
+  const slot = await computeManualPublishSchedule(acc.id, 'SHARING');
+  const consecutive = await consecutiveSharingBlock(acc.id, { includeQueued: true, at: slot.targetTime });
   if (consecutive) return { status: 'skipped_recent', reason: consecutive };
 
-  // 카피 생성
+  // 첨부 2개 (스하리는 첨부 있는 것만 · 2개+가 반응 좋음 — 2026-10-02/06 실측). 보관함에서 덜 쓴 것부터.
+  const { pickSharingAsset } = await import('../sharing-repost.js');
+  const a1 = await pickSharingAsset();
+  const a2 = a1 ? await pickSharingAsset([a1]) : null;
+  const media = [a1, a2].filter((u): u is string => Boolean(u));
+  if (media.length === 0) {
+    return { status: 'skipped_recent', reason: '스하리 첨부 보관함이 비어 있음 → 소재 추가 필요' };
+  }
+
+  // 카피 생성 — 후보 2개(카드에서 ①/② 골라 승인)
   const copy = await generateSharingCopy({
     accountId: acc.id,
-    variantCount: input.variantCount ?? 1,
+    variantCount: input.variantCount ?? 2,
     hookOffset: input.hookOffset ?? 0,
   });
-  const body = copy.variants[0]?.body;
+  const bodies = copy.variants.map((v) => v.body).filter(Boolean);
+  const body = bodies[0];
   if (!body) {
     return { status: 'failed', reason: 'sharing copywriter returned no body' };
   }
@@ -84,8 +96,9 @@ export async function runSharingPipeline(input: SharingRunInput): Promise<Sharin
       state: PostState.PENDING_APPROVAL,
       generatedBody: body,
       generatedReply: null, // 스하리 = 고정 댓글 없음
-      mediaUrls: [],
+      mediaUrls: media,
       sourceMediaUrls: [],
+      ...(bodies.length > 1 ? { sourceBrief: { altBodies: bodies } as never } : {}),
     },
   });
 

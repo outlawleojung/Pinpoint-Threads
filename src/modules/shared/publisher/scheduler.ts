@@ -222,97 +222,80 @@ function fmtHm(d: Date): string {
   return `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
 }
 
+/** 종류별 발행 시간창 (KST 시·분). 스하리 = 아침 첫 글, 일상·쇼핑 = 스하리 4h 뒤부터 (2026-10-12 사용자 "스하리는 아침에"). */
+const KIND_WINDOW: Record<string, { start: [number, number]; end: [number, number] }> = {
+  SHARING: { start: [8, 0], end: [9, 30] },
+  DAILY: { start: [13, 0], end: [22, 30] },
+  SHOPPING: { start: [13, 0], end: [22, 30] },
+};
+const SEARCH_DAYS = 14;
+
 /**
- * 수동 승인 발행 시각 계산 — 계정당 페이싱 규칙 적용.
- *   위반 없으면 즉시(delay 0). 위반 시 다음 유효 시각으로 지연.
+ * 수동 승인 발행 시각 계산 — 아래를 **모두** 만족하는 가장 이른 시각 (2026-10-12 재작성):
+ *   ① 종류별 시간창(스하리 08:00~09:30 · 일상/쇼핑 13:00~22:30)
+ *   ② 같은 계정의 발행·예약 글과 **앞뒤 모두** 4h 이상 (과거 글만 보던 방식 → 아침 스하리를 끼워 넣을 수 있게)
+ *   ③ 종류별 하루 상한(일상 계정당 2 · 스하리 1 · 쇼핑 전체 1)
+ *   ④ 다른 계정 글과 30분 + 0~30분 랜덤 시차
  */
-export async function computeManualPublishSchedule(accountId: string, kind: string): Promise<ManualSchedule> {
+export async function computeManualPublishSchedule(
+  accountId: string,
+  kind: string,
+  opts: { excludePostId?: string } = {},
+): Promise<ManualSchedule> {
   const now = new Date();
-  const account = await prisma.account.findUnique({ where: { id: accountId }, select: { activeHourStart: true } });
-
-  const activeStart = account?.activeHourStart ?? 9;
+  const win = KIND_WINDOW[kind] ?? KIND_WINDOW.DAILY!;
   const dayKey = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-
-  // 1) 이 계정 마지막 발행/예약 시각 (종류 무관) → 4시간 간격의 기준.
-  //    이미 예약된(APPROVED/PUBLISHING) 카드도 포함 → 여러 카드가 4h씩 줄서서 쌓임.
-  const last = await prisma.post.findFirst({
-    where: {
-      accountId,
-      OR: [
-        { state: 'PUBLISHED', publishedAt: { not: null } },
-        { state: { in: ['APPROVED', 'PUBLISHING'] }, scheduledAt: { not: null } },
-      ],
-    },
-    orderBy: [{ publishedAt: 'desc' }, { scheduledAt: 'desc' }],
-    select: { publishedAt: true, scheduledAt: true },
+  const live = {
+    OR: [
+      { state: 'PUBLISHED' as const, publishedAt: { gte: new Date(now.getTime() - 2 * 864e5) } },
+      { state: { in: ['APPROVED', 'PUBLISHING'] as ('APPROVED' | 'PUBLISHING')[] }, scheduledAt: { not: null } },
+    ],
+    ...(opts.excludePostId ? { id: { not: opts.excludePostId } } : {}),
+  };
+  const rows = await prisma.post.findMany({
+    where: live,
+    select: { accountId: true, kind: true, publishedAt: true, scheduledAt: true },
   });
-  const lastTime = last?.publishedAt ?? last?.scheduledAt ?? new Date(0);
-
-  // 4시간 간격 적용
-  let target = new Date(Math.max(now.getTime(), lastTime.getTime() + MANUAL_MIN_GAP_MS));
-  let reason = target.getTime() > now.getTime() + 60_000 ? `직전 발행 4h 미달 → ${fmtHm(target)} 예약` : '';
-
-  // 2) 같은 종류가 이미 차지한 '날'은 건너뛴다.
-  //    · 쇼핑(SHOPPING): 도달 우선 전략(2026-09-22) → **전체 계정 합산 하루 1건**만.
-  //    · 일상(DAILY): 계정당 하루 2건 · 스하리(SHARING): 계정당 하루 1건.
-  //    발행됨 + 예약됨 모두 카운트 → 같은 종류 카드를 연달아 승인해도 하루 하나씩 다음날로 밀림.
-  const shoppingGlobalCap = kind === 'SHOPPING'; // 쇼핑은 계정 무관 글로벌 캡
-  const sameKind = await prisma.post.findMany({
-    where: {
-      ...(shoppingGlobalCap ? {} : { accountId }),
-      kind: kind as never,
-      OR: [
-        { state: 'PUBLISHED', publishedAt: { not: null } },
-        { state: { in: ['APPROVED', 'PUBLISHING'] }, scheduledAt: { not: null } },
-      ],
-    },
-    select: { publishedAt: true, scheduledAt: true },
-  });
-  // 일상글은 계정당 하루 2건 (2026-09-30 사용자 "일상글을 많이 발행해야" · 링크 없는 도달 엔진). 나머지 1건.
+  const at = (p: (typeof rows)[number]) => (p.publishedAt ?? p.scheduledAt)!.getTime();
+  const own = rows.filter((p) => p.accountId === accountId).map(at);
+  const others = rows.filter((p) => p.accountId !== accountId).map(at);
+  const shoppingGlobalCap = kind === 'SHOPPING';
   const perDayCap = kind === 'DAILY' ? DAILY_PER_ACCOUNT_CAP : 1;
   const dayCount = new Map<string, number>();
-  for (const p of sameKind) {
-    const k = dayKey((p.publishedAt ?? p.scheduledAt)!);
+  for (const p of rows) {
+    if (p.kind !== kind || (!shoppingGlobalCap && p.accountId !== accountId)) continue;
+    const k = dayKey(new Date(at(p)));
     dayCount.set(k, (dayCount.get(k) ?? 0) + 1);
   }
-  const usedDays = new Set([...dayCount].filter(([, n]) => n >= perDayCap).map(([k]) => k));
-  while (usedDays.has(dayKey(target))) {
-    const next = new Date(target);
-    next.setDate(next.getDate() + 1);
-    next.setHours(activeStart, Math.floor(Math.random() * 30), 0, 0);
-    target = next;
-    reason = shoppingGlobalCap
-      ? `쇼핑 전체 하루 1건 → 다른 날 예약 ${fmtHm(target)}`
-      : `${kind} 다른 날 예약(계정당 하루 ${perDayCap}건) → ${fmtHm(target)}`;
-  }
-
-  // 3) ★ 계정 간 시차 · 동시 발행 금지 (사용자 결정 30분~1h 랜덤).
-  //    2026-10-01 버그: 스케줄러가 같은 계정 간격만 봐서 스하리 5건이 1분 안에 동시 발행 → 조직적 행위 신호·도달 저하.
-  //    다른 계정의 발행/예약 시각과 최소 (30분 + 0~30분 랜덤) 떨어지게 민다.
   const crossGapMs = CROSS_ACCOUNT_MIN_GAP_MS + Math.floor(Math.random() * CROSS_ACCOUNT_JITTER_MS);
-  const others = await prisma.post.findMany({
-    where: {
-      accountId: { not: accountId },
-      OR: [
-        { state: 'PUBLISHED', publishedAt: { gte: new Date(now.getTime() - CROSS_ACCOUNT_MIN_GAP_MS - CROSS_ACCOUNT_JITTER_MS) } },
-        { state: { in: ['APPROVED', 'PUBLISHING'] }, scheduledAt: { not: null } },
-      ],
-    },
-    select: { publishedAt: true, scheduledAt: true },
-  });
-  const otherTimes = others
-    .map((p) => (p.publishedAt ?? p.scheduledAt)!.getTime())
-    .sort((a, b) => a - b);
-  let moved = false;
-  for (let guard = 0; guard < 50; guard++) {
-    const clash = otherTimes.find((t) => Math.abs(target.getTime() - t) < crossGapMs);
-    if (clash == null) break;
-    target = new Date(clash + crossGapMs);
-    moved = true;
-  }
-  if (moved) reason = `${reason ? reason + ' · ' : ''}다른 계정과 시차 ${Math.round(crossGapMs / 60000)}분 → ${fmtHm(target)} 예약`;
+  const jitterMs = Math.floor(Math.random() * 20) * 60_000; // 창 시작 시각 랜덤(매일 같은 분 X)
 
-  return { targetTime: target, delayMs: Math.max(0, target.getTime() - now.getTime()), reason };
+  const windowOf = (d: Date) => {
+    const s = new Date(d); s.setHours(win.start[0], win.start[1], 0, 0);
+    const e = new Date(d); e.setHours(win.end[0], win.end[1], 0, 0);
+    return { s: s.getTime(), e: e.getTime() };
+  };
+  const nextDayStart = (t: number) => {
+    const d = new Date(t); d.setDate(d.getDate() + 1);
+    return windowOf(d).s + jitterMs;
+  };
+
+  let t = now.getTime();
+  const limit = now.getTime() + SEARCH_DAYS * 864e5;
+  for (let guard = 0; guard < 5000 && t < limit; guard++) {
+    const w = windowOf(new Date(t));
+    if (t < w.s) { t = w.s + jitterMs; continue; }
+    if (t > w.e) { t = nextDayStart(t); continue; }
+    if ((dayCount.get(dayKey(new Date(t))) ?? 0) >= perDayCap) { t = nextDayStart(t); continue; }
+    const ownClash = own.find((x) => Math.abs(t - x) < MANUAL_MIN_GAP_MS);
+    if (ownClash != null) { t = ownClash + MANUAL_MIN_GAP_MS; continue; }
+    const otherClash = others.find((x) => Math.abs(t - x) < crossGapMs);
+    if (otherClash != null) { t = otherClash + crossGapMs; continue; }
+    const target = new Date(t);
+    const reason = t - now.getTime() > 60_000 ? `${kind} 예약 ${target.getMonth() + 1}/${target.getDate()} ${fmtHm(target)}` : '';
+    return { targetTime: target, delayMs: Math.max(0, t - now.getTime()), reason };
+  }
+  throw new Error(`${SEARCH_DAYS}일 안에 ${kind} 발행 가능한 시각 없음`);
 }
 
 /**
@@ -344,7 +327,7 @@ export async function getSchedulesByAccount() {
  */
 export async function consecutiveSharingBlock(
   accountId: string,
-  opts: { excludePostId?: string; includeQueued: boolean },
+  opts: { excludePostId?: string; includeQueued: boolean; at?: Date },
 ): Promise<string | null> {
   const states = opts.includeQueued ? (['PUBLISHED', 'PUBLISHING', 'APPROVED'] as const) : (['PUBLISHED', 'PUBLISHING'] as const);
   const rows = await prisma.post.findMany({
@@ -358,7 +341,8 @@ export async function consecutiveSharingBlock(
     select: { kind: true, publishedAt: true, scheduledAt: true, createdAt: true },
   });
   const t = (p: (typeof rows)[number]) => (p.publishedAt ?? p.scheduledAt ?? p.createdAt).getTime();
-  const last = rows.sort((a, b) => t(b) - t(a))[0];
+  // at 이 주어지면 그 시각 **직전** 글 기준 (아침 스하리를 다음 날로 예약할 때 · 2026-10-12)
+  const last = rows.filter((p) => !opts.at || t(p) < opts.at.getTime()).sort((a, b) => t(b) - t(a))[0];
   if (!last || last.kind !== 'SHARING') return null;
   const when = new Date(t(last)).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
   return `직전 글(${when})이 스하리 → 스하리 연속 금지 · 일상글 먼저`;

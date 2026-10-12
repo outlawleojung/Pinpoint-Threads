@@ -381,8 +381,10 @@ export async function handleApprovalCallback(action: Action, postId: string): Pr
 
   // 스하리 연속 금지: 직전 글(예약 포함)이 스하리면 승인하지 않고 카드 유지 (2026-10-04)
   if (action === 'approve' && post.kind === PostKind.SHARING) {
-    const { consecutiveSharingBlock } = await import('../publisher/scheduler.js');
-    const block = await consecutiveSharingBlock(post.accountId, { excludePostId: postId, includeQueued: true });
+    const { consecutiveSharingBlock, computeManualPublishSchedule } = await import('../publisher/scheduler.js');
+    // 스하리는 아침 창에 끼워 넣으므로 "그 예약 시각 직전 글" 기준으로 본다 (2026-10-12)
+    const slot = await computeManualPublishSchedule(post.accountId, 'SHARING', { excludePostId: postId });
+    const block = await consecutiveSharingBlock(post.accountId, { excludePostId: postId, includeQueued: true, at: slot.targetTime });
     if (block) return `⛔ 승인 보류: ${block}. 이 계정에 일상글이 나간 뒤 다시 승인하세요`;
   }
 
@@ -420,7 +422,7 @@ export async function handleApprovalCallback(action: Action, postId: string): Pr
     try {
       const { computeManualPublishSchedule } = await import('../publisher/scheduler.js');
       const meta = await prisma.post.findUnique({ where: { id: postId }, select: { accountId: true, kind: true } });
-      const sched = await computeManualPublishSchedule(meta!.accountId, meta!.kind);
+      const sched = await computeManualPublishSchedule(meta!.accountId, meta!.kind, { excludePostId: postId });
       await prisma.post.update({ where: { id: postId }, data: { scheduledAt: sched.targetTime } });
       await publishQueue.add('publish', { postId }, { jobId: `publish-${postId}`, delay: sched.delayMs });
       scheduleNote = sched.delayMs > 60_000 ? ` · ${sched.reason}` : ' · 즉시 발행';

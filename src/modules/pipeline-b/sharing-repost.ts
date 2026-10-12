@@ -98,7 +98,7 @@ export async function refreshFollowerClaims(body: string, followers: number): Pr
 }
 
 /** 보관함에서 아직 어떤 글에도 안 쓴 첨부 하나(영상 우선, 오래된 것부터). 다 썼으면 가장 덜 쓴 것. */
-export async function pickSharingAsset(): Promise<string | null> {
+export async function pickSharingAsset(exclude: string[] = []): Promise<string | null> {
   const assets = await listFolderResources(`${env.CLOUDINARY_UPLOAD_FOLDER}/sharing-assets`);
   if (assets.length === 0) return null;
   const posts = await prisma.post.findMany({
@@ -107,11 +107,11 @@ export async function pickSharingAsset(): Promise<string | null> {
   });
   const used = new Map<string, number>();
   for (const p of posts) for (const u of p.mediaUrls) used.set(u, (used.get(u) ?? 0) + 1);
-  const ranked = [...assets].sort(
+  const ranked = assets.filter((a) => !exclude.includes(a.url)).sort(
     (a, b) =>
       (used.get(a.url) ?? 0) - (used.get(b.url) ?? 0) ||
       (a.kind === b.kind ? 0 : a.kind === 'video' ? -1 : 1) ||
       a.createdAt.getTime() - b.createdAt.getTime(),
   );
-  return ranked[0]!.url;
+  return ranked[0]?.url ?? null;
 }

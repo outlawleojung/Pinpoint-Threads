@@ -1,4 +1,5 @@
 import { Worker } from 'bullmq';
+import { prisma } from '../db/prisma.js';
 import { redisConnection } from '../queues/connection.js';
 import { QUEUE_NAMES, type PublishJob } from '../queues/queues.js';
 import { logger } from '../config/logger.js';

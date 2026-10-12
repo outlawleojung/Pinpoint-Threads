@@ -50,7 +50,7 @@ const DISCOVERY_PUSH_LIMIT = 10;
 const SEARCH_CRON = '30 8 * * *'; // 매일 08:30 KST (다이제스트 이후)
 const SOURCE_WATCH_CRON = '20 8 * * *'; // 매일 08:20 KST (소재 계정 감시 → 일상 후보 카드 · 2026-10-12)
 const SHARING_CRON = '0 8 * * *';  // 매일 08:00 KST (Pipeline B 스하리 벤치마크 수집 · publish 1h 전)
-const SHARING_PUBLISH_CRON = '0 9 * * *'; // 매일 09:00 KST (Pipeline B 계정별 스하리 카피 생성 → 승인 카드)
+const SHARING_PUBLISH_CRON = '0 20 * * *'; // 매일 20:00 KST 스하리 카드(승인 시 다음 날 아침 발행) · 2026-10-12
 const ACCOUNT_METRICS_CRON = '30 7 * * *'; // 매일 07:30 KST (계정 팔로워·나이 갱신 · publish 1.5h 전)
 const SHOPPING_PUBLISH_CRON = '0 9 * * *'; // 매일 09:00 KST (쇼핑 카피 생성 · 발행 slot 은 계정별 시차)
 const NAVER_DAILY_INFO_CRON = '0 9 * * *'; // 매일 09:00 KST (Pipeline D 정보글 1건 생성 + 관리자 알림)
@@ -301,8 +301,15 @@ export async function scheduleTrendJobs(): Promise<void> {
   // ⛔ 스하리 자동 카피 생성 **정지** (2026-09-18 · 불필요 API 정리).
   //   계정별 매일 LLM 카피 생성 = 사람 트리거 없는 백그라운드 토큰 소모. 스하리도 수동 발행으로 전환.
   await sharingPublishQueue
-    .removeRepeatable('sharing-publish-daily', { pattern: SHARING_PUBLISH_CRON, tz: 'Asia/Seoul' }, 'sharing-publish-daily')
+    .removeRepeatable('sharing-publish-daily', { pattern: '0 9 * * *', tz: 'Asia/Seoul' }, 'sharing-publish-daily')
     .catch(() => {});
+  // ✅ 스하리 카드 재가동 (2026-10-12 사용자): 저녁 20:00 계정별 카드 → 승인 시 다음 날 아침 08:00~09:30 발행.
+  //   연속 금지·첨부 2개·문구 ①② 는 runSharingPipeline 이 처리. 발행은 카드 승인 후에만.
+  await sharingPublishQueue.add(
+    'sharing-cards-evening',
+    { triggeredBy: 'scheduler' },
+    { repeat: { pattern: SHARING_PUBLISH_CRON, tz: 'Asia/Seoul' }, jobId: 'sharing-cards-evening' },
+  );
 
   // ⛔ 자동 쇼핑 발행 크론 **정지** (2026-09-04 사용자 방침).
   //   이유: 좋아요순 top 벤치마크를 5계정에 동시·동일 콘텐츠로 뿌려 "매일 각 계정 똑같은 쇼핑글" 발생.

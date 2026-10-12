@@ -53,14 +53,16 @@ const ALL_AGES: AgeBucket[] = ['fresh_under_7d', 'young_under_30d', 'settled_1to
 //   우리 글은 "스하리 해줘/N명/반하리 갈게" 메타 얘기뿐이라 대부분 0~20뷰. → 훅 = 누구나 겪는 오늘의 한 순간.
 //   신상(자녀·직업·나이·구체 취미) X · 첨부(남의 영상)를 내 것처럼 말하기 X("우리 강아지" X).
 const HOOK_QUERIES: HookDef[] = [
-  { label: '요일 공감', query: '월요병 수요일까지 가는 거 나만 그래 출근하기 싫다', ageOK: ALL_AGES },
-  { label: '심심함 한마디', query: '나 지금 너무 심심함 놀아줄 사람', ageOK: ALL_AGES },
-  { label: '배고픔·야식', query: '배고픈데 뭐 먹지 야식 참는 중', ageOK: ALL_AGES },
-  { label: '피곤·졸림', query: '오늘따라 너무 졸리다 커피 두 잔째', ageOK: ALL_AGES },
-  { label: '날씨·계절', query: '갑자기 날씨 추워졌다 겉옷 챙겨', ageOK: ALL_AGES },
-  { label: '주말·퇴근 설렘', query: '퇴근까지 한 시간 버티는 중 주말 뭐하지', ageOK: ALL_AGES },
-  { label: '소소한 웃긴 일', query: '오늘 길에서 넘어질 뻔했는데 아무도 못 봤겠지', ageOK: ALL_AGES },
-  { label: '잠 못 드는 밤', query: '새벽인데 잠이 안 와 깨어 있는 사람', ageOK: ALL_AGES },
+  // ★ 스하리는 아침 8~9시대 발행(2026-10-12 사용자) → 아침에 맞는 일상 순간만.
+  { label: '눈 뜨자마자', query: '알람 끄고 5분만 더 누워있다가 결국 일어남', ageOK: ALL_AGES },
+  { label: '출근 준비', query: '출근 준비하는데 입을 옷이 없다 매일 똑같은 고민', ageOK: ALL_AGES },
+  { label: '아침 커피', query: '커피 한 잔 들어가야 사람 됨 아직 정신 못 차림', ageOK: ALL_AGES },
+  { label: '아침 배고픔', query: '아침 거르고 나왔더니 벌써 배고프다', ageOK: ALL_AGES },
+  // 날씨·계절 훅 제거 (2026-10-12 사용자): 다음 날 아침 발행이라 실제 날씨를 모름 → 틀릴 수 있음
+  { label: '스레드 습관', query: '눈 뜨면 알람보다 스레드부터 켜는 거 나만 그래', ageOK: ALL_AGES },
+  { label: '오늘 다짐', query: '오늘은 진짜 할 일 다 끝내고 일찍 쉰다', ageOK: ALL_AGES },
+  { label: '소소한 웃긴 일', query: '급하게 나오다 양말 짝짝이로 신고 나옴', ageOK: ALL_AGES },
+  { label: '심심함 한마디', query: '할 일 앞두고 괜히 딴짓하는 중 인사하고 갈 사람', ageOK: ALL_AGES },
 ];
 
 /** 본문 blacklist. 노출 시 재생성. */
@@ -83,6 +85,10 @@ const FORBIDDEN_PATTERNS: Array<{ re: RegExp; label: string }> = [
   { re: /오래\s*(굴린|굴려온|붙잡[은고]|해온|해왔)/, label: '오래된계정-상투오프너' },
   // "알림 없는데 새로고침" 각도 — 반복 + 실측 저조(kle0 25뷰 · 2026-10-07)
   { re: /새로고침/, label: '새로고침-반복각도' },
+  // 시각·시간대 — 스하리는 일상글 발행 직후 생성되지만 같은 계정 4h 간격으로 몇 시간 뒤 나감 (2026-10-12)
+  { re: /\d{1,2}\s*시(?!간)|오후|저녁|새벽|밤|야식|잠이\s*안|잠\s*안\s*와|퇴근|[월화수목금토일]요일|주말|불금|평일|어제/, label: '아침 발행에 안 맞는 시간·요일 표현' },
+  // 날씨·계절 — 발행일 실제 날씨를 모름 (2026-10-12 사용자 "즉흥 발행 아니면 날씨 얘기 하지 마")
+  { re: /날씨|추워|추운|춥다|쌀쌀|선선|더워|더운|덥다|비\s*(?:와|오|가\s*와|내)|눈\s*(?:와|오는|온다|내려)|장마|미세먼지|햇살|가을|겨울|여름|봄바람|바람\s*(?:불|차)/, label: '날씨·계절(발행일 날씨 모름)' },
 ];
 
 const BodyResultSchema = z.object({
@@ -229,7 +235,7 @@ async function generateOne(
           `  ※ "N 넘고 싶어/몇 명 남았어" 류 숫자 목표 금지. 숫자 없이 순수 에너지·초대·리액션·자조로. (전 계정이 "N 넘고싶어"로 수렴하는 것 방지)`,
         ]),
     '',
-    `== 지금: ${nowKoContext()} == (요일·시간대는 이걸 따라라 · 다른 요일/불금/밤/새벽 등 지어내지 마 · 훅이 지금 시간대와 안 맞으면 훅은 버리고 지금 시간대의 일상 한마디로)`,
+    `== ⚠ 이 글은 **아침 8~9시대에 올라간다**(그 계정의 하루 첫 글). 아침에 읽기 자연스러운 일상 한마디로(눈 뜨자마자·출근 준비·아침 커피·오늘 하루 시작). 밤·새벽·잠이 안 옴·야식·퇴근 소재 금지. 날씨·계절 얘기 금지(다음 날 실제 날씨를 모름). 요일·날짜·"N시" 시각은 쓰지 마라(어느 날 나갈지 모름). ==`,
     `== 이번 variant 훅 유형: ${hook.label} ==`,
     `이 유형의 에너지·각도를 살려서 각색해라. **아래 실제 고참여 스하리 벤치마크의 텐션·표현을 적극 흡수**하되(밍밍한 잡담 금지), 그 각도로 새 문장을 써라.`,
     `단 매번 같은 오프너·같은 상투구("몇 달째 아직 N도 못 채움", "뒷삭 없이 반하리 확실")는 반복 금지 — 훅마다 완전히 다른 각도.`,
@@ -370,7 +376,7 @@ export async function generateSharingCopy(
 
   // ✅ 트렌드 반영: 유사도(옛 고참여 글)로 뽑지 않고 **최근 수집·게시된 스하리 글** 을 few-shot 으로.
   //    "예전 조회수 높은 글만 반복" 방지 → 지금 스하리 태그에서 도는 최신 흐름을 각색.
-  const trendPool = await loadTrendingSharingBenchmarks(7, 30);
+  const trendPool = await loadTrendingSharingBenchmarks(7, 12);
 
   const variants: SharingCopyResult['variants'] = [];
   const offset = input.hookOffset ?? 0;
@@ -426,12 +432,16 @@ export async function generateSharingCopy(
 async function loadTrendingSharingBenchmarks(days: number, poolSize: number): Promise<SimilarBenchmark[]> {
   try {
     const since = new Date(Date.now() - days * 864e5);
-    const rows = await prisma.benchmarkPost.findMany({
+    // 반응 좋은 순 (2026-10-12 사용자 "반응 좋은 스하리 수집해서 활용"): 최근 수집분 중 댓글×3+좋아요 상위.
+    const recent = await prisma.benchmarkPost.findMany({
       where: { contentType: 'SHARING', collectedAt: { gte: since }, text: { not: '' } },
-      orderBy: [{ publishedAt: { sort: 'desc', nulls: 'last' } }, { collectedAt: 'desc' }],
-      take: poolSize,
+      orderBy: { collectedAt: 'desc' },
+      take: 300,
       select: { id: true, sourceHandle: true, text: true, likesCount: true, repliesCount: true, viralFactors: true },
     });
+    const rows = recent
+      .sort((a, b) => b.repliesCount * 3 + b.likesCount - (a.repliesCount * 3 + a.likesCount))
+      .slice(0, poolSize);
     return rows.map((r) => ({
       id: r.id,
       sourceHandle: r.sourceHandle,
