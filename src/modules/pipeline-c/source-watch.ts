@@ -111,7 +111,7 @@ const JUDGE_SYSTEM = `해외 바이럴 영상을 한국 Threads 일상글로 올
 - 프레임에서 확인 안 되는 결말·전개를 추측해 쓰지 마라.
 JSON만: {"skip": boolean, "reason": "skip 사유(없으면 빈 문자열)", "situation": "영상이 뭔지 한 줄(내부용)", "candidates": ["한마디1", "한마디2"]}`;
 
-async function judge(caption: string, videoUrl: string): Promise<Judged> {
+export async function judge(caption: string, videoUrl: string): Promise<Judged> {
   const res = await llm().complete({
     tier: 'main',
     system: JUDGE_SYSTEM,
@@ -131,7 +131,7 @@ async function judge(caption: string, videoUrl: string): Promise<Judged> {
 }
 
 /** 오늘 일상글이 가장 적은 활성 계정(돌려막기) — bot.ts pickLeastUsedDailyAccount 와 같은 기준. */
-async function pickAccount(): Promise<{ id: string; handle: string } | null> {
+export async function pickAccount(): Promise<{ id: string; handle: string } | null> {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const live = { notIn: [PostState.REJECTED, PostState.FAILED] as PostState[] };
