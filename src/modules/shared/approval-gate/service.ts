@@ -79,15 +79,24 @@ export async function sendApprovalRequest(
       : [];
 
   // URL 패턴으로 image/video 판정
+  // 영상 캡처(/video/upload/…/x.jpg)는 이미지 — 확장자가 이미지면 영상 아님 (2026-10-13)
   const isVideoUrl = (u: string) =>
-    /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/');
+    !/\.(jpe?g|png|webp)(?:\?|$)/i.test(u) && (/\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/'));
 
   // Telegram 승인 카드 전략: 비디오는 URL fetch 실패 잦음 (크기·Cloudinary transform 지연).
   // → 이미지만 미리보기로 사용 · 비디오는 개수만 캡션에 명시.
   // 실 발행 시 Threads API 에는 all media (mp4 포함) 그대로 전달됨.
   const imageOnly = allMediaUrls.filter((u) => !isVideoUrl(u));
   const videoCount = allMediaUrls.length - imageOnly.length;
-  const baseMediaUrls = imageOnly;
+  // 영상은 Cloudinary 중간 장면 JPG 로 미리보기 (2026-10-13: 영상만 3개인 카드에 이미지 0장 → 사용자가 내용 확인 불가)
+  const videoPosters = allMediaUrls
+    .filter((u) => isVideoUrl(u) && u.includes('res.cloudinary.com'))
+    .map((u) => u.split('?')[0]!.replace('/video/upload/', '/video/upload/w_480,q_auto,so_40p/').replace(/\.(mp4|mov|webm)$/i, '.jpg'));
+  // 캡처는 첫 요청 때 Cloudinary 가 생성 → 텔레그램이 기다리다 WEBPAGE_CURL_FAILED. 미리 한 번 받아 캐시 데움.
+  await Promise.all(
+    videoPosters.map((u) => fetch(u, { signal: AbortSignal.timeout(30_000) }).then((r) => r.arrayBuffer()).catch(() => null)),
+  );
+  const baseMediaUrls = [...imageOnly, ...videoPosters].slice(0, 9);
 
   // 승인 카드 검증용: 매칭된 상품 썸네일 첨부 (원본과 시각 비교)
   const productThumb = post.commerceProduct?.thumbnailUrl;
@@ -96,7 +105,7 @@ export async function sendApprovalRequest(
   const captionCore = buildPreviewCaption(post, showProductThumb);
   // 비디오 포함 여부를 카드 최상단에 명확히 (사용자가 발행 전 확인 가능하게)
   const videoBadge = videoCount > 0
-    ? `🎬 비디오 ${videoCount}개 포함됨 ✅ (프리뷰엔 이미지만 · 발행 시 비디오 나감)`
+    ? `🎬 비디오 ${videoCount}개 포함됨 ✅ (프리뷰는 영상 중간 장면 캡처 · 발행 시 비디오 나감)`
     : `🖼 비디오 없음 · 이미지 ${imageOnly.length}개`;
   // 자동 완화 경고(사실검사 우려 등) — 있으면 카드 상단에 눈에 띄게. 사용자가 최종 판단.
   const warnBlock = opts?.warnings?.length
