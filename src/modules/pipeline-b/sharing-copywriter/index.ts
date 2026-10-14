@@ -61,7 +61,6 @@ const HOOK_QUERIES: HookDef[] = [
   // 날씨·계절 훅 제거 (2026-10-12 사용자): 다음 날 아침 발행이라 실제 날씨를 모름 → 틀릴 수 있음
   { label: '스레드 습관', query: '일 시작 전에 스레드 한 바퀴는 돌아야 됨', ageOK: ALL_AGES },
   { label: '오늘 다짐', query: '오늘은 진짜 할 일 다 끝내고 일찍 쉰다', ageOK: ALL_AGES },
-  { label: '소소한 웃긴 일', query: '급하게 나왔더니 양말 짝짝이인 거 이제 봄', ageOK: ALL_AGES },
   { label: '심심함 한마디', query: '할 일 앞두고 괜히 딴짓하는 중 인사하고 갈 사람', ageOK: ALL_AGES },
 ];
 
@@ -92,7 +91,7 @@ const FORBIDDEN_PATTERNS: Array<{ re: RegExp; label: string }> = [
 ];
 
 const BodyResultSchema = z.object({
-  body: z.string().min(4).max(40), // ★ 한 줄 40자 안쪽 (2026-10-13 사용자: 너무 길고 구구절절 → 전량 폐기)
+  body: z.string().min(4).max(80), // ★ 한 줄 40자 안쪽 (2026-10-13 사용자: 너무 길고 구구절절 → 전량 폐기)
 });
 
 export interface SharingCopyInput {
@@ -114,16 +113,16 @@ export interface SharingCopyResult {
   }>;
 }
 
-const SYSTEM_PROMPT = `한국 Threads "스하리1000명프로젝트" 태그에 올릴 스하리 글 한 줄을 쓴다. (2026-10-13 간소화 · 비용 절감)
+const SYSTEM_PROMPT = `한국 Threads "스하리1000명프로젝트" 태그에 올릴 스하리 글을 쓴다. (2026-10-14 벤치마킹 방식)
 
-규칙:
-- **한 줄, 25자 안쪽(최대 40자).** 구구절절 X — 아무도 안 읽는다.
-- 중심은 누구나 겪는 일상 한마디. 스하리 요청은 붙여도 몇 글자("스하리 환영🙌") 또는 생략.
-- 이 글은 **아침 8~9시대**(출근·등교 직후)에 올라간다 → 그 시간에 맞는 말만.
-  ⛔ 눈 뜨자마자·알람·밤·새벽·야식·퇴근 · 요일·날짜·시각 · 날씨·계절 · 숫자·팔로워·계정 나이 · 신상(자녀·직업·나이)
-- 반말, ㅋㅋ 가능, 이모지 0~1개. 다른 계정 @ 금지. 상품·링크 금지. 첨부 사진·영상 얘기 금지.
-- 아래 참고 글은 말투·리듬만 흡수. 문장 복사 금지. 최근 우리 글과 같은 오프너 반복 금지.
-반응 좋았던 예: "나지금 ㅁㅐ우 심심함." / "출근하자마자 집 가고 싶음ㅋㅋ"
+방법: 사용자 메시지의 **벤치마크 글(실제로 반응 좋았던 스하리)**을 그대로 벤치마킹해 각색한다.
+- 그 글의 **구조·톤·요청 방식·길이**를 따라라. 문장 통째 복사 금지 — 표현을 바꿔 새 글로.
+- 스하리 요청(스하리=반하리, 반하리 무조건 갈게, 도와줘 등)은 **반드시** 포함.
+- 길이: 벤치마크보다 짧게, **60자 안쪽**. 구구절절 X.
+- 숫자(팔로워 수)는 아래 "이 계정 사실"과 맞을 때만. "스레드 처음/오늘 시작/첫 계정" 같은 계정 나이 주장 금지.
+- 이 글은 아침 8~9시대 발행 → 요일·날짜·시각·밤·퇴근·날씨·계절 표현 금지.
+- 신상(자녀·직업·나이·지역·가게) 금지. 다른 계정 @·상품·링크 금지. 첨부 사진·영상 얘기 금지.
+- 반말, ㅋㅋ·이모지 자연스럽게.
 
 JSON만: { "body": "..." }`;
 
@@ -164,11 +163,13 @@ async function generateOne(
   const gap = nextMilestone - cur;
   const closeToMilestone = gap <= 25; // 코앞이라 할 수 있는 거리
 
+  // 벤치마크 1개를 계정·variant 별로 회전 선택 → 그 글을 각색 (2026-10-14 사용자 "벤치마킹 하라고")
+  const primary = benchmarks.length > 0 ? benchmarks[variantIndex % benchmarks.length]! : null;
   const userPrompt = [
-    `소재: ${hook.label} (예: "${hook.query}")`,
-    '참고 글(말투만):',
-    refBlock,
-    ...(recentBodies.length > 0 ? ['최근 우리 글(오프너 반복 금지):', ...recentBodies.slice(0, 6).map((b) => `- ${b.replace(/\n/g, ' ').slice(0, 50)}`)] : []),
+    `== 벤치마크 글 (댓글 ${primary?.likesCount ?? 0}) ==`,
+    primary ? `"""\n${primary.text.slice(0, 220)}\n"""` : '(없음 — 스하리=반하리 요청형 한 줄로)',
+    `== 이 계정 사실 == 팔로워 ${context.followersCount}명 · 계정 나이 ${context.accountAgeDays ?? '미확인'}일`,
+    ...(recentBodies.length > 0 ? ['최근 우리 글(같은 문장 반복 금지):', ...recentBodies.slice(0, 6).map((b) => `- ${b.replace(/\n/g, ' ').slice(0, 50)}`)] : []),
     `variant=${variantIndex}. JSON만.`,
   ].join('\n');
 
@@ -193,6 +194,7 @@ async function generateOne(
   //   LLM이 문장/해시태그로 넣는 경우가 있어 본문에서 문구(# 유무·띄어쓰기 변형)를 전부 제거.
   //   (단독 "스하리" 단어는 정상 어휘라 건드리지 않음)
   const cleaned = body
+    .replace(/#[^\s#]+/g, '') // 본문 해시태그 전부 제거 (태그는 topic_tag 로만 · 벤치마크 따라 "#소통" 붙는 것 방지 · 2026-10-14)
     .replace(/#?\s*스하리\s*1000\s*명\s*프로젝트/g, '') // "#스하리1000명프로젝트" / "스하리 1000명 프로젝트" 등 변형 포함
     .replace(/[ \t]{2,}/g, ' ') // 제거 후 남은 이중 공백
     .replace(/^[ \t]+/gm, '') // 줄 앞 공백 (문구가 줄 첫머리에 있던 경우)
@@ -203,11 +205,36 @@ async function generateOne(
   const hit = FORBIDDEN_TERMS.find((t) => cleaned.includes(t));
   if (hit) throw new SharingBlacklistError(hit, cleaned, false); // 금지어 = 하드
   const patHit = FORBIDDEN_PATTERNS.find((p) => p.re.test(cleaned));
-  if (patHit) throw new SharingBlacklistError(patHit.label, cleaned, true); // 템플릿 패턴 = 소프트
+  // 반복 방지 템플릿만 소프트(재시도 소진 시 수용) · 시간·요일·날씨 등 사실/정책 위반은 하드(절대 수용 X · 2026-10-14)
+  if (patHit) throw new SharingBlacklistError(patHit.label, cleaned, !/시간|요일|날씨|계절/.test(patHit.label));
+  // 유사도 검사 (2026-10-14): ① 벤치마크 거의 베낌 ② 다른 계정 최근 스하리와 비슷(같은 주인 신호) → 재생성
+  {
+    const grams = (t: string) => {
+      const x = t.replace(/[\s\p{P}\p{S}ㅋㅎㅠㅜ]/gu, '');
+      const g = new Set<string>();
+      for (let i = 0; i < x.length - 1; i++) g.add(x.slice(i, i + 2));
+      return g;
+    };
+    const sim = (a: string, b: string) => {
+      const A = grams(a), B = grams(b);
+      if (!A.size || !B.size) return 0;
+      let n = 0;
+      for (const g of A) if (B.has(g)) n++;
+      return n / Math.min(A.size, B.size);
+    };
+    if (primary && sim(cleaned, primary.text) >= 0.6) throw new SharingBlacklistError('벤치마크 베낌', cleaned, false);
+    const near = recentBodies.find((r) => sim(cleaned, r) >= 0.5);
+    if (near) throw new SharingBlacklistError('최근 우리 스하리와 비슷', cleaned, false);
+  }
+  // 스하리 요청 필수 (2026-10-14 사용자: 요청 없는 한마디는 "스하리 글이 아님")
+  if (!/스하리|반하리|맞팔|반사/.test(cleaned)) throw new SharingBlacklistError('스하리 요청 없음', cleaned, false);
 
   // 비마일스톤 훅인데 "N 넘고싶어/몇 명 남았어" 숫자 목표가 새면 소프트 재시도 (전 계정 숫자 수렴 방지).
-  if (!hook.milestone && /\d{2,4}\s*(명|넘|찍|까지|앞두|근처|언저리)/.test(cleaned)) {
-    throw new SharingBlacklistError('비마일스톤-숫자목표누출', cleaned, true);
+  // 숫자는 실제 팔로워 기준 사실일 때만 · 계정 나이 주장 금지 (벤치마크가 숫자형·신생형이어도)
+  {
+    const { falseFollowerClaim, NEW_ACCOUNT_CLAIM } = await import('../sharing-repost.js');
+    if (falseFollowerClaim(cleaned, context.followersCount)) throw new SharingBlacklistError('팔로워 숫자 거짓', cleaned, false);
+    if (NEW_ACCOUNT_CLAIM.test(cleaned) || /스레드\s*처음|오늘\s*시작|첫\s*계정|입문/.test(cleaned)) throw new SharingBlacklistError('계정 나이 주장', cleaned, false);
   }
 
   return cleaned;

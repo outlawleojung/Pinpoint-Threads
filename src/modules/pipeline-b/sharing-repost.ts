@@ -99,7 +99,7 @@ export async function refreshFollowerClaims(body: string, followers: number): Pr
 
 /** 보관함에서 아직 어떤 글에도 안 쓴 첨부 하나(영상 우선, 오래된 것부터). 다 썼으면 가장 덜 쓴 것. */
 export async function pickSharingAsset(exclude: string[] = []): Promise<string | null> {
-  const assets = await listFolderResources(`${env.CLOUDINARY_UPLOAD_FOLDER}/sharing-assets`);
+  const assets = await listFolderResources(`${env.CLOUDINARY_UPLOAD_FOLDER}/sharing-assets/`);
   if (assets.length === 0) return null;
   const posts = await prisma.post.findMany({
     where: { kind: 'SHARING', mediaUrls: { hasSome: assets.map((a) => a.url) } },
@@ -114,4 +114,47 @@ export async function pickSharingAsset(exclude: string[] = []): Promise<string |
       a.createdAt.getTime() - b.createdAt.getTime(),
   );
   return ranked[0]?.url ?? null;
+}
+
+/**
+ * 한 출처의 첨부 묶음 (2026-10-14 사용자: 서로 다른 영상 2개를 섞어 붙여 "뒤죽박죽" → 카드 전량 미발행).
+ *   보관함 업로드는 출처 하나씩 몇 초 안에 연달아 올라감 → 업로드 시각 20초 이내끼리를 한 출처로 묶는다.
+ *   덜 쓴 묶음(영상 포함 우선, 오래된 것부터). 영상 하나뿐인 출처는 그 영상의 정지 장면을 이미지로 올려 2장 구성
+ *   (일상글과 같은 방식 · 실측 2장 이상이 반응 좋음).
+ */
+export async function pickSharingAssetGroup(): Promise<string[]> {
+  const assets = (await listFolderResources(`${env.CLOUDINARY_UPLOAD_FOLDER}/sharing-assets/`)).sort(
+    (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
+  );
+  if (assets.length === 0) return [];
+  const groups: (typeof assets)[] = [];
+  for (const a of assets) {
+    const g = groups[groups.length - 1];
+    const last = g?.[g.length - 1];
+    if (g && last && a.createdAt.getTime() - last.createdAt.getTime() <= 20_000) g.push(a);
+    else groups.push([a]);
+  }
+  const posts = await prisma.post.findMany({
+    where: { kind: 'SHARING', mediaUrls: { hasSome: assets.map((a) => a.url) } },
+    select: { mediaUrls: true },
+  });
+  const used = new Map<string, number>();
+  for (const p of posts) for (const u of p.mediaUrls) used.set(u, (used.get(u) ?? 0) + 1);
+  const uses = (g: typeof assets) => Math.max(...g.map((a) => used.get(a.url) ?? 0));
+  const hasVideo = (g: typeof assets) => g.some((a) => a.kind === 'video');
+  const best = [...groups].sort(
+    (x, y) => uses(x) - uses(y) || Number(hasVideo(y)) - Number(hasVideo(x)) || x[0]!.createdAt.getTime() - y[0]!.createdAt.getTime(),
+  )[0]!;
+  const urls = best.map((a) => a.url).slice(0, 4);
+  if (urls.length === 1 && best[0]!.kind === 'video') {
+    const { uploadFromUrl } = await import('../../infra/cloudinary-client.js');
+    const poster = urls[0]!.replace('/video/upload/', '/video/upload/w_720,q_auto,so_40p/').replace(/\.(mp4|mov|webm)$/i, '.jpg');
+    try {
+      const img = await uploadFromUrl({ sourceUrl: poster, folder: `${env.CLOUDINARY_UPLOAD_FOLDER}/sharing-posters`, resourceType: 'image' });
+      urls.push(img.publicUrl);
+    } catch (err) {
+      logger.warn({ err: (err as Error).message }, 'sharing poster upload failed → 영상 1개로');
+    }
+  }
+  return urls;
 }

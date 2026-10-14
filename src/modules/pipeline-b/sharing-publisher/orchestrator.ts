@@ -68,10 +68,9 @@ export async function runSharingPipeline(input: SharingRunInput): Promise<Sharin
   if (consecutive) return { status: 'skipped_recent', reason: consecutive };
 
   // 첨부 2개 (스하리는 첨부 있는 것만 · 2개+가 반응 좋음 — 2026-10-02/06 실측). 보관함에서 덜 쓴 것부터.
-  const { pickSharingAsset } = await import('../sharing-repost.js');
-  const a1 = await pickSharingAsset();
-  const a2 = a1 ? await pickSharingAsset([a1]) : null;
-  const media = [a1, a2].filter((u): u is string => Boolean(u));
+  // 한 출처 묶음만 (서로 다른 영상 섞지 않음 · 2026-10-14)
+  const { pickSharingAssetGroup } = await import('../sharing-repost.js');
+  const media = await pickSharingAssetGroup();
   if (media.length === 0) {
     return { status: 'skipped_recent', reason: '스하리 첨부 보관함이 비어 있음 → 소재 추가 필요' };
   }

@@ -386,6 +386,10 @@ export async function handleApprovalCallback(action: Action, postId: string): Pr
   ) {
     return '⚠ 이미 승인·발행 단계라 리젝 불가 (필요하면 Threads 에서 직접 삭제하세요)';
   }
+  // 폐기된 카드의 남은 버튼을 누른 경우 — 오류 대신 안내 (2026-10-14)
+  if (post.state === PostState.REJECTED) {
+    return '⚠ 이미 폐기된 카드예요. 같은 계정의 새 카드에서 승인해 주세요';
+  }
   assertTransition(post.state, nextState);
 
   // 스하리 연속 금지: 직전 글(예약 포함)이 스하리면 승인하지 않고 카드 유지 (2026-10-04)
