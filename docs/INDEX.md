@@ -4,6 +4,7 @@
 
 ## 🔴 세션 시작 필수 (다른 것보다 먼저)
 
+- [ops-runbook](08-decisions/ops-runbook.md) — ★ 운영 런북: 프로세스·하루 흐름·URL 수동 처리·문구 원칙·계정 상태 (2026-10-19)
 - [STATE](STATE.md) — 현재 프로젝트 상태 스냅샷 (Phase, 검증 완료, credential 상태)
 - [TASKS](TASKS.md) — 21개 태스크 체크리스트 (완료·미완료·사용자 액션 대기)
 - [session-log/](session-log/) 최신 파일 — 이전 세션 인수인계

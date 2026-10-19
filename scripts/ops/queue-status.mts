@@ -1,0 +1,10 @@
+import { prisma } from '../../src/db/prisma.js';
+const f = (d: Date | null) => d ? d.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '-';
+const since = new Date(Date.now() - 3 * 864e5);
+const pub = await prisma.post.findMany({ where: { state: 'PUBLISHED', publishedAt: { gte: since } }, include: { account: { select: { handle: true } } }, orderBy: { publishedAt: 'asc' } });
+console.log('PUBLISHED_3d', pub.length); for (const p of pub) console.log(' P', f(p.publishedAt), p.kind, p.account.handle);
+const q = await prisma.post.findMany({ where: { state: { in: ['APPROVED', 'PUBLISHING', 'PENDING_APPROVAL'] } }, include: { account: { select: { handle: true } } }, orderBy: { createdAt: 'asc' } });
+for (const p of q) console.log(' Q', p.state, p.kind, p.account.handle, 'sched', f(p.scheduledAt), 'created', f(p.createdAt));
+const fail = await prisma.post.findMany({ where: { state: 'FAILED', updatedAt: { gte: since } }, include: { account: { select: { handle: true } } } });
+for (const p of fail) console.log(' F', p.kind, p.account.handle, (p.rejectionReason ?? '').slice(0, 80));
+await prisma.$disconnect(); process.exit(0);
