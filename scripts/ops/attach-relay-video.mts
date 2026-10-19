@@ -1,0 +1,14 @@
+import { prisma } from '../../src/db/prisma.js';
+import { fetchThreadsPostRelay } from '../../src/infra/threads-relay.js';
+import { shutdownPlaywrightBrowser } from '../../src/infra/playwright-threads-video.js';
+import { uploadFromUrl } from '../../src/infra/cloudinary-client.js';
+const [postId, url] = [process.argv[2]!, process.argv[3]!];
+const code = url.split('/post/')[1]!.split(/[/?]/)[0]!;
+const r: any = await fetchThreadsPostRelay(url, code);
+const v = r.media.find((m: any) => m.kind === 'video');
+const up = await uploadFromUrl({ sourceUrl: v.url, postId, resourceType: 'video' });
+const poster = up.publicUrl.replace('/video/upload/', '/video/upload/w_720,q_auto,so_40p/').replace(/\.mp4$/, '.jpg');
+const img = await uploadFromUrl({ sourceUrl: poster, postId, resourceType: 'image' });
+await prisma.post.update({ where: { id: postId }, data: { mediaUrl: up.publicUrl, mediaUrls: [up.publicUrl, img.publicUrl], state: 'PENDING_APPROVAL', rejectionReason: null } });
+console.log('VID', up.publicUrl, '| text:', (r.text ?? '').slice(0, 80), '| quoted:', r.quotedUsername);
+await shutdownPlaywrightBrowser(); await prisma.$disconnect(); process.exit(0);

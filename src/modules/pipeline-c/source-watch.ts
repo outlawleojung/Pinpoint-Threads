@@ -109,6 +109,7 @@ const JUDGE_SYSTEM = `해외 바이럴 영상을 한국 Threads 일상글로 올
   예) "こんなふうに出迎えられたら 疲れがぶっ飛んだよ〜🥰" → "이렇게 마중 나와주면 피로가 싹 날아감🥰"
   원문이 이모지뿐이거나 내용이 없으면 ①도 반응 한마디로.
 - ② 단어 몇 개짜리 반응 한마디. 궁금해서 끝까지 보게 만드는 훅. 예: "겁나 웃기네ㅋㅋㅋ", "입은 거짓말 못하네ㅋㅋㅋ".
+- 원문의 "내 아내/남편/아이" 같은 원작자 가족·신상은 게시자 본인 얘기처럼 옮기지 마라(우리 계정 신상 노출) — 3인칭이나 일반 표현으로.
 - 공통: 영상 장면을 글로 설명하지 마라 · 질문·감성·교훈 멘트 금지 · 프레임에서 확인 안 되는 결말 추측 금지.
 JSON만: {"skip": boolean, "reason": "skip 사유(없으면 빈 문자열)", "situation": "영상이 뭔지 한 줄(내부용)", "candidates": ["한마디1", "한마디2"]}`;
 
@@ -160,8 +161,12 @@ export interface SourceWatchSummary {
   note?: string;
 }
 
-export async function runSourceWatch(opts: { maxCards?: number; dryRun?: boolean } = {}): Promise<SourceWatchSummary> {
-  const maxCards = opts.maxCards ?? DEFAULT_MAX_CARDS;
+/**
+ * opts.targets: 휴식 계정 회복 테스트용 — 후보를 이 계정들에 순서대로 1건씩 배정하고 allowInactive 로 단발 허용 (2026-10-19).
+ */
+export async function runSourceWatch(opts: { maxCards?: number; dryRun?: boolean; targets?: { id: string; handle: string }[] } = {}): Promise<SourceWatchSummary> {
+  const targets = opts.targets ? [...opts.targets] : null;
+  const maxCards = targets ? targets.length : (opts.maxCards ?? DEFAULT_MAX_CARDS);
   const summary: SourceWatchSummary = { watched: 0, scanned: 0, passed: 0, cards: 0, skipped: [], added: [], pruned: [] };
   const watches = await prisma.seedSource.findMany({ where: { isActive: true } });
   summary.watched = watches.length;
@@ -206,7 +211,8 @@ export async function runSourceWatch(opts: { maxCards?: number; dryRun?: boolean
 
   // 2) 카드 (대기 카드가 이미 많으면 쉼)
   const pendingDaily = await prisma.post.count({ where: { kind: PostKind.DAILY, state: PostState.PENDING_APPROVAL } });
-  const room = Math.max(0, Math.min(maxCards, MAX_PENDING_DAILY - pendingDaily));
+  // 회복 테스트(targets)는 대기 카드 상한과 무관 — 계정당 1장뿐
+  const room = targets ? maxCards : Math.max(0, Math.min(maxCards, MAX_PENDING_DAILY - pendingDaily));
   if (room === 0) summary.note = `승인 대기 일상 카드 ${pendingDaily}장 → 새 카드 보류`;
   const ranked = [...cands.values()].sort((a, b) => b.likes - a.likes);
   const { runPipelineC } = await import('./orchestrator.js');
@@ -214,10 +220,11 @@ export async function runSourceWatch(opts: { maxCards?: number; dryRun?: boolean
   for (const p of ranked) {
     if (summary.cards >= room || opts.dryRun) break;
     const url = `https://www.threads.com/@${p.username}/post/${p.code}`;
-    const acc = await pickAccount();
+    const acc = targets ? targets.shift() : await pickAccount();
     if (!acc) break;
+    const cardsBefore = summary.cards;
     try {
-      const out = await runPipelineC({ accountId: acc.id, sourceUrl: url, holdApproval: true, bodyOverride: '' });
+      const out = await runPipelineC({ accountId: acc.id, sourceUrl: url, holdApproval: true, bodyOverride: '', ...(targets ? { allowInactive: true } : {}) });
       if (out.status !== 'PENDING_APPROVAL' || !('postId' in out) || !out.postId) {
         summary.skipped.push({ url, reason: `파이프라인: ${'reason' in out ? out.reason : out.status}` });
         continue;
@@ -260,6 +267,9 @@ export async function runSourceWatch(opts: { maxCards?: number; dryRun?: boolean
     } catch (err) {
       summary.skipped.push({ url, reason: (err as Error).message.slice(0, 120) });
       logger.warn({ url, err: (err as Error).message }, 'source-watch: 후보 처리 실패');
+    } finally {
+      // 회복 테스트: 이 후보가 카드로 안 이어졌으면(제외·실패·continue 포함) 계정 차례를 되돌려 다음 후보에 배정
+      if (targets && summary.cards === cardsBefore) targets.unshift(acc);
     }
   }
 
