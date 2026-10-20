@@ -127,23 +127,46 @@ export async function pickSharingAssetGroup(): Promise<string[]> {
     (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
   );
   if (assets.length === 0) return [];
+  // 묶음 기준 (2026-10-20 · 다른 영상 둘이 섞여 2장 카드 폐기됨):
+  //   ① 출처별 하위폴더(sharing-assets/<출처>/...)면 그 폴더 단위
+  //   ② 옛 평면 업로드는 20초 이내 연속 + "이미지 다음에 새 영상이 오면 다른 출처"로 끊음
+  const folderOf = (u: string) => u.match(/sharing-assets\/([^/]+)\/[^/]+$/)?.[1] ?? null;
   const groups: (typeof assets)[] = [];
+  const byFolder = new Map<string, typeof assets>();
   for (const a of assets) {
+    const f = folderOf(a.url);
+    if (f) {
+      if (!byFolder.has(f)) { byFolder.set(f, []); groups.push(byFolder.get(f)!); }
+      byFolder.get(f)!.push(a);
+      continue;
+    }
     const g = groups[groups.length - 1];
     const last = g?.[g.length - 1];
-    if (g && last && a.createdAt.getTime() - last.createdAt.getTime() <= 20_000) g.push(a);
+    const legacyGroup = g && last && !folderOf(last.url);
+    const close = legacyGroup && a.createdAt.getTime() - last!.createdAt.getTime() <= 20_000;
+    const newSource = a.kind === 'video' && g?.some((x) => x.kind === 'image');
+    if (close && !newSource) g!.push(a);
     else groups.push([a]);
   }
   const posts = await prisma.post.findMany({
-    where: { kind: 'SHARING', mediaUrls: { hasSome: assets.map((a) => a.url) } },
-    select: { mediaUrls: true },
+    where: { kind: 'SHARING', state: { not: 'REJECTED' }, mediaUrls: { hasSome: assets.map((a) => a.url) } },
+    select: { mediaUrls: true, createdAt: true },
   });
   const used = new Map<string, number>();
-  for (const p of posts) for (const u of p.mediaUrls) used.set(u, (used.get(u) ?? 0) + 1);
+  const lastUsed = new Map<string, number>();
+  for (const p of posts) for (const u of p.mediaUrls) {
+    used.set(u, (used.get(u) ?? 0) + 1);
+    lastUsed.set(u, Math.max(lastUsed.get(u) ?? 0, p.createdAt.getTime()));
+  }
   const uses = (g: typeof assets) => Math.max(...g.map((a) => used.get(a.url) ?? 0));
+  const recency = (g: typeof assets) => Math.max(...g.map((a) => lastUsed.get(a.url) ?? 0));
   const hasVideo = (g: typeof assets) => g.some((a) => a.kind === 'video');
-  const best = [...groups].sort(
-    (x, y) => uses(x) - uses(y) || Number(hasVideo(y)) - Number(hasVideo(x)) || x[0]!.createdAt.getTime() - y[0]!.createdAt.getTime(),
+  // 덜 쓴 것 → 오래전에 쓴 것(같은 날 두 계정이 같은 묶음 X) → 영상 포함 → 오래된 업로드
+  // 한 번 쓴 묶음은 다시 안 씀 (2026-10-20 사용자: "왜 같은 영상으로 여러 글을 발행했지") — 다 쓰면 빈 배열 → 그날 스하리 건너뜀
+  const fresh = groups.filter((g) => uses(g) === 0);
+  if (fresh.length === 0) return [];
+  const best = [...fresh].sort(
+    (x, y) => uses(x) - uses(y) || recency(x) - recency(y) || Number(hasVideo(y)) - Number(hasVideo(x)) || x[0]!.createdAt.getTime() - y[0]!.createdAt.getTime(),
   )[0]!;
   const urls = best.map((a) => a.url).slice(0, 4);
   if (urls.length === 1 && best[0]!.kind === 'video') {
