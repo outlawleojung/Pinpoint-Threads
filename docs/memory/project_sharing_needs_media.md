@@ -15,3 +15,5 @@ metadata:
 **첨부 = 어그로용(10/3 사용자):** 스하리 첨부 사진·영상은 시선 끌기용이라 글 내용과 무관해도 됨 → 글에서 첨부를 설명·연결하지 말 것("얘가 대신 인사함" X). 재탕 시 첨부 교체 OK, 팔로워 숫자는 현재값으로 보정(sharing-repost.ts).
 
 **How to apply:** 스하리 작성 시 첨부 보관분(Cloudinary `pinpoint-threads/sharing-assets/`)과 짝지어 제안. 첨부 없는 계정 초안은 session-log에 보류로 기록. 파이프라인 기본값(mediaUrls: [])으로 바로 카드 보내지 말 것. 관련: [[project-sharing-diversity]], [[project-pipeline-b-discovery]]
+
+**2026-10-21 변경:** 사용자 "사진 없어도 스하리는 나간다 · 있으면 이목 더 끌어 좋음". 첨부는 선택 — 보관함 비면 텍스트로 생성·발행(orchestrator). 위 "첨부 필수"는 폐기.

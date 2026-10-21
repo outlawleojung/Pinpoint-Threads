@@ -46,7 +46,7 @@
 - [규칙은 강제로](feedback_rules_enforced_not_requested.md) — 프롬프트 부탁으론 안 지켜짐 · styleCheckCopy로 강제 · 새 규칙이 사용자 규칙과 충돌하는지 먼저 확인 · 사용자 규칙 걷어내기 금지
 - [일상글=현지화](feedback_daily_copy_transcreate.md) — 영상 내용은 알고 쓰되 장면 설명 X · 원문 웃음 포인트를 한국 말맛으로(직역 X) · 실제 경로로 여러 번 검증 · 봇은 tsx watch(즉시 반영)
 - [kle0 휴식→재가동](project_kle0_rested.md) — 10/1 도달 정지로 휴식 · 10/20 회복 테스트 109뷰(2h) → 재가동
-- [스하리=첨부 필수](project_sharing_needs_media.md) — 스하리는 사진/영상 첨부 있는 것만 발행 · 없는 초안은 보류, 사용자가 소재 찾아옴 (10/2)
+- [스하리 첨부=선택](project_sharing_needs_media.md) — 사진·영상 있으면 붙임(이목↑) · 없어도 텍스트로 발행 (10/21, 이전 "필수" 폐기)
 - [pikkseetem 휴식→재가동](project_pikkseetem_rested.md) — 10/2 도달붕괴로 휴식 · 10/20 회복 테스트 218뷰 → 재가동
 - [발행=텔레그램 카드](feedback_publish_via_telegram_card.md) — "발행해줘"여도 직접 APPROVED·큐 X, 항상 승인 카드 보내 컨펌 후 발행 (10/6)
 - [스하리 현행 기준](project_sharing_daily_moment_style.md) — 벤치마킹 각색 · 담백 인사+반하리 필수 · 반말 · 구걸조 X · 아침 08:00~10:30 · 첨부 같은 출처 (10/19)

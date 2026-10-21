@@ -29,7 +29,7 @@ related: [docs/STATE.md, CLAUDE.md, docs/memory/MEMORY.md]
 3. 문구 확정 후 `npx tsx scripts/ops/send-card.mts <postId> '["①","②"]' '<상황 한 줄>'` → 텔레그램 카드.
 4. "스하리용" 이면 `npx tsx scripts/ops/keep-sharing-asset.mts <URL...>` → 보관함(`pinpoint-threads/sharing-assets/`)에 영상+정지장면 묶음 저장.
 - 사진 1장 글: 파이프라인이 실패(2장 룰) → 웃음 포인트를 Cloudinary `c_crop` 확대샷으로 2장째 만들어 붙임(맥도날드 사례).
-- 인용(quoted) 글·텍스트형 글: 미디어 0 이 나올 수 있음 → Relay `fetchThreadsPostRelay` 의 media 로 직접 업로드. **강제 영상 추출(`hasVideo:true`)은 페이지의 다른 영상을 잡을 수 있으니 반드시 프레임 확인**(하마 사례).
+- 인용(quoted) 글·텍스트형 글: 미디어 0 이 나올 수 있음 → Relay `fetchThreadsPostRelay` 의 media 로 직접 업로드(확인: `npx tsx scripts/ops/relay-meta.mts <URL>`, 붙이기: `attach-relay-video.mts`). **강제 영상 추출(`hasVideo:true`)은 페이지의 다른 영상을 잡을 수 있으니 반드시 프레임 확인**(하마 사례).
 - 로그인 필요 글(민감 콘텐츠)은 Relay 0건 → 넘기거나 사용자에게 파일 요청.
 
 ## 3. 문구 원칙 (사용자 확정)
