@@ -1,0 +1,53 @@
+- [응답 길이](feedback_response_length.md) — 짧게, 한 화면 이내, 옵션 3개 이하
+- [실측 검증](feedback_verify_before_done.md) — 예측/가정으로 "완료" X, 실 호출로 검증 후 매듭
+- [XHS 수동만](project_xhs_manual_only.md) — 샤오홍슈는 텔레그램 수동 URL 전용, 자율 검색 제외 (비용)
+- [스하리 발견](project_pipeline_b_discovery.md) — Pipeline B 스하리 상대는 "스하리1000명프로젝트" 해시태그 검색
+- [스하리 토픽태그](project_sharing_topic_tag.md) — 스하리 태그는 본문 텍스트 X, Threads topic_tag 파라미터로만 부착
+- [스하리 개인정보 금지](feedback_sharing_no_personal_info.md) — 스하리 글에 자녀·직업·구체 취미 노출 X, 일반 상태만
+- [뇌피셜 금지](feedback_no_narrow_interpretation.md) — 짧은 지시를 좁게 해석하지 말고 이해한 내용 한 줄로 확인 후 진행
+- [임시방편 금지](feedback_no_silent_stopgap.md) — 축소·임시 구현을 조용히 방치 X, 합의된 목표대로 구현하거나 명시 확인
+- [쇼핑 확산 설계](project_shopping_propagation.md) — 5계정 동일 콘텐츠 동시발행 금지, 한 계정→반응 좋으면 확산(성과 게이팅), 자동 크론 정지
+- [게이트 말고 실행](feedback_execute_dont_gate.md) — 설계 합의 후엔 단계마다 승인받지 말고 끝까지 실행·결과만 보고 (되돌리기 어려운 것만 확인)
+- [파이프라인 트리거](project_pipeline_triggers.md) — 콘텐츠 자동인지 X · 쇼핑/일상(`일상 URL`)/스하리 태그로 구분, 한글 \b 함정
+- [사람 큐레이션·AI 재생산](project_human_curates_ai_reproduces.md) — 완전자율 상품선정(Line B) OFF · 사람이 URL 던지고 AI가 각색·확장
+- [네이버 수익모델](project_naver_monetization_model.md) — 브랜드커넥트/쇼핑커넥트 제휴 중심, 광고수익(애드센스·애드포스트) 아님
+- [일상글=정보 우선](project_naver_info_post_is_information_first.md) — 정보글은 유용한 주제에서 출발, 특정 상품/SKU를 주제로 X(홍보글 금지), 상품은 선택적 링크만
+- [네이버 글=재미·문제해결](feedback_naver_engaging_not_dry.md) — 사전형 정보나열 X, 공감·궁금증·문제해결형으로 읽는 재미 우선
+- [네이버=에버그린만](project_naver_evergreen_only.md) — 자동생성은 방법·기준·관리 노하우만, 지명·가격·절차·자격 팩트취약 주제 배제(할루시네이션)
+- [쇼핑 하입 스타일](project_shopping_copy_hype_style.md) — 쇼핑 카피는 하입/FOMO 승리 스타일 + 1인칭 조작 가드 해제(Astra 원본보존 반대, 되돌리지 X)
+- [쇼핑 최소 팔로워](project_shopping_min_followers.md) — 링크 글은 팔로워 300 미만 금지(하드 바닥, 2026-09-30) · 300 미만은 링크 없이 일상글로 · 발행기 안전망
+- [스하리 다양성](project_sharing_diversity.md) — 스하리 글 "오래된 계정+숫자+뒷삭없이반하리" 틀 금지, 숫자·계정나이 대부분 생략·각도 다양화
+- [작은 수정은 직접](feedback_small_edits_direct_not_subagent.md) — 작은 편집은 서브에이전트+리뷰 세리머니 X, 직접 빠르게 + 오래 걸리면 소요·이유 먼저 고지
+- [원본 보고 제대로](feedback_fix_from_source_not_patch.md) — 카피 수정 요청 시 한 단어 때우기 X, 원본 소스(InboundLink 캡션) 찾아 전체 맥락으로 재생성
+- [이미지=이해용,서술X](feedback_image_understand_not_describe.md) — 이미지는 오류방지·이해용, 카피에 이미지 내용 서술·사족 금지, 원문처럼 심플하게
+- [원작자 정황 재연 금지](feedback_no_author_circumstance_projection.md) — 원작자의 매장·여행·관계·구매경위를 게시계정 일로 재연 X, 1인칭은 반응/구매욕만
+- [카피 포맷·호칭](feedback_copy_format_linebreaks_and_address.md) — 긴 글은 두 줄씩 묶어 빈 줄로 분리, 독자 호칭은 '님들' 아닌 '스친들'
+- [논쟁이 조회수](feedback_controversy_drives_engagement.md) — 논쟁 유발 디테일(동전 등)이 바이럴 엔진, '오류'라고 밋밋하게 다듬다 훅 죽이지 마라
+- [반사적 금지 금지](feedback_dont_reflexively_ban.md) — 사용자 관찰을 '금지 규칙'으로 반사 변환 X, 의도(다양성·품질) 파악해 비례 처리
+- [고정댓글 링크반복](project_reply_link_repeat.md) — 딥링크 3회 반복(링크 증발 방어), 1개로 줄이지 말 것 · 프리뷰는 이미지 첨부로 억제
+- [도달건강 게이트](project_reach_health_gate.md) — 쇼핑은 팔로워 아닌 실제 피드도달로 게이팅 · 일상글=도달엔진 · 스하리 죽은팔로워=도달독
+- [정정 학습 루프](project_correction_learning_loop.md) — 승인 카드에 텔레그램 답장으로 정정→즉시반영+학습→다음 글 재사용(무수정 승인율↑)
+- [블란챗 휴식](project_blanchatt_rested.md) — _blanchatt_ 메타재인증·도달붕괴로 isActive=false 휴식 · 회복확인 전 재가동 금지 · 붕괴판정=최근3건<20뷰
+- [한국어소스 재창조](feedback_korean_source_recreate.md) — 한국어 원본은 표현 그대로 베끼지 말고 재창조 · 특유 문구(할머니플랫 등) 반복 금지(사실보존≠문구복사)
+- [브랜드 사실 검증](feedback_verify_brand_facts_in_copy.md) — 카피 훅을 브랜드 카테고리 단정 위에 세우지 마라(오니츠카≠러닝화) · 눈으로 본 것으로 훅, 애매하면 검증 후
+- [영상 추출 HTML폴백](project_threads_video_extract_html_fallback.md) — 릴이 커버스틸로 발행되면 추출기 문제 · Playwright에 자동재생+HTML(Relay) mp4 파싱 폴백 추가함
+- [자동 LLM 크론 정지](project_auto_llm_crons_disabled.md) — API비용 절감 위해 백그라운드 카피 자동생성 크론 전부 정지 · 사람 트리거+위너게이팅만 · 재시작 시 반영
+- [비용 절약 최우선](feedback_conserve_api_cost.md) — 아직 수익 X, API/토큰 아껴쓰기 · 자동 LLM 기본 금지 · 내 작업도 최소 호출로
+- [성과 KPI 2가지](project_performance_kpi.md) — 1차 조회수, 2차 댓글조회/조회≥10%(딥링크 유입) · 좋아요는 안 봄
+- [발행 페이싱](project_publish_pacing.md) — 일상 계정당 하루 2·스하리 1·쇼핑 전체 1 + 같은계정 ≥4h + 계정 간 30분~1h 랜덤 시차 · 승인해도 즉시발행 X, 줄세워 예약
+- [표본 크기 규율](feedback_sample_size_rigor.md) — 모수 작은 결과(에우셉 17뷰) 승자모델로 일반화 X · 학습 코드화 전 표본 확인, 소수=가설 다수=규칙
+- [댓글 홍보티 금지](feedback_no_promo_tell_in_reply.md) — 고정댓글에 "좌표/링크 남김/문의 많아서" 홍보 티 X · 진짜 반응 한 줄 + 링크는 그냥 밑에
+- [일상글 소재 범위](project_daily_content_scope.md) — 일상=동물·재밌는것 + 화제·논란 사건도 OK(정치 제외) · 1인칭 반응/의견으로 댓글 유발
+- [해외 바이럴만 소스로](project_source_foreign_viral_only.md) — 소스는 해외 바이럴(한국 미유입)을 한국에 처음 푸는 것 · 한국서 이미 뜬 건 X
+- [강의 도출 전략](project_course_strategy.md) — 수익=소재×볼륨×재탕 시스템(카피 과투자 중단) · 재탕엔진·소재엔진 우선 · 방향은 강의에서 스스로 도출해 끌고 가기
+- [Apify 미결제→Relay](project_apify_unpaid_relay.md) — 9/21~ Apify 크레딧 소진으로 수집 붕괴 · 비로그인 Relay 파싱이 1순위(무료) · 스하리 수집도 Relay로 이관
+- [일상글 반응 규칙](project_daily_reaction_rule.md) — 댓글 달리는 영상(댓글/좋아요≥1.5%) + 장면 즉각반응 카피 · 감성·힐링·교훈 멘트 금지(실측)
+- [재탕 보류](project_repost_on_hold.md) — 발행 글 적을 땐 같은 계정 재탕은 티남 · 재고 쌓인 뒤 재개 (2026-09-30 리젝 6건)
+- [규칙은 강제로](feedback_rules_enforced_not_requested.md) — 프롬프트 부탁으론 안 지켜짐 · styleCheckCopy로 강제 · 새 규칙이 사용자 규칙과 충돌하는지 먼저 확인 · 사용자 규칙 걷어내기 금지
+- [일상글=현지화](feedback_daily_copy_transcreate.md) — 영상 내용은 알고 쓰되 장면 설명 X · 원문 웃음 포인트를 한국 말맛으로(직역 X) · 실제 경로로 여러 번 검증 · 봇은 tsx watch(즉시 반영)
+- [kle0 휴식→재가동](project_kle0_rested.md) — 10/1 도달 정지로 휴식 · 10/20 회복 테스트 109뷰(2h) → 재가동
+- [스하리=첨부 필수](project_sharing_needs_media.md) — 스하리는 사진/영상 첨부 있는 것만 발행 · 없는 초안은 보류, 사용자가 소재 찾아옴 (10/2)
+- [pikkseetem 휴식→재가동](project_pikkseetem_rested.md) — 10/2 도달붕괴로 휴식 · 10/20 회복 테스트 218뷰 → 재가동
+- [발행=텔레그램 카드](feedback_publish_via_telegram_card.md) — "발행해줘"여도 직접 APPROVED·큐 X, 항상 승인 카드 보내 컨펌 후 발행 (10/6)
+- [스하리 현행 기준](project_sharing_daily_moment_style.md) — 벤치마킹 각색 · 담백 인사+반하리 필수 · 반말 · 구걸조 X · 아침 08:00~10:30 · 첨부 같은 출처 (10/19)
+- [운영 런북](reference_ops_runbook.md) — 이어받기 전 docs/08-decisions/ops-runbook.md 필독 · 프로세스 3개·URL 수동 절차·scripts/ops
