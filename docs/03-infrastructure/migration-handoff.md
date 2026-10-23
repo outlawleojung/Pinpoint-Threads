@@ -7,7 +7,7 @@ related: [docs/08-decisions/ops-runbook.md, docs/STATE.md, docs/memory/MEMORY.md
 # 서버 이전 · 새 Claude 계정 인수인계
 
 사용자가 2026-10-23 퇴사 → 지금 PC(D:\Source Code\thread_project)의 서버와 이 Claude Code 계정을 더 쓸 수 없음.
-**새 위치(VPS/집 PC)는 미정.** 서비스 계정(GitHub·Neon·Cloudinary·Anthropic·Meta 앱·텔레그램 봇·쿠팡)은 **전부 개인 계정** → 그대로 이어 씀.
+**새 위치 = Oracle Cloud 무료(Always Free) ARM VM 으로 결정 (2026-10-23).** 업그레이드(종량제) 하지 않음 → 과금 위험 0. 유휴 회수되면 2절 스크립트로 재설치(데이터는 Neon·Cloudinary). 서비스 계정(GitHub·Neon·Cloudinary·Anthropic·Meta 앱·텔레그램 봇·쿠팡)은 **전부 개인 계정** → 그대로 이어 씀.
 
 ## 1. 무엇이 어디에 있나
 | 항목 | 위치 | 이전 작업 |
@@ -22,19 +22,29 @@ related: [docs/08-decisions/ops-runbook.md, docs/STATE.md, docs/memory/MEMORY.md
 `.env` 키 목록(값은 여기 적지 않음): DATABASE_URL · REDIS_* · ANTHROPIC_* · GEMINI_API_KEY · META_APP_ID/SECRET/REDIRECT_URI · COUPANG_* · MUSINSA_* · TELEGRAM_BOT_TOKEN/ADMIN_CHAT_ID · CLOUDINARY_* · VOYAGE_* · APIFY_* · ENGAGEMENT_*/PUBLISH_* · SESSION_SECRET.
 `META_REDIRECT_URI` 는 GitHub Pages 주소라 서버를 옮겨도 그대로. Threads 토큰은 DB 에 있음.
 
-## 2. 새 머신 준비
-1. Node 22 · pnpm 9.12.1 (`corepack enable`) · Docker · Git · Python3 + Pillow(`pip install pillow`, frame-grid 용).
-2. `git clone` → `git checkout feature/naver-cta-button` → `pnpm install`.
-3. `.env` 복사(1절). VPS 면 `NODE_ENV=production`.
-4. `docker compose up -d` (Redis) → `npx prisma generate`.
-5. `npx playwright install --with-deps chromium` (Relay 수집·영상 추출에 필수).
+## 2. 새 서버 준비 (Oracle 무료)
+**사용자(직접)**: Oracle Cloud 가입(카드 본인확인만, Free Tier 유지 — "Upgrade" 누르지 말 것) → Compute 인스턴스 생성
+- 리전: 서울 또는 춘천 · 이미지: Ubuntu 24.04 (또는 22.04) · Shape: **VM.Standard.A1.Flex (Ampere ARM) 2 OCPU / 12GB** (무료 한도 4/24 이내)
+- "Out of capacity" 나오면 다른 가용 도메인·다른 시간에 재시도
+- SSH 키 생성·다운로드 · 공인 IP 할당 · 보안 목록은 22번만 (기본값)
+
+**서버에서 (새 Claude 가 SSH 로 진행 가능)**:
+```bash
+git clone https://github.com/outlawleojung/Pinpoint-Threads.git && cd Pinpoint-Threads
+git checkout feature/naver-cta-button
+# 로컬에서: scp -i <키> .env ubuntu@<IP>:~/Pinpoint-Threads/.env
+bash scripts/deploy/setup-ubuntu.sh     # TZ=KST · Redis · Node22 · pnpm · pm2 · Playwright 크롬 · 스왑 · 방화벽
+```
+- Redis 는 apt 설치(docker 불필요). `.env` 의 REDIS_HOST=localhost 그대로.
+- 실행은 `ecosystem.config.cjs`(pm2 · `node --import tsx` · 로컬 dev 와 같은 코드 경로, watch 없음). tsc 빌드 불필요.
+- 집 PC 로 돌릴 경우: 위 대신 `docker compose up -d` + `pnpm run dev / dev:bot / dev:worker`.
 
 ## 3. 전환 순서 (반드시 이 순서)
 1. **옛 PC 3개 프로세스를 먼저 완전히 끈다** (dev · dev:bot · dev:worker). 둘이 동시에 돌면 텔레그램 봇 충돌(409) + **같은 글 이중 발행**.
 2. 새 머신에서 `npx tsx scripts/ops/reschedule-approved.mts` — 승인 대기 예약을 새 큐에 다시 배치 (안 하면 밀린 글이 안 나가거나 몰려 나감).
 3. 새 머신 3개 프로세스 시작:
    - 집 PC: 지금처럼 `pnpm run dev` · `pnpm run dev:bot` · `pnpm run dev:worker`.
-   - VPS: `pnpm run build` 후 pm2 — `pm2 start dist/index.js --name api` · `pm2 start dist/worker.js --name worker` · `pm2 start dist/bot.js --name bot` · `pm2 save && pm2 startup`.
+   - 서버: `pm2 start ecosystem.config.cjs && pm2 save && pm2 startup` (출력되는 sudo 명령 1회 실행 → 재부팅해도 자동 시작). 로그 `pm2 logs`, 재시작 `pm2 restart all`, 코드 갱신 `git pull && pnpm install && pm2 restart all`.
 4. 확인: `npx tsx scripts/ops/queue-status.mts` · 텔레그램에서 아무 카드 버튼 반응 · 다음 크론(08:20 소재 감시 / 20:00 스하리 카드) 실제 도착.
 
 ## 4. 새 Claude 계정에서 이어가기
