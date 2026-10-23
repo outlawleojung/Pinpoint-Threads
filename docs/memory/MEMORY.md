@@ -51,3 +51,4 @@
 - [발행=텔레그램 카드](feedback_publish_via_telegram_card.md) — "발행해줘"여도 직접 APPROVED·큐 X, 항상 승인 카드 보내 컨펌 후 발행 (10/6)
 - [스하리 현행 기준](project_sharing_daily_moment_style.md) — 벤치마킹 각색 · 담백 인사+반하리 필수 · 반말 · 구걸조 X · 아침 08:00~10:30 · 첨부 같은 출처 (10/19)
 - [운영 런북](reference_ops_runbook.md) — 이어받기 전 docs/08-decisions/ops-runbook.md 필독 · 프로세스 3개·URL 수동 절차·scripts/ops
+- [GCP 서버 이전](project_gcp_deployment.md) — 10/23 GCP e2-micro(us-central1·pinpoint)로 이전 · pm2 worker+bot · 로컬 dev 서버 재가동 금지

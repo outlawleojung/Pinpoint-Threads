@@ -68,3 +68,9 @@ bash scripts/deploy/setup-ubuntu.sh     # TZ=KST · Redis · Node22 · pnpm · p
 - **PENDING_APPROVAL**: 텔레그램 카드 다수 — 서버가 꺼져 있으면 카드 버튼 무반응. 새 서버(bot) 켜진 뒤 누르면 됨. 10/2~10/16 생성된 오래된 카드 6건은 폐기 대상.
 - 쇼핑: 나이키 올블랙 10/22 19:14 발행 완료(pikkseetem). 보관 3건(뉴발 1906R 다색·메리제인·1906R 핑크)은 일상 4개 쌓인 뒤 하나씩 카드 (런북 7절).
 - 스하리: 10/23 아침 sookck·pikkseetem 발행 완료. 보관함에 하얀 아깽이 사진 4장 · nikoandkota 고양이 2장 묶음.
+
+## 7. ✅ 이전 완료 (2026-10-23 11:08 KST)
+- GCP 프로젝트 `pinpoint` · VM `pinpoint` (us-central1-a · e2-micro · Ubuntu 24.04 · 표준 30GB · 스냅샷 없음) · 외부 IP 136.116.255.96(임시).
+- 서버 `~/Pinpoint-Threads` · `.env` 업로드 · `setup-ubuntu.sh` 완료(저메모리 모드 · 스왑 4GB) · `reschedule-approved` 14건 재배치 · pm2 worker+bot online(재시작 0, 램 73%) · pm2 startup 등록.
+- GitHub 저장소 비공개 전환 → 서버는 읽기전용 fine-grained 토큰(Contents RO · 2027-10-23 만료)으로 pull.
+- **옛 PC 서버 종료. 로컬에서 dev/bot/worker 다시 켜지 말 것(이중 발행).** 운영 스크립트는 서버 SSH 에서 `npx tsx scripts/ops/...`.
