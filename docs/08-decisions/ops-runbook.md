@@ -53,3 +53,9 @@ related: [docs/STATE.md, CLAUDE.md, docs/memory/MEMORY.md]
 ## 6. 사용자 피드백·학습 기록 (다른 컨텍스트 이어받기용)
 - `docs/memory/` = Claude 자동 메모리 사본(사용자 피드백·결정 근거 전부). 인덱스 `docs/memory/MEMORY.md`. **이어받는 AI 는 런북 다음으로 이걸 읽을 것.**
 - 원본 위치: `~/.claude/projects/D--Source-Code-thread-project/memory/`. 메모리 갱신 시 `cp <원본>/*.md docs/memory/` 로 사본도 맞추고 커밋.
+
+## 7. 쇼핑 소재 (2026-10-22~)
+- 사용자가 `URL 쇼핑 | 상품 설명` + 쿠팡 파트너스 링크(link.coupang.com/a/...)를 줌 → `npx tsx scripts/ops/shopping-hold.mts '[["URL","설명","쿠팡링크"]]'` → pikkseetem 에 **카드 보류**로 저장.
+- 사진을 직접 보고 카피·고정댓글 확인: 고정댓글에 "좌표/링크 박아둠/물어보길래" 같은 홍보 티 X → 진짜 반응 한 줄. 원작자 매장 방문·구매 경위 재연 X.
+- 카드는 **하나씩**: 쇼핑 전체 하루 1 · pikkseetem 최근 5개 중 1개. 이전 쇼핑 발행 후 일상 4개 쌓이면 다음 카드 `send-card.mts <postId> '["본문"]' '<상황>'`.
+- 보관 중(10/22): 뉴발 1906R 다색 `cmvitju3w0005qvz4173du998` · 뉴발 메리제인 그레이 `cmvitk4wf0008qvz4pdmd148j` · 뉴발 1906R 핑크 `cmvitkhqs000bqvz4u1762tnv`. 발송: 나이키 올블랙 `cmvitjjf30002qvz4siqqvzla`(10/22).

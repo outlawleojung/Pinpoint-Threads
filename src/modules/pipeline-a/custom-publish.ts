@@ -50,6 +50,8 @@ export interface RunCustomPublishInput {
   direction: string; // 사용자가 준 카피 방향
   commerceUrl?: string; // 있으면 고정댓글 링크
   hasVideo?: boolean;
+  /** true 면 카드 보내지 않고 PENDING_APPROVAL 로 보관 (쇼핑 소재 쌓아두고 하나씩 카드 · 2026-10-22) */
+  holdApproval?: boolean;
 }
 
 export type CustomPublishOutcome =
@@ -156,8 +158,13 @@ export async function runCustomPublish(input: RunCustomPublishInput): Promise<Cu
       },
     });
 
-    await sendApprovalRequest(post.id);
-    logger.info({ postId: post.id, handle: account.handle, hasReply: Boolean(generatedReply) }, '커스텀 발행 승인 카드 발송');
+    if (input.holdApproval) {
+      await prisma.post.update({ where: { id: post.id }, data: { state: PostState.PENDING_APPROVAL } });
+      logger.info({ postId: post.id, handle: account.handle }, '커스텀 발행 보관 (카드 보류)');
+    } else {
+      await sendApprovalRequest(post.id);
+      logger.info({ postId: post.id, handle: account.handle, hasReply: Boolean(generatedReply) }, '커스텀 발행 승인 카드 발송');
+    }
     return { status: 'PENDING_APPROVAL', postId: post.id, body: gen.body };
   } catch (err) {
     return await finishFailed(post.id, 'custom-publish', (err as Error).message);
