@@ -42,7 +42,7 @@
 - [강의 도출 전략](project_course_strategy.md) — 수익=소재×볼륨×재탕 시스템(카피 과투자 중단) · 재탕엔진·소재엔진 우선 · 방향은 강의에서 스스로 도출해 끌고 가기
 - [Apify 미결제→Relay](project_apify_unpaid_relay.md) — 9/21~ Apify 크레딧 소진으로 수집 붕괴 · 비로그인 Relay 파싱이 1순위(무료) · 스하리 수집도 Relay로 이관
 - [일상글 반응 규칙](project_daily_reaction_rule.md) — 댓글 달리는 영상(댓글/좋아요≥1.5%) + 장면 즉각반응 카피 · 감성·힐링·교훈 멘트 금지(실측)
-- [재탕 보류](project_repost_on_hold.md) — 발행 글 적을 땐 같은 계정 재탕은 티남 · 재고 쌓인 뒤 재개 (2026-09-30 리젝 6건)
+- [재탕 재개](project_repost_on_hold.md) — 10/27 재개 · 원본 14일+ · 다른 계정 · 소재당 2회·재탕 간 14일+ · 하루 1개 (10/23)
 - [규칙은 강제로](feedback_rules_enforced_not_requested.md) — 프롬프트 부탁으론 안 지켜짐 · styleCheckCopy로 강제 · 새 규칙이 사용자 규칙과 충돌하는지 먼저 확인 · 사용자 규칙 걷어내기 금지
 - [일상글=현지화](feedback_daily_copy_transcreate.md) — 영상 내용은 알고 쓰되 장면 설명 X · 원문 웃음 포인트를 한국 말맛으로(직역 X) · 실제 경로로 여러 번 검증 · 봇은 tsx watch(즉시 반영)
 - [kle0 휴식→재가동](project_kle0_rested.md) — 10/1 도달 정지로 휴식 · 10/20 회복 테스트 109뷰(2h) → 재가동
@@ -52,3 +52,4 @@
 - [스하리 현행 기준](project_sharing_daily_moment_style.md) — 벤치마킹 각색 · 담백 인사+반하리 필수 · 반말 · 구걸조 X · 아침 08:00~10:30 · 첨부 같은 출처 (10/19)
 - [운영 런북](reference_ops_runbook.md) — 이어받기 전 docs/08-decisions/ops-runbook.md 필독 · 프로세스 3개·URL 수동 절차·scripts/ops
 - [GCP 서버 이전](project_gcp_deployment.md) — 10/23 GCP e2-micro(us-central1·pinpoint)로 이전 · pm2 worker+bot · 로컬 dev 서버 재가동 금지
+- [수강생 수익 시사점](project_peer_income_insights.md) — 인증 3건 공통=계정·채널 분산 · 최우선 minyoung 300(2번째 링크 계정) · 11월 일본 아마존
