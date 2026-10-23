@@ -17,9 +17,12 @@ sudo apt-get update -y
 sudo apt-get install -y curl git build-essential redis-server python3 python3-pil
 sudo systemctl enable --now redis-server
 
-echo "▶ 스왑 2GB (Playwright 크롬 메모리 여유)"
+# 램 1.5GB 미만(GCP e2-micro 등) = 저메모리 모드: 스왑 4GB · api 프로세스 제외
+MEM_KB=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+if [ "$MEM_KB" -lt 1572864 ]; then LOWMEM=1; SWAP=4G; else LOWMEM=0; SWAP=2G; fi
+echo "▶ 스왑 $SWAP (Playwright 크롬 메모리 여유 · 저메모리=$LOWMEM)"
 if ! swapon --show | grep -q /swapfile; then
-  sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
+  sudo fallocate -l $SWAP /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
   echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
 fi
 
@@ -42,11 +45,12 @@ if command -v ufw >/dev/null; then
   sudo ufw allow OpenSSH && sudo ufw --force enable
 fi
 
-cat <<'EOF'
+if [ "$LOWMEM" = 1 ]; then START='PINPOINT_APPS=worker,bot pm2 start ecosystem.config.cjs'; else START='pm2 start ecosystem.config.cjs'; fi
+cat <<EOF
 
 ✅ 셋업 완료. 다음 순서 (docs/03-infrastructure/migration-handoff.md 3절):
   1) 옛 서버가 꺼져 있는지 확인 (봇 2개 동시 실행 금지)
   2) npx tsx scripts/ops/reschedule-approved.mts
-  3) pm2 start ecosystem.config.cjs && pm2 save && pm2 startup   (마지막 줄이 출력하는 sudo 명령 한 번 실행)
+  3) $START && pm2 save && pm2 startup   (마지막 줄이 출력하는 sudo 명령 한 번 실행)
   4) pm2 logs  ·  npx tsx scripts/ops/queue-status.mts
 EOF

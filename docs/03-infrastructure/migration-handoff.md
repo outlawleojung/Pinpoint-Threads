@@ -7,7 +7,7 @@ related: [docs/08-decisions/ops-runbook.md, docs/STATE.md, docs/memory/MEMORY.md
 # 서버 이전 · 새 Claude 계정 인수인계
 
 사용자가 2026-10-23 퇴사 → 지금 PC(D:\Source Code\thread_project)의 서버와 이 Claude Code 계정을 더 쓸 수 없음.
-**새 위치 = Oracle Cloud 무료(Always Free) ARM VM 으로 결정 (2026-10-23).** 업그레이드(종량제) 하지 않음 → 과금 위험 0. 유휴 회수되면 2절 스크립트로 재설치(데이터는 Neon·Cloudinary). 서비스 계정(GitHub·Neon·Cloudinary·Anthropic·Meta 앱·텔레그램 봇·쿠팡)은 **전부 개인 계정** → 그대로 이어 씀.
+**새 위치 = Google Cloud e2-micro 무료(2026-10-23 결정).** 사용자 Google AI Pro 구독에 GCP 크레딧 월 $10 포함(개발자 프로그램 혜택 1회 활성화 필요) → 부대비용 충당. 카드는 기존 구글 결제 프로필. Oracle 무료는 사용자가 카드 신규 등록 거부로 보류. 램 부족하면 e2-small(서울 ~$15, 차액 자부담)로 상향 — 스크립트 동일. 서비스 계정(GitHub·Neon·Cloudinary·Anthropic·Meta 앱·텔레그램 봇·쿠팡)은 **전부 개인 계정** → 그대로 이어 씀.
 
 ## 1. 무엇이 어디에 있나
 | 항목 | 위치 | 이전 작업 |
@@ -22,7 +22,13 @@ related: [docs/08-decisions/ops-runbook.md, docs/STATE.md, docs/memory/MEMORY.md
 `.env` 키 목록(값은 여기 적지 않음): DATABASE_URL · REDIS_* · ANTHROPIC_* · GEMINI_API_KEY · META_APP_ID/SECRET/REDIRECT_URI · COUPANG_* · MUSINSA_* · TELEGRAM_BOT_TOKEN/ADMIN_CHAT_ID · CLOUDINARY_* · VOYAGE_* · APIFY_* · ENGAGEMENT_*/PUBLISH_* · SESSION_SECRET.
 `META_REDIRECT_URI` 는 GitHub Pages 주소라 서버를 옮겨도 그대로. Threads 토큰은 DB 에 있음.
 
-## 2. 새 서버 준비 (Oracle 무료)
+## 2. 새 서버 준비 (GCP e2-micro · 대안 Oracle 무료 ARM)
+**사용자(직접) — GCP**: developers.google.com 에서 AI Pro 혜택 연결 → 크레딧을 Cloud 결제 계정에 추가 → Compute Engine VM 생성
+- 리전 **us-central1 / us-west1 / us-east1** (e2-micro 무료 대상) · 머신 **e2-micro** · Ubuntu 24.04 · 표준 영구 디스크 30GB
+- 방화벽: 기본(SSH)만 · 예산 알림 $10
+- 램 1GB → 스크립트가 자동 저메모리 모드(스왑 4GB · worker+bot 만, api 제외)
+
+**(대안) Oracle 무료**:
 **사용자(직접)**: Oracle Cloud 가입(카드 본인확인만, Free Tier 유지 — "Upgrade" 누르지 말 것) → Compute 인스턴스 생성
 - 리전: 서울 또는 춘천 · 이미지: Ubuntu 24.04 (또는 22.04) · Shape: **VM.Standard.A1.Flex (Ampere ARM) 2 OCPU / 12GB** (무료 한도 4/24 이내)
 - "Out of capacity" 나오면 다른 가용 도메인·다른 시간에 재시도
