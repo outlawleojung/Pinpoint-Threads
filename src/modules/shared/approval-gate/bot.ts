@@ -1275,9 +1275,9 @@ async function buildPublishedReport(): Promise<string> {
     for (const p of posts.slice(0, 3)) {
       const d = p.publishedAt ? p.publishedAt.toISOString().slice(5, 10) : '--';
       const kindLabel = p.kind === 'SHOPPING' ? '쇼핑' : p.kind === 'SHARING' ? '스하리' : '일상';
-      const label = p.kind === 'SHOPPING'
-        ? (p.commerceProduct?.productName?.slice(0, 24) ?? '')
-        : (p.generatedBody?.replace(/\n/g, ' ').slice(0, 24) ?? '');
+      // 코드포인트 단위로 자름 — UTF-16 slice 는 이모지 반쪽(\ud83d)을 남겨 텔레그램 400(UTF-8) 유발
+      const raw = (p.kind === 'SHOPPING' ? p.commerceProduct?.productName : null) ?? p.generatedBody ?? '';
+      const label = Array.from(raw.replace(/\n/g, ' ')).slice(0, 24).join('');
       const s = p.insightSnapshots[0];
       const perf = s
         ? `👁${fmtNum(s.views)} ❤️${fmtNum(s.likes)} 💬${fmtNum(s.replies)} (${s.hoursAfterPublish}h)`
