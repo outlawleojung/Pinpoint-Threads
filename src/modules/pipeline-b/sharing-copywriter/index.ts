@@ -228,7 +228,7 @@ async function generateOne(
       return n / Math.min(A.size, B.size);
     };
     if (primary && sim(cleaned, primary.text) >= 0.6) throw new SharingBlacklistError('벤치마크 베낌', cleaned, false);
-    const near = recentBodies.find((r) => sim(cleaned, r) >= 0.5);
+    const near = recentBodies.find((r) => sim(cleaned, r) >= 0.65);
     if (near) throw new SharingBlacklistError('최근 우리 스하리와 비슷', cleaned, false);
   }
   // 스하리 요청 필수 (2026-10-14 사용자: 요청 없는 한마디는 "스하리 글이 아님")
@@ -252,7 +252,7 @@ export class SharingBlacklistError extends Error {
   }
 }
 
-const MAX_RETRY = 2;
+const MAX_RETRY = 4;
 async function generateOneWithRetry(
   context: AccountContext,
   hook: { label: string; query: string; milestone?: boolean },
