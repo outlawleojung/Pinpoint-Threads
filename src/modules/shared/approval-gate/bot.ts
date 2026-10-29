@@ -1136,11 +1136,9 @@ bot.callbackQuery(/^(approve|regen-text|regen-product|reject):(.+)$/, async (ctx
   const postId = match[2] ?? '';
   logger.info({ action, postId }, 'telegram callback received');
 
+  await ctx.answerCallbackQuery({ text: '처리 중…' }).catch(() => {});
   try {
     const label = await handleApprovalCallback(action, postId);
-    await ctx.answerCallbackQuery({ text: label });
-    // 버튼 제거는 카드가 종결(승인·리젝)되거나 새 카드로 교체(재생성 성공)된 경우만.
-    // regen-product(안내만)·재생성 실패 시엔 이 카드로 계속 승인/리젝 해야 하므로 버튼 유지.
     const keepButtons =
       action === 'regen-product' || (action === 'regen-text' && label.startsWith('⚠'));
     if (!keepButtons) {
@@ -1149,7 +1147,7 @@ bot.callbackQuery(/^(approve|regen-text|regen-product|reject):(.+)$/, async (ctx
     await ctx.reply(`처리됨: ${label}\nPost: \`${postId}\``, { parse_mode: 'Markdown' });
   } catch (err) {
     logger.error({ err, action, postId }, 'callback handler failed');
-    await ctx.answerCallbackQuery({ text: `실패: ${(err as Error).message}`, show_alert: true });
+    await ctx.reply(`❌ 실패: ${(err as Error).message}\nPost: \`${postId}\``, { parse_mode: 'Markdown' }).catch(() => {});
   }
 });
 
