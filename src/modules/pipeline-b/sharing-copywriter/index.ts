@@ -54,14 +54,25 @@ const ALL_AGES: AgeBucket[] = ['fresh_under_7d', 'young_under_30d', 'settled_1to
 //   신상(자녀·직업·나이·구체 취미) X · 첨부(남의 영상)를 내 것처럼 말하기 X("우리 강아지" X).
 const HOOK_QUERIES: HookDef[] = [
   // ★ 스하리는 아침 8~9시대 발행 → 그 시간에 맞는 순간만 (2026-10-13 사용자: 기상 직후 글은 6~7시에나 어울림).
+  // ★★ 2026-10-29: 훅 다양화 — 아침 루틴만 7개 → 카테고리 분산. 5계정 매일 돌려도 2주간 안 겹치게.
+  // — 아침 루틴 (3개로 축소)
   { label: '출근 직후', query: '출근하자마자 벌써 집에 가고 싶다', ageOK: ALL_AGES },
-  { label: '벌써 피곤', query: '아침인데 벌써 하루 다 산 기분', ageOK: ALL_AGES },
-  { label: '아침 커피', query: '커피 한 잔 들어가야 사람 됨 아직 정신 못 차림', ageOK: ALL_AGES },
-  { label: '아침 배고픔', query: '아침 거르고 나왔더니 벌써 배고프다', ageOK: ALL_AGES },
-  // 날씨·계절 훅 제거 (2026-10-12 사용자): 다음 날 아침 발행이라 실제 날씨를 모름 → 틀릴 수 있음
+  { label: '아침 커피', query: '커피 한 잔 들어가야 사람 됨', ageOK: ALL_AGES },
   { label: '스레드 습관', query: '일 시작 전에 스레드 한 바퀴는 돌아야 됨', ageOK: ALL_AGES },
+  // — 가벼운 인사·소통 (신상 X)
+  { label: '스친 인사', query: '오늘 첫 글 스친들 안녕 좋은 하루', ageOK: ALL_AGES },
+  { label: '소통 제안', query: '심심한데 놀 사람 댓글 남겨봐', ageOK: ALL_AGES },
+  // — 공감·질문형
+  { label: '공감 질문', query: '나만 이래? 다들 이런 거 공감돼?', ageOK: ALL_AGES },
+  { label: '고민 한마디', query: '요즘 고민 많은데 나만 그런 거 아니지', ageOK: ALL_AGES },
+  // — 의지·에너지형
   { label: '오늘 다짐', query: '오늘은 진짜 할 일 다 끝내고 일찍 쉰다', ageOK: ALL_AGES },
-  { label: '심심함 한마디', query: '할 일 앞두고 괜히 딴짓하는 중 인사하고 갈 사람', ageOK: ALL_AGES },
+  { label: '같이 힘내자', query: '다들 힘내자 오늘도 한 걸음씩', ageOK: ALL_AGES },
+  // — 유머·가벼운 잡담
+  { label: '한마디 잡담', query: '갑자기 생각난 건데 별거 아닌데 웃김', ageOK: ALL_AGES },
+  { label: '혼잣말', query: '아무도 안 물어봤는데 그냥 하고 싶은 말', ageOK: ALL_AGES },
+  // — 감사·칭찬형
+  { label: '스친 감사', query: '스친들 고마워 덕분에 오늘도 즐겁다', ageOK: ALL_AGES },
 ];
 
 /** 본문 blacklist. 노출 시 재생성. */
@@ -120,8 +131,14 @@ const SYSTEM_PROMPT = `한국 Threads "스하리1000명프로젝트" 태그에 �
 - 반말 위주(스레드 기본 말투). 존댓말은 되도록 쓰지 마라.
 - 벤치마크 작성자의 취미·관심사·상황(그림·운동·육아 등)은 가져오지 마라 — 우리 계정 얘기가 아니다.
 - 벤치마크의 오타·변형 표기("스와릿", "ㅂㅎㄹ", "쓰레드" 등)는 따라 쓰지 말고 "스하리/반하리/스레드"로.
-- 좋은 예: "스친 구함🙌 스하리 남기면 반하리 감" / "오늘도 소통하자🍀 스하리=반하리" / "인사 남겨줘🙂 반하리 꼭 갈게"
-- 그 글의 **구조·톤·요청 방식·길이**를 따라라. 문장 통째 복사 금지 — 표현을 바꿔 새 글로.
+- 좋은 예 (각각 다른 톤 — 매번 다른 각도를 써라):
+  · 인사형: "스친 구함🙌 스하리 남기면 반하리 감"
+  · 공감형: "나만 이래..? 댓글 달아줘 반하리 갈게"
+  · 유머형: "할 일은 많은데 스레드부터 켬ㅋㅋ 스하리 하자"
+  · 감사형: "스친들 덕분에 스레드 재밌다🍀 소통해요"
+  · 에너지형: "오늘도 가보자💪 스하리 남기면 바로 감"
+  · 질문형: "다들 아침에 뭐 해? 댓글 남겨봐 반하리 감"
+- 벤치마크 글의 **톤·길이**를 참고하되, 매번 **위 6가지 중 다른 각도**로 써라. 문장 통째 복사 금지 — 표현을 바꿔 새 글로.
 - 스하리 요청(스하리=반하리, 반하리 무조건 갈게, 도와줘 등)은 **반드시** 포함.
 - 길이: 벤치마크보다 짧게, **60자 안쪽**. 구구절절 X.
 - 숫자(팔로워 수)는 아래 "이 계정 사실"과 맞을 때만. "스레드 처음/오늘 시작/첫 계정" 같은 계정 나이 주장 금지.
@@ -371,24 +388,65 @@ export async function generateSharingCopy(
  *   - 목적: "예전 조회수 높은 글만 반복" 방지. 지금 스하리 태그에 도는 최신 흐름을 각색.
  *   - collectedAt 최근 N일 + 실게시 시각(publishedAt) 최신 우선. (수집 시 이미 repliesCount≥20 필터됨)
  */
+/**
+ * 스하리 패턴 분류 — 같은 패턴 벤치마크끼리 수렴 방지.
+ * "의리·반하리" 패턴만 상위 12개를 독점하면 LLM 출력이 전부 같아지므로
+ * 패턴별 최대 CAP 개로 제한하고 나머지는 다른 유형으로 채운다.
+ */
+type SharingPattern = 'loyalty' | 'milestone' | 'greeting' | 'daily_moment' | 'question' | 'energy' | 'other';
+const PATTERN_CAP = 3; // 패턴당 최대 벤치마크 수
+
+function classifySharingPattern(text: string): SharingPattern {
+  const t = text.replace(/\s+/g, ' ');
+  if (/의리|뒷삭|반하리.*무조건|무조건.*반하리|진짜.*바로|1분.*컷|100%/.test(t)) return 'loyalty';
+  if (/\d+\s*명|넘고\s*싶|남았|채우|목표|달성/.test(t)) return 'milestone';
+  if (/안녕|나는|시작했|처음|입문|자기소개/.test(t)) return 'greeting';
+  if (/출근|퇴근|커피|피곤|배고|심심|월요일|아침/.test(t)) return 'daily_moment';
+  if (/\?|맞아|어려운|힘든|왜.*이렇|진짜야/.test(t)) return 'question';
+  if (/달리자|화이팅|가보자|🔥|💪|파이팅|가즈아/.test(t)) return 'energy';
+  return 'other';
+}
+
 async function loadTrendingSharingBenchmarks(days: number, poolSize: number): Promise<SimilarBenchmark[]> {
   try {
     const since = new Date(Date.now() - days * 864e5);
-    // 반응 좋은 순 (2026-10-12 사용자 "반응 좋은 스하리 수집해서 활용"): 최근 수집분 중 댓글×3+좋아요 상위.
     const recent = await prisma.benchmarkPost.findMany({
       where: { contentType: 'SHARING', collectedAt: { gte: since }, text: { not: '' } },
       orderBy: { collectedAt: 'desc' },
       take: 300,
       select: { id: true, sourceHandle: true, text: true, likesCount: true, repliesCount: true, viralFactors: true },
     });
-    const rows = recent
-      .sort((a, b) => b.repliesCount * 3 + b.likesCount - (a.repliesCount * 3 + a.likesCount))
-      .slice(0, poolSize);
-    return rows.map((r) => ({
+    const scored = recent
+      .map((r) => ({ ...r, score: r.repliesCount * 3 + r.likesCount, pattern: classifySharingPattern(r.text) }))
+      .sort((a, b) => b.score - a.score);
+
+    // 패턴별 CAP 적용: 같은 패턴이 풀을 독점하지 않게
+    const patternCount = new Map<SharingPattern, number>();
+    const diverse: typeof scored = [];
+    const overflow: typeof scored = []; // CAP 초과분 (풀이 부족하면 여기서 보충)
+    for (const r of scored) {
+      const cnt = patternCount.get(r.pattern) ?? 0;
+      if (cnt < PATTERN_CAP) {
+        diverse.push(r);
+        patternCount.set(r.pattern, cnt + 1);
+      } else {
+        overflow.push(r);
+      }
+      if (diverse.length >= poolSize) break;
+    }
+    // 풀이 부족하면 overflow 에서 보충 (다양성보다 빈 슬롯 방지)
+    while (diverse.length < poolSize && overflow.length > 0) {
+      diverse.push(overflow.shift()!);
+    }
+
+    const patternSummary = Object.fromEntries([...patternCount.entries()]);
+    logger.info({ poolSize: diverse.length, patterns: patternSummary }, 'sharing benchmark pool (diversity-filtered)');
+
+    return diverse.map((r) => ({
       id: r.id,
       sourceHandle: r.sourceHandle,
       text: r.text,
-      likesCount: r.repliesCount ?? r.likesCount, // 스하리 참여 = 댓글 수
+      likesCount: r.repliesCount ?? r.likesCount,
       distance: 0,
       viralFactors: (r.viralFactors as Record<string, unknown> | null) ?? null,
     }));
