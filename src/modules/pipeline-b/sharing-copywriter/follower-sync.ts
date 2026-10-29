@@ -22,6 +22,9 @@ export interface AccountContext {
   accountAgeBucket: AgeBucket;
   ageHints: string[];
 
+  /** Account.personaPrompt — 쇼핑·일상글용 페르소나. 스하리 톤 힌트 추출에도 사용. */
+  personaPrompt: string;
+
   syncedAt: Date;
 }
 
@@ -106,6 +109,7 @@ export async function syncAccountMetrics(accountId: string): Promise<AccountCont
       id: true,
       handle: true,
       accessToken: true,
+      personaPrompt: true,
       followersCount: true,
       followersSyncedAt: true,
       threadsCreatedAt: true,
@@ -154,6 +158,7 @@ export async function syncAccountMetrics(accountId: string): Promise<AccountCont
   return buildContext({
     accountId: acc.id,
     handle: acc.handle,
+    personaPrompt: acc.personaPrompt,
     followersCount,
     accountAgeDays: ageDays,
     syncedAt,
@@ -167,7 +172,7 @@ export async function getAccountContext(accountId: string): Promise<AccountConte
   const acc = await prisma.account.findUniqueOrThrow({
     where: { id: accountId },
     select: {
-      id: true, handle: true, accessToken: true,
+      id: true, handle: true, accessToken: true, personaPrompt: true,
       followersCount: true, followersSyncedAt: true, threadsCreatedAt: true,
     },
   });
@@ -188,6 +193,7 @@ export async function getAccountContext(accountId: string): Promise<AccountConte
   return buildContext({
     accountId: acc.id,
     handle: acc.handle,
+    personaPrompt: acc.personaPrompt,
     followersCount: acc.followersCount ?? 0,
     accountAgeDays: ageDays,
     syncedAt: acc.followersSyncedAt ?? new Date(),
@@ -197,6 +203,7 @@ export async function getAccountContext(accountId: string): Promise<AccountConte
 function buildContext(input: {
   accountId: string;
   handle: string;
+  personaPrompt: string;
   followersCount: number;
   accountAgeDays: number | null;
   syncedAt: Date;

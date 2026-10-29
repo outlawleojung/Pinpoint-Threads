@@ -13,7 +13,7 @@ const NO_LEARNINGS: SharingLearnings = { factors: [], avoidOpeners: [] };
  * Pipeline B 스하리 각색 카피라이터.
  *
  * 원칙:
- *   - **계정 페르소나 무관** (스하리 = 소통 요청, 정체성과 별개)
+ *   - **계정별 톤 차별화** (personaPrompt 에서 스하리 톤 힌트 추출 · 2026-10-30)
  *   - **RAG 기반 각색** (pgvector · SHARING 벤치마크 풀 유사도 검색)
  *   - **계정 실 팔로워 수 기반** (허구 X, 구간에 맞는 표현만)
  *   - **훅 유형 다양화**: variant 마다 다른 훅 유형 쿼리 → 다른 few-shot
@@ -105,6 +105,27 @@ const BodyResultSchema = z.object({
   body: z.string().min(4).max(80), // ★ 한 줄 40자 안쪽 (2026-10-13 사용자: 너무 길고 구구절절 → 전량 폐기)
 });
 
+/**
+ * personaPrompt → 스하리용 간결 톤 힌트 한 줄.
+ * 쇼핑·일상글용 페르소나가 "20대 여성 …" 같은 식이면 핵심 톤만 추출.
+ * 신상(직업·나이·지역) 자체는 스하리 본문에 쓰면 안 되지만, 말투(반말·존댓말·이모지 빈도·에너지)는 구분 가능.
+ */
+function extractSharingToneHint(personaPrompt: string): string {
+  const p = personaPrompt.trim();
+  if (!p) return '자연스럽고 가벼운 반말';
+  const hints: string[] = [];
+  if (/솔직|직설|쿨/.test(p)) hints.push('쿨하고 직설적');
+  if (/따뜻|다정|상냥|부드/.test(p)) hints.push('따뜻하고 다정한');
+  if (/유머|웃|재밌|ㅋ/.test(p)) hints.push('유머러스한');
+  if (/차분|담백|조용|깔끔/.test(p)) hints.push('담백하고 차분한');
+  if (/활발|에너지|밝|텐션/.test(p)) hints.push('밝고 에너지 넘치는');
+  if (/20대/.test(p)) hints.push('20대 말투');
+  if (/30대/.test(p)) hints.push('30대 말투');
+  if (/남성|남자/.test(p)) hints.push('남성 화자');
+  if (/여성|여자/.test(p)) hints.push('여성 화자');
+  return hints.length > 0 ? hints.join(' · ') : p.slice(0, 40);
+}
+
 export interface SharingCopyInput {
   accountId: string;
   variantCount?: number;
@@ -145,6 +166,7 @@ const SYSTEM_PROMPT = `한국 Threads "스하리1000명프로젝트" 태그에 �
 - 이 글은 아침 8~9시대 발행 → 요일·날짜·시각·밤·퇴근·날씨·계절 표현 금지.
 - 신상(자녀·직업·나이·지역·가게) 금지. 다른 계정 @·상품·링크 금지. 첨부 사진·영상 얘기 금지.
 - 반말, ㅋㅋ·이모지 자연스럽게.
+- ★ **계정 톤 지시**: "이 계정 톤" 에 적힌 말투를 반드시 따라라. 4개 계정이 매일 똑같은 패턴으로 쓰면 안 된다. 쿨한 계정은 쿨하게, 다정한 계정은 다정하게 — 각자 다른 사람이 쓴 것처럼.
 
 JSON만: { "body": "..." }`;
 
@@ -187,10 +209,12 @@ async function generateOne(
 
   // 벤치마크 1개를 계정·variant 별로 회전 선택 → 그 글을 각색 (2026-10-14 사용자 "벤치마킹 하라고")
   const primary = benchmarks.length > 0 ? benchmarks[variantIndex % benchmarks.length]! : null;
+  const toneHint = extractSharingToneHint(context.personaPrompt);
   const userPrompt = [
     `== 벤치마크 글 (댓글 ${primary?.likesCount ?? 0}) ==`,
     primary ? `"""\n${primary.text.slice(0, 220)}\n"""` : '(없음 — 스하리=반하리 요청형 한 줄로)',
     `== 이 계정 사실 == 팔로워 ${context.followersCount}명 · 계정 나이 ${context.accountAgeDays ?? '미확인'}일`,
+    `== 이 계정 톤 == ${toneHint}`,
     ...(recentBodies.length > 0 ? ['최근 우리 글(같은 문장 반복 금지):', ...recentBodies.slice(0, 6).map((b) => `- ${b.replace(/\n/g, ' ').slice(0, 50)}`)] : []),
     `variant=${variantIndex}. JSON만.`,
   ].join('\n');
