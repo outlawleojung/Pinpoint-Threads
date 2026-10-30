@@ -158,9 +158,14 @@ export async function runCustomPublish(input: RunCustomPublishInput): Promise<Cu
       },
     });
 
+    if (input.commerceUrl && !generatedReply) {
+      logger.error({ postId: post.id, commerceUrl: input.commerceUrl }, 'SHOPPING 글인데 generatedReply 미생성 — 딥링크 변환 실패 가능성');
+      return await finishFailed(post.id, 'reply', '커머스 URL이 있지만 고정댓글 생성 실패 (딥링크 변환 확인 필요)');
+    }
+
     if (input.holdApproval) {
       await prisma.post.update({ where: { id: post.id }, data: { state: PostState.PENDING_APPROVAL } });
-      logger.info({ postId: post.id, handle: account.handle }, '커스텀 발행 보관 (카드 보류)');
+      logger.info({ postId: post.id, handle: account.handle, hasReply: Boolean(generatedReply) }, '커스텀 발행 보관 (카드 보류)');
     } else {
       await sendApprovalRequest(post.id);
       logger.info({ postId: post.id, handle: account.handle, hasReply: Boolean(generatedReply) }, '커스텀 발행 승인 카드 발송');

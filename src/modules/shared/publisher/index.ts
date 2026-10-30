@@ -123,6 +123,21 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
     );
     throw new PublisherError('본문에 커머스 링크 포함 — 발행 차단', 'INVALID_STATE');
   }
+  // 하드룰: SHOPPING 글은 고정댓글(딥링크+공정위 문구)이 반드시 있어야 발행.
+  // generatedReply 가 없으면 링크 없이 나가는 사고 → 차단 후 알림 (2026-10-30).
+  if (post.kind === 'SHOPPING' && !post.generatedReply) {
+    await prisma.post.update({
+      where: { id: post.id },
+      data: { state: 'FAILED', rejectionReason: '고정댓글(딥링크+공정위 문구) 없음 — 쇼핑 글 발행 차단' },
+    });
+    await notifyAdmin(
+      `⛔ 쇼핑 글 발행 차단: 고정댓글(딥링크+공정위 문구)이 없습니다.\n` +
+      `계정: ${post.account.handle}\nPost: ${post.id}\n` +
+      `→ 커머스 링크를 포함해서 다시 생성하세요.`,
+    );
+    throw new PublisherError('SHOPPING 글에 generatedReply 없음 — 발행 차단', 'INVALID_STATE');
+  }
+
   // 쉬는 계정이라도 회복 확인용으로 명시 허용된 글(sourceBrief.allowInactive)은 발행 (2026-10-01 _blanchatt_ 테스트)
   const allowInactive = Boolean((post.sourceBrief as { allowInactive?: boolean } | null)?.allowInactive);
   if (!post.account.isActive && !allowInactive) {
