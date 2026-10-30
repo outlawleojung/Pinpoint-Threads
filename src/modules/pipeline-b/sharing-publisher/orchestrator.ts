@@ -129,6 +129,11 @@ export interface SharingBatchSummary {
   perAccount: Array<{ handle: string; status: string; reason?: string }>;
 }
 
+/**
+ * 하루 1건 로테이션 — 전 계정 통틀어 하루 스하리 1건만 (2026-10-30 사용자 결정).
+ * 계정은 날짜 기반 라운드 로빈으로 돌아가며, 연속 스하리·dedup 등으로 해당 계정이
+ * 불가능하면 다음 계정으로 폴백.
+ */
 export async function runSharingForAllAccounts(): Promise<SharingBatchSummary> {
   const accounts = await prisma.account.findMany({
     where: { isActive: true },
@@ -144,24 +149,36 @@ export async function runSharingForAllAccounts(): Promise<SharingBatchSummary> {
     perAccount: [],
   };
 
-  // 매일 다른 hook 배정을 위해 (오늘의 일수 + 계정 인덱스) 로 offset 계산
+  if (accounts.length === 0) return summary;
+
   const dayOfYearBase = Math.floor(Date.now() / 86_400_000);
-  for (let i = 0; i < accounts.length; i++) {
-    const acc = accounts[i]!;
+  const startIdx = dayOfYearBase % accounts.length;
+
+  for (let attempt = 0; attempt < accounts.length; attempt++) {
+    const idx = (startIdx + attempt) % accounts.length;
+    const acc = accounts[idx]!;
     try {
       const result = await runSharingPipeline({
         accountId: acc.id,
-        hookOffset: dayOfYearBase + i,
+        hookOffset: dayOfYearBase,
       });
       summary.perAccount.push({ handle: acc.handle, status: result.status, reason: result.reason });
-      if (result.status === 'sent_for_approval') summary.sent += 1;
-      else if (result.status === 'skipped_recent') summary.skipped += 1;
-      else summary.failed += 1;
+      if (result.status === 'sent_for_approval') {
+        summary.sent = 1;
+        logger.info({ handle: acc.handle, dayRotation: idx }, '오늘 스하리 계정 선정');
+        break; // 1건 성공 → 종료
+      }
+      // skipped/failed → 다음 계정으로 폴백
+      summary.skipped += 1;
     } catch (err) {
       logger.error({ err, accountId: acc.id }, 'sharing pipeline crashed');
       summary.perAccount.push({ handle: acc.handle, status: 'failed', reason: (err as Error).message });
       summary.failed += 1;
     }
+  }
+
+  if (summary.sent === 0) {
+    logger.warn({ summary }, '오늘 스하리 발행 가능한 계정 없음');
   }
 
   logger.info({ summary }, 'sharing batch done');
