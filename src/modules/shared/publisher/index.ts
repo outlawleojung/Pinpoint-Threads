@@ -195,12 +195,18 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
         : ratioBlock
           ? `${ratioBlock} → 링크 생략(일상글 강등)`
           : null;
-  const stripLink = stripReason != null;
-  if (stripLink) {
-    logger.warn(
-      { postId: post.id, handle: post.account.handle, followers: post.account.followersCount, reason: stripReason },
-      '링크 금지 조건 → 쇼핑 글을 링크 없이 일상글로 발행',
+  if (stripReason != null) {
+    // 쇼핑 글인데 링크를 뺄 수밖에 없으면 발행하지 않고 보류 (2026-10-30 사용자: "댓글 링크 없으면 발행하면 안 되지")
+    await prisma.post.update({
+      where: { id: post.id },
+      data: { state: 'PENDING_APPROVAL', scheduledAt: null, replyFailureReason: stripReason },
+    });
+    await notifyAdmin(
+      `⏸ 쇼핑 글 발행 보류: ${stripReason}\n` +
+      `계정: ${post.account.handle}\nPost: ${post.id}\n` +
+      `→ 일상글을 더 발행한 뒤 카드에서 다시 승인하세요.`,
     );
+    throw new PublisherError(`쇼핑 글 링크 금지 조건 → 발행 보류: ${stripReason}`, 'INVALID_STATE');
   }
 
   let threadsPostId: string;
@@ -274,14 +280,7 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
     threadsPostId = main.threadsPostId;
     logger.info({ postId: post.id, threadsPostId, handle: post.account.handle }, 'main post published');
 
-    if (stripLink) {
-      await prisma.post.update({
-        where: { id: post.id },
-        data: { kind: 'DAILY', replyFailureReason: stripReason },
-      });
-    }
-
-    if (post.generatedReply && !stripLink) {
+    if (post.generatedReply) {
       // 비디오 포함 게시글은 Meta 후단 처리가 이어지므로 reply 전 대기 필요.
       // 이미지만이면 즉시 reply 가능.
       const hasVideo = (post.mediaUrls ?? []).some(
