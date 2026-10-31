@@ -120,6 +120,10 @@ const FORBIDDEN_PATTERNS: Array<{ re: RegExp; label: string }> = [
   // 구체적 숫자 팔로워/목표 주장 — 벤치마크 숫자를 그대로 가져오면 계정 실제 상황과 불일치 (2026-11-01)
   { re: /\d+\s*명\s*(까지|남|목표|넘|달성|채우|도달|만들)/, label: '거짓-팔로워숫자-주장' },
   { re: /\d+\s*일\s*차/, label: '거짓-N일차-주장' },
+  // 남의 개인 사연 — 벤치마크에서 흡수하는 주범 (2026-11-01 "육아맘" 사건)
+  { re: /육아|아기|애기|아이\s*(키우|돌보|재우)|임신|출산|맘스타|엄마|아빠\s*(되|된)/, label: '남의사연-육아' },
+  { re: /군대|군인|전역|입대|복학|대학생|취준|취업|이직|퇴사/, label: '남의사연-직업신분' },
+  { re: /부산|대구|광주|대전|인천|제주|전주|경상|전라|충청|강원|서울\s*(사는|살|거주)/, label: '남의사연-지역' },
 ];
 
 const BodyResultSchema = z.object({
@@ -304,7 +308,7 @@ async function generateOne(
   // 계정 나이 주장 금지
   {
     const { NEW_ACCOUNT_CLAIM } = await import('../sharing-repost.js');
-    if (NEW_ACCOUNT_CLAIM.test(opener) || /스레드\s*처음|오늘\s*시작|첫\s*계정|입문/.test(opener)) {
+    if (NEW_ACCOUNT_CLAIM.test(opener) || /스레드\s*처음|오늘\s*시작|첫\s*계정|첫\s*글|처음\s*글|첫\s*포스트|입문|시작한\s*지|시작했|막\s*시작/.test(opener)) {
       throw new SharingBlacklistError('계정 나이 주장', opener, false);
     }
   }
@@ -581,6 +585,10 @@ function sanitizeBenchmarkForPrompt(text: string): string {
     .replace(/진심(이니까|으로|임|인데)/g, '')
     .replace(/\d+\s*명\s*(까지|남았|목표|넘고|달성|채우|도달|만들기)/g, '')
     .replace(/\d+\s*일\s*차/g, '')
+    .replace(/첫\s*글|처음\s*글|막\s*시작|시작한\s*지|입문/g, '')
+    .replace(/육아맘|육아|아기|애기|임신|출산|맘스타/g, '')
+    .replace(/군대|군인|전역|입대|복학|취준생?|취업|이직|퇴사/g, '')
+    .replace(/(부산|대구|광주|대전|인천|제주|전주|경상도?|전라도?|충청도?|강원도?)\s*(사는|살|거주|에서)/g, '')
     .replace(/#[^\s#]+/g, '') // 해시태그 제거
     .replace(/[ \t]{2,}/g, ' ')
     .trim();
