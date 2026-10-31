@@ -235,15 +235,17 @@ async function generateOne(
   const gap = nextMilestone - cur;
   const closeToMilestone = gap <= 25; // 코앞이라 할 수 있는 거리
 
-  // 벤치마크 1개를 계정·variant 별로 회전 선택 → 그 글을 각색 (2026-10-14 사용자 "벤치마킹 하라고")
-  const primary = benchmarks.length > 0 ? benchmarks[variantIndex % benchmarks.length]! : null;
-  // 벤치마크 원문에서 금지 표현을 미리 제거 → LLM이 그대로 복사하는 것 방지
-  const cleanedBenchmark = primary ? sanitizeBenchmarkForPrompt(primary.text.slice(0, 220)) : null;
+  // ★★ 2026-11-01: 벤치마크 풀이 전부 동일 패턴(의리/뒷삭/반하리)이라
+  //   sanitize해도 LLM이 맥락에서 복원 → 거짓 숫자·남의 사연 반복.
+  //   새 해시태그(스레드소통·스레드일상 등)로 다양한 벤치마크가 쌓일 때까지
+  //   벤치마크 OFF → 훅 쿼리만으로 순수 일상 한마디 생성.
+  //   TODO: 풀에 daily_moment/question/humor/participation 패턴이 30%+ 되면 다시 활성화
+  // ★ 벤치마크 OFF (위 주석 참조)
+  const cleanedBenchmark: string | null = null;
   const toneHint = extractSharingToneHint(context.personaPrompt);
+  const hookGuide = `훅 방향: "${hook.query}"`;
   const userPrompt = [
-    `== 각색할 원문 (댓글 ${primary?.likesCount ?? 0}개 반응) ==`,
-    cleanedBenchmark ? `"""\n${cleanedBenchmark}\n"""` : '(없음 — "스하리 남기면 반하리 갈게" 기본형)',
-    `↑ 이 글의 핵심 메시지를 살려서 40자 안쪽으로 축약 각색해라.`,
+    `== 아래 훅 방향으로 일상 한마디를 20자 안쪽으로 만들어라 ==\n${hookGuide}`,
     `계정 톤: ${toneHint}`,
     ...(recentBodies.length > 0 ? ['최근 우리 글(반복 금지):', ...recentBodies.slice(0, 5).map((b) => `- ${b.replace(/\n/g, ' ').slice(0, 40)}`)] : []),
     `JSON만.`,
@@ -276,18 +278,25 @@ async function generateOne(
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
-  // LLM이 스하리/반하리 요청까지 넣었으면 그 부분 제거 (꼬리에서 붙인다)
+  // opener에서 스하리 관련 단어 전부 제거 (꼬리에서 붙인다 — opener는 순수 일상 한마디만)
   opener = opener
-    .replace(/스하리\s*(남기면|하면|해주면|하자|ㄱ|가자|고고)[\s\S]*/g, '')
-    .replace(/반하리\s*(갈게|간다|감|바로|무조건)[\s\S]*/g, '')
-    .replace(/맞팔\s*(하자|ㄱ|가자)[\s\S]*/g, '')
+    .replace(/스하리[^\s]*/g, '')
+    .replace(/반하리[^\s]*/g, '')
+    .replace(/맞팔[^\s]*/g, '')
+    .replace(/스친[^\s]*/g, '')
+    .replace(/선팔|팔로우|팔로|리포스트/g, '')
+    .replace(/1000\s*명\s*프로젝트/g, '')
+    // 숫자+단위 제거 (거짓 팔로워/마일스톤 방지)
+    .replace(/\d+\s*(명|천|백|만)\s*(까지|남|넘|목표|달성|채우|되|거의|코앞|가까이)?/g, '')
+    .replace(/\d+\s*(일\s*차|개월)/g, '')
+    .replace(/[ \t]{2,}/g, ' ')
     .trim();
 
   // 금지어 검증 (일상 한마디 부분만)
   const hit = FORBIDDEN_TERMS.find((t) => opener.includes(t));
   if (hit) throw new SharingBlacklistError(hit, opener, false);
   const patHit = FORBIDDEN_PATTERNS.find((p) => p.re.test(opener));
-  const HARD_LABELS = /시간|요일|날씨|계절|오글|과잉|취미|의리|진심|무조건|뒷삭|느낌표|이모지/;
+  const HARD_LABELS = /시간|요일|날씨|계절|오글|과잉|취미|의리|진심|무조건|뒷삭|느낌표|이모지|거짓|남의사연|불평|구걸/;
   if (patHit) throw new SharingBlacklistError(patHit.label, opener, !HARD_LABELS.test(patHit.label));
 
   // 유사도 검사: 다른 계정 최근 스하리와 비슷하면 재생성
@@ -580,20 +589,24 @@ function pickSharingTail(seed: number): string {
  */
 function sanitizeBenchmarkForPrompt(text: string): string {
   return text
-    .replace(/의리(로만|로\s*뭉|만\s*간다|파|[\s]*있)/g, '확실하게')
-    .replace(/의리/g, '')
-    .replace(/뒷삭\s*(한\s*번\s*)?없(이|어|다|음)/g, '삭제 안 함')
-    .replace(/뒷삭/g, '')
-    .replace(/무조건\s*(갈게|간다|감|바로)/g, '바로 감')
+    // 스하리 메타 단어 전부 제거 (LLM이 복사 못 하게)
+    .replace(/스하리|반하리|맞팔|선팔|팔로우|팔로|리포스트|스친/g, '')
+    .replace(/1000\s*명\s*프로젝트/g, '')
+    .replace(/의리[^\s]*/g, '')
+    .replace(/뒷삭[^\s]*/g, '')
     .replace(/무조건/g, '')
     .replace(/진심(이니까|으로|임|인데)/g, '')
-    .replace(/\d+\s*명\s*(까지|남았|목표|넘고|달성|채우|도달|만들기)/g, '')
-    .replace(/\d+\s*일\s*차/g, '')
+    // 숫자+단위 제거 (거짓 마일스톤 방지)
+    .replace(/\d+\s*(명|천|백|만)\s*[^\s]*/g, '')
+    .replace(/\d+\s*(일\s*차|개월)/g, '')
+    // 계정 나이 주장
     .replace(/첫\s*글|처음\s*글|막\s*시작|시작한\s*지|입문/g, '')
+    // 개인 사연
     .replace(/육아맘|육아|아기|애기|임신|출산|맘스타/g, '')
     .replace(/군대|군인|전역|입대|복학|취준생?|취업|이직|퇴사/g, '')
     .replace(/(부산|대구|광주|대전|인천|제주|전주|경상도?|전라도?|충청도?|강원도?)\s*(사는|살|거주|에서)/g, '')
-    .replace(/#[^\s#]+/g, '') // 해시태그 제거
+    .replace(/자기\s*가게|사업|쇼핑몰|카페\s*(하|운영)|식당\s*(하|운영)/g, '')
+    .replace(/#[^\s#]+/g, '')
     .replace(/[ \t]{2,}/g, ' ')
     .trim();
 }
