@@ -43,6 +43,7 @@ model Account {
   posts              Post[]
   engagementLogs     EngagementLog[]
   dailyPostCounts    DailyPostCount[]
+  sourceQueues       SourceQueue[]
 }
 
 // ==========================================
