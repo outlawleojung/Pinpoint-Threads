@@ -73,6 +73,10 @@ const HOOK_QUERIES: HookDef[] = [
   { label: '혼잣말', query: '아무도 안 물어봤는데 그냥 하고 싶은 말', ageOK: ALL_AGES },
   // — 감사·칭찬형
   { label: '스친 감사', query: '스친들 고마워 덕분에 오늘도 즐겁다', ageOK: ALL_AGES },
+  // — 참여 유도형 (2026-11-01 다양화: 질문·선택·이벤트)
+  { label: '점심 질문', query: '점심 뭐 먹지 골라줘', ageOK: ALL_AGES },
+  { label: '선택 요청', query: '둘 중에 뭐가 나아 골라봐', ageOK: ALL_AGES },
+  { label: '가벼운 TMI', query: '쓸데없는 TMI 하나만 하고 갈게', ageOK: ALL_AGES },
 ];
 
 /** 본문 blacklist. 노출 시 재생성. */
@@ -93,8 +97,8 @@ const FORBIDDEN_PATTERNS: Array<{ re: RegExp; label: string }> = [
   { re: /뒷삭\s*(한\s*번\s*)?없이\s*반하리/, label: '뒷삭없이반하리-상투구' },
   // "뒷삭 없이/없어" 단독도 오글거림 주범 — 반하리와 조합 아니어도 차단 (2026-10-30)
   { re: /뒷삭\s*(절대\s*)?없/, label: '뒷삭없다-오글거림' },
-  // "의리로만" 다짐형 — 5계정 매일 반복되는 오글거림 핵심 (2026-10-30)
-  { re: /의리(로만|로\s*뭉|만\s*간다|파)/, label: '의리로만-오글거림' },
+  // "의리" 포함 표현 전부 — 각색 시 원문 의리가 남는 것 방지 (2026-10-31)
+  { re: /의리/, label: '의리-오글거림' },
   // "진심이니까/진심으로" 다짐형 (2026-10-30)
   { re: /진심(이니까|으로|임|인데)/, label: '진심-오글거림' },
   // "무조건 갈게/바로 간다" 과잉 약속 (2026-10-30)
@@ -116,7 +120,7 @@ const FORBIDDEN_PATTERNS: Array<{ re: RegExp; label: string }> = [
 ];
 
 const BodyResultSchema = z.object({
-  body: z.string().min(4).max(80), // ★ 한 줄 40자 안쪽 (2026-10-13 사용자: 너무 길고 구구절절 → 전량 폐기)
+  body: z.string().min(4).max(120), // 벤치마크 각색 방식 전환 후 원문이 길면 각색도 길어짐 → 120자 허용 (40자 목표는 프롬프트로 유도)
 });
 
 /**
@@ -159,27 +163,28 @@ export interface SharingCopyResult {
   }>;
 }
 
-const SYSTEM_PROMPT = `한국 Threads "스하리1000명프로젝트" 태그에 올릴 스하리 글을 쓴다.
+const SYSTEM_PROMPT = `한국 Threads 스하리 글의 **앞부분(일상 한마디)**만 각색하는 카피라이터.
 
-★★ 핵심: **일상 한마디 + 스하리 요청 한 줄**. 스하리 메타 얘기("의리", "뒷삭 없이", "무조건 반하리")로 도배하면 실패.
-실제 반응 좋은 스하리 = "출근하기 싫다… 스하리 남기면 반하리 감", "나 지금 매우 심심함. 스하리 하자". 일상이 메인, 스하리는 덤.
+★★ 구조: [일상 한마디] + [스하리 꼬리]. 너는 **[일상 한마디]만** 각색해라. [스하리 꼬리]는 시스템이 자동으로 붙인다.
 
-방법: 벤치마크 글의 **리듬·길이**만 참고. 내용은 새로 써라.
+★ 벤치마크 원문에서 "일상 한마디" 부분만 추출해서 각색해라:
+- 원문: "월요일이다 출근하는 스니들 오늘도 화이팅 스하리 반하리 가보자" → 각색: "출근하기 싫다"
+- 원문: "스레드 3일 차 1000명 만들기 도전 스하리 반하리 가보자" → 각색: "1000명 가보자"
+- 원문: "나 안보이는거 아니겠지 스하리 많이 해줘 도와줘" → 각색: "나 보여?"
+- 원문: "드디어 50만달성 고생많이했다 앞으로 100만 가보자" → 각색: "50 달성. 100까지 가자"
+- 원문: "경상도 사는 나랑 스친할까 친구 사귀고 싶어" → 각색: "심심한데 스친 하자"
+- 원문: "다들 점심 모 머거?! 스친이들 내 점심을 결정해줘 스하리 반하리" → 각색: "점심 뭐 먹지 골라줘"
+- 원문: "스하리 지금도 공 때리기 중? ㅋㅋ 반하리 갈게" → 각색: "아직도 하고 있지 ㅋㅋ"
+- 원문: "쓸데없는 TMI인데 나 어제 라면 세 개 먹음 스하리 하자" → 각색: "어제 라면 세 개 먹음"
 
-★ 절대 금지 (이거 하면 무조건 폐기):
-- 벤치마크 작성자의 취미·관심사·상황(개발·그림·운동·육아·요리 등) 가져오기 — 우리 계정 얘기가 아니다
-- "의리로만", "뒷삭 없이", "무조건 갈게!!", "진심이니까" 같은 오글거리는 다짐형 문구
-- 하소연("혼자 한계", "왜 안 와", "도와줘") · 구걸조 · 억지 텐션("미치게 달려볼게💪🔥")
-- 존댓말 · 신상(직업·나이·지역·자녀·취미) · 시간/요일/날씨/계절 · @멘션 · 링크
-- 느낌표 2개 이상 연속(!!) · 이모지 3개 이상 연속
+★ 규칙:
+1. 20자 안쪽으로 짧게
+2. 벤치마크의 개인 사연(직업·취미·육아·지역 등)은 빼라
+3. 반말, 담백하게
+4. 스하리/반하리/맞팔 단어 쓰지 마라 (꼬리에서 붙는다)
+5. 불평·하소연 금지 ("왜 안 와" "실망" "도와줘")
 
-★ 톤:
-- 반말 기본. 짧고 담백하게. 실제 사람이 편하게 쓴 것처럼.
-- 스하리 요청은 끝에 한 줄이면 충분: "스하리 남기면 반하리 감", "스하리 하자", "반하리 갈게"
-- **40자 안쪽** 목표. 길어도 50자 이내.
-- 계정 톤 지시를 반드시 따라라 — 4개 계정이 같은 패턴이면 안 된다.
-
-JSON만: { "body": "..." }`;
+★ 계정 톤을 따라라. JSON만: { "body": "..." }`;
 
 /** 생성 시점의 한국 요일·시간대 (스하리 일상 한마디가 요일을 지어내지 않게). */
 function nowKoContext(now = new Date()): string {
@@ -220,14 +225,16 @@ async function generateOne(
 
   // 벤치마크 1개를 계정·variant 별로 회전 선택 → 그 글을 각색 (2026-10-14 사용자 "벤치마킹 하라고")
   const primary = benchmarks.length > 0 ? benchmarks[variantIndex % benchmarks.length]! : null;
+  // 벤치마크 원문에서 금지 표현을 미리 제거 → LLM이 그대로 복사하는 것 방지
+  const cleanedBenchmark = primary ? sanitizeBenchmarkForPrompt(primary.text.slice(0, 220)) : null;
   const toneHint = extractSharingToneHint(context.personaPrompt);
   const userPrompt = [
-    `== 벤치마크 글 (댓글 ${primary?.likesCount ?? 0}) ==`,
-    primary ? `"""\n${primary.text.slice(0, 220)}\n"""` : '(없음 — 스하리=반하리 요청형 한 줄로)',
-    `== 이 계정 사실 == 팔로워 ${context.followersCount}명 · 계정 나이 ${context.accountAgeDays ?? '미확인'}일`,
-    `== 이 계정 톤 == ${toneHint}`,
-    ...(recentBodies.length > 0 ? ['최근 우리 글(같은 문장 반복 금지):', ...recentBodies.slice(0, 6).map((b) => `- ${b.replace(/\n/g, ' ').slice(0, 50)}`)] : []),
-    `variant=${variantIndex}. JSON만.`,
+    `== 각색할 원문 (댓글 ${primary?.likesCount ?? 0}개 반응) ==`,
+    cleanedBenchmark ? `"""\n${cleanedBenchmark}\n"""` : '(없음 — "스하리 남기면 반하리 갈게" 기본형)',
+    `↑ 이 글의 핵심 메시지를 살려서 40자 안쪽으로 축약 각색해라.`,
+    `계정 톤: ${toneHint}`,
+    ...(recentBodies.length > 0 ? ['최근 우리 글(반복 금지):', ...recentBodies.slice(0, 5).map((b) => `- ${b.replace(/\n/g, ' ').slice(0, 40)}`)] : []),
+    `JSON만.`,
   ].join('\n');
 
   const response = await llm().complete({
@@ -247,25 +254,31 @@ async function generateOne(
 
   const parsed = extractJson(response.text);
   const { body } = BodyResultSchema.parse(parsed);
-  // "스하리1000명프로젝트"는 **본문 텍스트 금지** — 발행 시 topic_tag 로만 붙는다 (사용자 방침).
-  //   LLM이 문장/해시태그로 넣는 경우가 있어 본문에서 문구(# 유무·띄어쓰기 변형)를 전부 제거.
-  //   (단독 "스하리" 단어는 정상 어휘라 건드리지 않음)
-  const cleaned = body
-    .replace(/#[^\s#]+/g, '') // 본문 해시태그 전부 제거 (태그는 topic_tag 로만 · 벤치마크 따라 "#소통" 붙는 것 방지 · 2026-10-14)
-    .replace(/#?\s*스하리\s*1000\s*명\s*프로젝트/g, '') // "#스하리1000명프로젝트" / "스하리 1000명 프로젝트" 등 변형 포함
-    .replace(/[ \t]{2,}/g, ' ') // 제거 후 남은 이중 공백
-    .replace(/^[ \t]+/gm, '') // 줄 앞 공백 (문구가 줄 첫머리에 있던 경우)
+  // LLM 출력 정제: 해시태그·이중공백 제거
+  let opener = body
+    .replace(/#[^\s#]+/g, '')
+    .replace(/#?\s*스하리\s*1000\s*명\s*프로젝트/g, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/^[ \t]+/gm, '')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
-  const hit = FORBIDDEN_TERMS.find((t) => cleaned.includes(t));
-  if (hit) throw new SharingBlacklistError(hit, cleaned, false); // 금지어 = 하드
-  const patHit = FORBIDDEN_PATTERNS.find((p) => p.re.test(cleaned));
-  // 사실/정책 위반 + 오글거림 핵심 패턴 = 하드(절대 수용 X). 나머지 반복 템플릿만 소프트.
+  // LLM이 스하리/반하리 요청까지 넣었으면 그 부분 제거 (꼬리에서 붙인다)
+  opener = opener
+    .replace(/스하리\s*(남기면|하면|해주면|하자|ㄱ|가자|고고)[\s\S]*/g, '')
+    .replace(/반하리\s*(갈게|간다|감|바로|무조건)[\s\S]*/g, '')
+    .replace(/맞팔\s*(하자|ㄱ|가자)[\s\S]*/g, '')
+    .trim();
+
+  // 금지어 검증 (일상 한마디 부분만)
+  const hit = FORBIDDEN_TERMS.find((t) => opener.includes(t));
+  if (hit) throw new SharingBlacklistError(hit, opener, false);
+  const patHit = FORBIDDEN_PATTERNS.find((p) => p.re.test(opener));
   const HARD_LABELS = /시간|요일|날씨|계절|오글|과잉|취미|의리|진심|무조건|뒷삭|느낌표|이모지/;
-  if (patHit) throw new SharingBlacklistError(patHit.label, cleaned, !HARD_LABELS.test(patHit.label));
-  // 유사도 검사 (2026-10-14): ① 벤치마크 거의 베낌 ② 다른 계정 최근 스하리와 비슷(같은 주인 신호) → 재생성
+  if (patHit) throw new SharingBlacklistError(patHit.label, opener, !HARD_LABELS.test(patHit.label));
+
+  // 유사도 검사: 다른 계정 최근 스하리와 비슷하면 재생성
   {
     const grams = (t: string) => {
       const x = t.replace(/[\s\p{P}\p{S}ㅋㅎㅠㅜ]/gu, '');
@@ -280,22 +293,26 @@ async function generateOne(
       for (const g of A) if (B.has(g)) n++;
       return n / Math.min(A.size, B.size);
     };
-    if (primary && sim(cleaned, primary.text) >= 0.6) throw new SharingBlacklistError('벤치마크 베낌', cleaned, false);
-    const near = recentBodies.find((r) => sim(cleaned, r) >= 0.65);
-    if (near) throw new SharingBlacklistError('최근 우리 스하리와 비슷', cleaned, false);
+    const near = recentBodies.find((r) => sim(opener, r) >= 0.65);
+    if (near) throw new SharingBlacklistError('최근 우리 스하리와 비슷', opener, false);
   }
-  // 스하리 요청 필수 (2026-10-14 사용자: 요청 없는 한마디는 "스하리 글이 아님")
-  if (!/스하리|반하리|맞팔|반사/.test(cleaned)) throw new SharingBlacklistError('스하리 요청 없음', cleaned, false);
 
-  // 비마일스톤 훅인데 "N 넘고싶어/몇 명 남았어" 숫자 목표가 새면 소프트 재시도 (전 계정 숫자 수렴 방지).
-  // 숫자는 실제 팔로워 기준 사실일 때만 · 계정 나이 주장 금지 (벤치마크가 숫자형·신생형이어도)
+  // 계정 나이 주장 금지
   {
-    const { falseFollowerClaim, NEW_ACCOUNT_CLAIM } = await import('../sharing-repost.js');
-    if (falseFollowerClaim(cleaned, context.followersCount)) throw new SharingBlacklistError('팔로워 숫자 거짓', cleaned, false);
-    if (NEW_ACCOUNT_CLAIM.test(cleaned) || /스레드\s*처음|오늘\s*시작|첫\s*계정|입문/.test(cleaned)) throw new SharingBlacklistError('계정 나이 주장', cleaned, false);
+    const { NEW_ACCOUNT_CLAIM } = await import('../sharing-repost.js');
+    if (NEW_ACCOUNT_CLAIM.test(opener) || /스레드\s*처음|오늘\s*시작|첫\s*계정|입문/.test(opener)) {
+      throw new SharingBlacklistError('계정 나이 주장', opener, false);
+    }
   }
 
-  return cleaned;
+  // opener가 너무 짧으면(2자 이하) 실패
+  if (opener.length < 3) throw new SharingBlacklistError('일상 한마디 너무 짧음', opener, false);
+
+  // 스하리 꼬리 랜덤 선택해서 붙이기
+  const tail = pickSharingTail(variantIndex);
+  const full = `${opener}\n${tail}`;
+
+  return full;
 }
 
 export class SharingBlacklistError extends Error {
@@ -429,16 +446,19 @@ export async function generateSharingCopy(
  * "의리·반하리" 패턴만 상위 12개를 독점하면 LLM 출력이 전부 같아지므로
  * 패턴별 최대 CAP 개로 제한하고 나머지는 다른 유형으로 채운다.
  */
-type SharingPattern = 'loyalty' | 'milestone' | 'greeting' | 'daily_moment' | 'question' | 'energy' | 'other';
-const PATTERN_CAP = 3; // 패턴당 최대 벤치마크 수
+type SharingPattern = 'loyalty' | 'milestone' | 'greeting' | 'daily_moment' | 'question' | 'participation' | 'humor' | 'energy' | 'other';
+const PATTERN_CAP = 3;
+const LOYALTY_CAP = 1;
 
 function classifySharingPattern(text: string): SharingPattern {
   const t = text.replace(/\s+/g, ' ');
   if (/의리|뒷삭|반하리.*무조건|무조건.*반하리|진짜.*바로|1분.*컷|100%/.test(t)) return 'loyalty';
   if (/\d+\s*명|넘고\s*싶|남았|채우|목표|달성/.test(t)) return 'milestone';
+  if (/골라|결정해|뭐\s*먹|뭐\s*할|어떤.*좋아|추천|투표|남겨줘|알려줘|봐줄게/.test(t)) return 'participation';
+  if (/ㅋㅋ|ㅎㅎ|웃긴|미친|레전드|개웃|빵터/.test(t)) return 'humor';
   if (/안녕|나는|시작했|처음|입문|자기소개/.test(t)) return 'greeting';
-  if (/출근|퇴근|커피|피곤|배고|심심|월요일|아침/.test(t)) return 'daily_moment';
-  if (/\?|맞아|어려운|힘든|왜.*이렇|진짜야/.test(t)) return 'question';
+  if (/출근|퇴근|커피|피곤|배고|심심|아침|점심/.test(t)) return 'daily_moment';
+  if (/\?|맞아|어려운|힘든|왜.*이렇|진짜야|나만/.test(t)) return 'question';
   if (/달리자|화이팅|가보자|🔥|💪|파이팅|가즈아/.test(t)) return 'energy';
   return 'other';
 }
@@ -462,7 +482,8 @@ async function loadTrendingSharingBenchmarks(days: number, poolSize: number): Pr
     const overflow: typeof scored = []; // CAP 초과분 (풀이 부족하면 여기서 보충)
     for (const r of scored) {
       const cnt = patternCount.get(r.pattern) ?? 0;
-      if (cnt < PATTERN_CAP) {
+      const cap = r.pattern === 'loyalty' ? LOYALTY_CAP : PATTERN_CAP;
+      if (cnt < cap) {
         diverse.push(r);
         patternCount.set(r.pattern, cnt + 1);
       } else {
@@ -520,6 +541,43 @@ function rotatePick<T>(pool: T[], offset: number, n: number): T[] {
   const out: T[] = [];
   for (let i = 0; i < n; i++) out.push(pool[(start + i) % pool.length]!);
   return out;
+}
+
+/**
+ * 스하리 꼬리 문구 풀 — 계정·날짜별 회전. LLM이 생성한 일상 한마디 뒤에 붙는다.
+ * 오글거리지 않으면서 스하리 요청이 담긴 짧은 한 줄.
+ */
+const SHARING_TAILS = [
+  '스하리 남기면 반하리 감',
+  '스하리 하자',
+  '반하리 갈게',
+  '스하리 ㄱ',
+  '같이 키우자 스하리',
+  '스하리 남기면 바로 감',
+  '소통하자 스하리',
+  '스하리 하면 갈게',
+];
+
+function pickSharingTail(seed: number): string {
+  return SHARING_TAILS[((seed % SHARING_TAILS.length) + SHARING_TAILS.length) % SHARING_TAILS.length]!;
+}
+
+/**
+ * 벤치마크 원문에서 오글거림 표현을 제거/교체 → LLM이 그대로 복사 방지.
+ * 원문의 구조는 유지하되 금지 단어만 빼서 "깨끗한 원문"을 프롬프트에 전달.
+ */
+function sanitizeBenchmarkForPrompt(text: string): string {
+  return text
+    .replace(/의리(로만|로\s*뭉|만\s*간다|파|[\s]*있)/g, '확실하게')
+    .replace(/의리/g, '')
+    .replace(/뒷삭\s*(한\s*번\s*)?없(이|어|다|음)/g, '삭제 안 함')
+    .replace(/뒷삭/g, '')
+    .replace(/무조건\s*(갈게|간다|감|바로)/g, '바로 감')
+    .replace(/무조건/g, '')
+    .replace(/진심(이니까|으로|임|인데)/g, '')
+    .replace(/#[^\s#]+/g, '') // 해시태그 제거
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
 }
 
 /** slice 로 짝 잃은 서로게이트(반쪽 이모지) 제거 — LLM 요청 JSON 깨짐 방지. */

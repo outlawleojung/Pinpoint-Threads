@@ -589,3 +589,40 @@ model NaverTrendKeyword {
   @@index([category, collectedAt])
   @@index([usedAt])
 }
+
+// ==========================================
+// SourceQueue: 소재 접수 큐 (텔레그램 입력 → 저장 → 발행 시점에 카드 생성)
+// ==========================================
+enum SourceQueueStatus {
+  QUEUED        // 접수됨, 카드 생성 대기
+  PROCESSING    // 카피 생성 + 카드 발송 중
+  CARD_SENT     // 승인 카드 발송 완료 (Post 와 연결)
+  CONSUMED      // 발행 완료
+  CANCELLED     // 사용자가 취소
+}
+
+model SourceQueue {
+  id              String            @id @default(cuid())
+  status          SourceQueueStatus @default(QUEUED)
+
+  sourceUrl       String
+  kind            PostKind?         // 없으면 자동 분류
+  accountId       String?           // 없으면 자동 배정
+  account         Account?          @relation(fields: [accountId], references: [id])
+  description     String?           @db.Text  // 카피 방향 힌트
+  notes           String?           @db.Text  // 특이사항
+  commerceUrl     String?           // 쇼핑 커머스 링크
+  productName     String?           // 쇼핑 상품명 힌트
+  immediate       Boolean           @default(false) // 즉시 카드 발송
+
+  inboundLinkId   String?           // 인제스트 결과
+  postId          String?           // 카드 생성 후 연결된 Post
+
+  priority        Int               @default(0)  // 높을수록 먼저 소비
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  processedAt     DateTime?         // 카드 생성 시각
+
+  @@index([status, kind, createdAt])
+  @@index([accountId])
+}
