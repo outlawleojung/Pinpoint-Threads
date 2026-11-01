@@ -29,9 +29,9 @@ export interface SharingRunResult {
 }
 
 /**
- * 최근 몇 시간 이내에 같은 계정 SHARING 포스트가 있으면 스킵 (하루 1건 제한).
+ * 최근 N시간 이내에 같은 계정 SHARING 포스트가 있으면 스킵 (격일 발행 · 2026-11-01).
  */
-const DEDUP_WINDOW_HOURS = 20;
+const DEDUP_WINDOW_HOURS = 44;
 
 export async function runSharingPipeline(input: SharingRunInput): Promise<SharingRunResult> {
   const acc = await prisma.account.findUniqueOrThrow({
