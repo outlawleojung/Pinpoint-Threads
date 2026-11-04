@@ -12,6 +12,7 @@ related: [docs/STATE.md, CLAUDE.md, docs/memory/MEMORY.md]
 - 터미널 3개가 떠 있어야 한다: `pnpm run dev` · `pnpm run dev:bot` · `pnpm run dev:worker` (tsx watch · 저장 즉시 반영).
 - **워커가 꺼지면 발행·크론 전부 멈춤** (2026-10-16 오후~10/18 사고). 확인: `npx tsx scripts/ops/queue-status.mts` — 지난 시각인데 APPROVED 로 남은 글이 있으면 워커가 죽은 것.
 - 워커를 다시 켜기 **전에** `npx tsx scripts/ops/reschedule-approved.mts` 로 지난 예약을 재배치 (안 하면 밀린 글이 한꺼번에 동시 발행 → 10/1 사고 재현).
+- **overdue APPROVED 자동 복구** (2026-11-05): 워커 시작 시 + 30분마다 `scheduledAt < now` 인 APPROVED 포스트를 publish 큐에 재투입. 서버 재시작으로 BullMQ delay 잡이 유실돼도 자동 복구.
 
 ## 1. 하루 흐름 (자동)
 | 시각(KST) | 작업 | 사람 할 일 |

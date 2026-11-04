@@ -13,6 +13,7 @@ import {
   naverDailyInfoQueue,
   naverTrendCollectQueue,
   sourceWatchQueue,
+  publishQueue,
 } from '../queues/queues.js';
 import { prisma } from '../db/prisma.js';
 import { logger } from '../config/logger.js';
@@ -358,6 +359,40 @@ export async function scheduleTrendJobs(): Promise<void> {
     },
     'trend jobs: 자동 LLM 크론 정지 · 계정 메트릭만 유지',
   );
+
+  // ✅ Overdue APPROVED 복구 스캐너 (2026-11-05).
+  //   승인 시 BullMQ delay 잡으로 발행 예약하지만, 서버 재시작 시 잡 유실 가능.
+  //   30분마다 + 시작 즉시 scheduledAt < now 인 APPROVED 포스트를 publish 큐에 재투입.
+  const scanOverdueApproved = async () => {
+    try {
+      const overdue = await prisma.post.findMany({
+        where: { state: 'APPROVED', scheduledAt: { not: null, lt: new Date() } },
+        select: { id: true, kind: true, account: { select: { handle: true } } },
+      });
+      if (overdue.length === 0) return;
+
+      let recovered = 0;
+      for (const p of overdue) {
+        const jobId = `publish-${p.id}`;
+        const existing = await publishQueue.getJob(jobId);
+        if (existing) {
+          const state = await existing.getState();
+          if (state === 'waiting' || state === 'active' || state === 'delayed') continue;
+          await existing.remove().catch(() => {});
+        }
+        await publishQueue.add('publish', { postId: p.id }, { jobId, delay: 0 });
+        recovered++;
+        logger.info({ postId: p.id, kind: p.kind, handle: p.account.handle }, 'overdue APPROVED 복구 → publish 큐 재투입');
+      }
+      if (recovered > 0) logger.info({ total: overdue.length, recovered }, 'overdue-approved-scan recovered');
+    } catch (err) {
+      logger.error({ err }, 'overdue-approved-scan failed');
+    }
+  };
+
+  await scanOverdueApproved();
+  setInterval(scanOverdueApproved, 30 * 60 * 1000);
+  logger.info('overdue-approved-scan: 즉시 1회 + 30분 간격 활성');
 }
 
 /**
