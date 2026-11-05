@@ -316,14 +316,13 @@ export async function scheduleTrendJobs(): Promise<void> {
     { repeat: { pattern: SHARING_PUBLISH_CRON, tz: 'Asia/Seoul' }, jobId: 'sharing-cards-evening' },
   );
 
-  // ⛔ 자동 쇼핑 발행 크론 **정지** (2026-09-04 사용자 방침).
-  //   이유: 좋아요순 top 벤치마크를 5계정에 동시·동일 콘텐츠로 뿌려 "매일 각 계정 똑같은 쇼핑글" 발생.
-  //   대체: 수동 URL+상품명 흐름만 사용. 향후 "한 계정 발행 → 반응 좋으면 타 계정 확산"(성과 게이팅) 별도 구현 예정.
-  //   기존에 등록된 repeatable job 은 removeRepeatable 로 제거 필요 (scripts 참고).
-  // await shoppingPublishQueue.add('shopping-publish-daily', ...);
-  await shoppingPublishQueue
-    .removeRepeatable('shopping-publish-daily', { pattern: SHOPPING_PUBLISH_CRON, tz: 'Asia/Seoul' }, 'shopping-publish-daily')
-    .catch(() => {});
+  // ✅ 쇼핑 카드 매일 발행 (2026-11-05 사용자): 매일 09:00 전 계정 개별 처리.
+  //   SHOPPING_DEDUP_WINDOW_HOURS=44 로 계정당 격일 보장. reach-health 적격 판정은 orchestrator 내부.
+  await shoppingPublishQueue.add(
+    'shopping-publish-daily',
+    { triggeredBy: 'scheduler' },
+    { repeat: { pattern: SHOPPING_PUBLISH_CRON, tz: 'Asia/Seoul' }, jobId: 'shopping-publish-daily' },
+  );
 
   // Line B (상품 우선) 계정별 스태거 크론 — 각 계정 하루 1건, 서로 다른 시각.
   //   같은 상품 금지(크로스계정 DB dedup) · 동시 발행 금지(계정별 다른 slot).
@@ -350,10 +349,13 @@ export async function scheduleTrendJobs(): Promise<void> {
         'trend-search-daily',
         'trend-digest-daily(발굴 푸시)',
         'sharing-publish-daily',
-        'shopping-publish-daily',
         'naver-trend-collect-daily',
         'naver-daily-info-daily',
         'line-b-*',
+      ],
+      enabled: [
+        'shopping-publish-daily(격일 DEDUP 44h)',
+        'sharing-cards-evening(격일 DEDUP 44h)',
       ],
       accountMetricsCron: ACCOUNT_METRICS_CRON,
     },

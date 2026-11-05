@@ -19,9 +19,10 @@ import { ContentType, PostKind, PostState } from '@prisma/client';
  *   5) 사용자 승인 → 기존 publisher 발행
  */
 
-const PER_ACCOUNT_DAILY_MAX = 2; // 계정당 하루 최대 쇼핑 발행 (사용자 방침)
+const PER_ACCOUNT_DAILY_MAX = 1; // 계정당 하루 최대 쇼핑 카드 1건 (격일이므로 충분)
 const BENCHMARK_LOOKBACK_DAYS = 30; // 최근 30일 이내 수집된 벤치마크만 후보
 const DUPLICATE_LOOKBACK_DAYS = 14; // 같은 벤치마크 최근 14일 내 다른 계정 발행 여부
+const SHOPPING_DEDUP_WINDOW_HOURS = 44; // 계정당 격일 보장 (2026-11-05 사용자: 쇼핑도 격일)
 
 export interface ShoppingPublishInput {
   accountId: string;
@@ -51,6 +52,24 @@ export async function runShoppingForAccount(
   });
   if (!account.isActive) {
     return [{ status: 'failed', reason: 'account inactive' }];
+  }
+
+  // 계정별 격일 DEDUP (2026-11-05 사용자: 쇼핑도 격일)
+  const dedupSince = new Date(Date.now() - SHOPPING_DEDUP_WINDOW_HOURS * 60 * 60 * 1000);
+  const recentShopping = await prisma.post.findFirst({
+    where: {
+      accountId: account.id,
+      kind: PostKind.SHOPPING,
+      createdAt: { gte: dedupSince },
+      state: { notIn: [PostState.REJECTED, PostState.FAILED] },
+    },
+    select: { id: true, state: true, createdAt: true },
+  });
+  if (recentShopping) {
+    return [{
+      status: 'skipped_daily_cap',
+      reason: `최근 ${SHOPPING_DEDUP_WINDOW_HOURS}h 내 SHOPPING 있음 (${recentShopping.id.slice(-8)}, ${recentShopping.state})`,
+    }];
   }
 
   const maxNew = Math.min(input.maxNewPosts ?? PER_ACCOUNT_DAILY_MAX, PER_ACCOUNT_DAILY_MAX);
