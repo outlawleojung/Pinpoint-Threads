@@ -445,5 +445,24 @@ export async function handleApprovalCallback(action: Action, postId: string): Pr
     }
   }
 
-  return action === 'approve' ? '✅ 승인' + scheduleNote : '🗑 폐기 처리';
+  if (action === 'approve') {
+    return '✅ 승인' + scheduleNote;
+  }
+
+  // 스하리 폐기 → 같은 계정으로 자동 재생성 (2026-11-05 사용자 요청)
+  if (action === 'reject' && post.kind === PostKind.SHARING) {
+    try {
+      const { runSharingPipeline } = await import('../../pipeline-b/sharing-publisher/orchestrator.js');
+      const result = await runSharingPipeline({ accountId: post.accountId });
+      if (result.status === 'sent_for_approval') {
+        return `🗑 폐기 → 🔄 새 스하리 카드 발송 (${result.postId?.slice(-8)})`;
+      }
+      return `🗑 폐기 (재생성 skip: ${result.reason ?? 'DEDUP'})`;
+    } catch (err) {
+      logger.error({ postId, err }, 'sharing auto-regen after reject failed');
+      return `🗑 폐기 (재생성 실패: ${(err as Error).message})`;
+    }
+  }
+
+  return '🗑 폐기 처리';
 }

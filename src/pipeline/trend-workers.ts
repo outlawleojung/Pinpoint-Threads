@@ -51,7 +51,7 @@ const DISCOVERY_PUSH_LIMIT = 10;
 const SEARCH_CRON = '30 8 * * *'; // 매일 08:30 KST (다이제스트 이후)
 const SOURCE_WATCH_CRON = '20 8 * * *'; // 매일 08:20 KST (소재 계정 감시 → 일상 후보 카드 · 2026-10-12)
 const SHARING_CRON = '0 8 * * *';  // 매일 08:00 KST (Pipeline B 스하리 벤치마크 수집 · publish 1h 전)
-const SHARING_PUBLISH_CRON = '0 20 */2 * *'; // 격일 20:00 KST 스하리 카드(승인 시 다음 날 아침 발행) · 2026-11-01 격일 전환
+const SHARING_PUBLISH_CRON = '0 20 * * *'; // 매일 20:00 KST 스하리 카드 — 전 계정 개별 발행, DEDUP 44h로 계정당 격일 보장 (2026-11-05)
 const ACCOUNT_METRICS_CRON = '30 7 * * *'; // 매일 07:30 KST (계정 팔로워·나이 갱신 · publish 1.5h 전)
 const SHOPPING_PUBLISH_CRON = '0 9 * * *'; // 매일 09:00 KST (쇼핑 카피 생성 · 발행 slot 은 계정별 시차)
 const NAVER_DAILY_INFO_CRON = '0 9 * * *'; // 매일 09:00 KST (Pipeline D 정보글 1건 생성 + 관리자 알림)
@@ -304,12 +304,12 @@ export async function scheduleTrendJobs(): Promise<void> {
   await sharingPublishQueue
     .removeRepeatable('sharing-publish-daily', { pattern: '0 9 * * *', tz: 'Asia/Seoul' }, 'sharing-publish-daily')
     .catch(() => {});
-  // 이전 매일 크론 제거 (2026-11-01 격일 전환)
+  // 이전 격일 크론 제거 (2026-11-05 전 계정 개별 격일로 전환)
   await sharingPublishQueue
-    .removeRepeatable('sharing-cards-evening', { pattern: '0 20 * * *', tz: 'Asia/Seoul' }, 'sharing-cards-evening')
+    .removeRepeatable('sharing-cards-evening', { pattern: '0 20 */2 * *', tz: 'Asia/Seoul' }, 'sharing-cards-evening')
     .catch(() => {});
-  // ✅ 스하리 카드 격일 발행 (2026-11-01 사용자): 격일 20:00 계정별 카드 → 승인 시 다음 날 아침 08:00~09:30 발행.
-  //   연속 금지·첨부 2개·문구 ①② 는 runSharingPipeline 이 처리. 발행은 카드 승인 후에만.
+  // ✅ 스하리 카드 매일 발행 (2026-11-05 사용자): 매일 20:00 전 계정 개별 처리.
+  //   DEDUP_WINDOW_HOURS=44 로 계정당 격일 보장. 연속 금지·첨부 2개·문구 ①② 는 runSharingPipeline 처리.
   await sharingPublishQueue.add(
     'sharing-cards-evening',
     { triggeredBy: 'scheduler' },

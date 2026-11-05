@@ -151,25 +151,24 @@ export async function runSharingForAllAccounts(): Promise<SharingBatchSummary> {
 
   if (accounts.length === 0) return summary;
 
+  // 전 계정 개별 처리 (2026-11-05): DEDUP_WINDOW_HOURS=44 로 계정당 격일 보장.
+  //   eligible 계정은 카드 생성, 44h 내 스하리 있는 계정은 skip.
   const dayOfYearBase = Math.floor(Date.now() / 86_400_000);
-  const startIdx = dayOfYearBase % accounts.length;
 
-  for (let attempt = 0; attempt < accounts.length; attempt++) {
-    const idx = (startIdx + attempt) % accounts.length;
-    const acc = accounts[idx]!;
+  for (let i = 0; i < accounts.length; i++) {
+    const acc = accounts[i]!;
     try {
       const result = await runSharingPipeline({
         accountId: acc.id,
-        hookOffset: dayOfYearBase,
+        hookOffset: dayOfYearBase + i,
       });
       summary.perAccount.push({ handle: acc.handle, status: result.status, reason: result.reason });
       if (result.status === 'sent_for_approval') {
-        summary.sent = 1;
-        logger.info({ handle: acc.handle, dayRotation: idx }, '오늘 스하리 계정 선정');
-        break; // 1건 성공 → 종료
+        summary.sent += 1;
+        logger.info({ handle: acc.handle }, '스하리 카드 생성');
+      } else {
+        summary.skipped += 1;
       }
-      // skipped/failed → 다음 계정으로 폴백
-      summary.skipped += 1;
     } catch (err) {
       logger.error({ err, accountId: acc.id }, 'sharing pipeline crashed');
       summary.perAccount.push({ handle: acc.handle, status: 'failed', reason: (err as Error).message });
@@ -178,7 +177,7 @@ export async function runSharingForAllAccounts(): Promise<SharingBatchSummary> {
   }
 
   if (summary.sent === 0) {
-    logger.warn({ summary }, '오늘 스하리 발행 가능한 계정 없음');
+    logger.warn({ summary }, '오늘 스하리 발행 가능한 계정 없음 (전원 DEDUP 또는 실패)');
   }
 
   logger.info({ summary }, 'sharing batch done');

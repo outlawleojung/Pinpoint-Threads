@@ -1144,10 +1144,12 @@ bot.callbackQuery(/^(approve|regen-text|regen-product|reject):(.+)$/, async (ctx
     if (!keepButtons) {
       await ctx.editMessageReplyMarkup({ reply_markup: undefined }).catch(() => {});
     }
-    await ctx.reply(`처리됨: ${label}\nPost: \`${postId}\``, { parse_mode: 'Markdown' });
+    await ctx.reply(`${label}\n${postId.slice(-8)}`).catch((replyErr) => {
+      logger.error({ replyErr, label, postId }, 'callback reply failed');
+    });
   } catch (err) {
     logger.error({ err, action, postId }, 'callback handler failed');
-    await ctx.reply(`❌ 실패: ${(err as Error).message}\nPost: \`${postId}\``, { parse_mode: 'Markdown' }).catch(() => {});
+    await ctx.reply(`❌ 실패: ${(err as Error).message}`).catch(() => {});
   }
 });
 
