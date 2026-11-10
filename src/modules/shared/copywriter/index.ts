@@ -1154,6 +1154,8 @@ export async function generateCustomBody(
 **★★ 아래 "요청 방향"이 이 글의 핵심 지시다. 그 의도·각도대로 써라.** 소스(영상/캡션)는 맥락 참고용.
 - 요청 방향과 소스를 결합해 자연스러운 한 편으로. 방향이 우선, 소스는 사실 근거·소재.
 - **없는 사실 지어내기 금지** — 소스에 있는 것/일반 상식만. 원작자의 특정 정황(매장 방문·여행·국적·관계·구매경위) 재연 금지, 1인칭은 반응·의견만.
+- **★ 원본 표절 금지** — 소스 원문의 문장·표현·구조·키워드를 그대로 가져오지 마. 사실만 참고하고 완전히 새로운 문장으로 써라. 비슷한 구조로 단어만 바꾸는 것도 표절이다.
+- **★ "사고쳤다/일냈다" 패턴 절대 금지** — "OOO 사고쳤다", "OOO 또 사고쳤네", "OOO 일냈다" 같은 뻔한 광고 멘트 금지. 이런 패턴은 광고 티가 심하게 남.
 ${input.withReplyLead
       ? '- 이 글은 **고정댓글에 상품 링크**가 붙는다. 본문은 광고처럼 쓰지 말고 방향대로 흥미·공감·논쟁을 유도. 상품은 지금 링크로 살 수 있다("못 산다/들어오면 산다" 뉘앙스 금지).\n- **replyLead**: 고정댓글 첫 줄 — 광고 티 안 나게 링크(상품/딜)로 자연스럽게 이어주는 한 마디(15~50자, 이모지 최대 1개).'
       : '- 상품·링크 없음. 순수 본문만.'}
@@ -1170,7 +1172,7 @@ ${input.withReplyLead
     parts.push({ type: 'text', text: renderWinningStyle() });
     parts.push({ type: 'text', text: `요청 방향 (이 글의 핵심 지시):\n"""\n${input.direction.slice(0, 1000)}\n"""` });
     if (input.sourceText) {
-      parts.push({ type: 'text', text: `소스 원문 (맥락·사실 근거 · 직역 금지):\n"""\n${input.sourceText.slice(0, 800)}\n"""` });
+      parts.push({ type: 'text', text: `소스 원문 (맥락·사실 근거용 — ★★ 표현 재사용 절대 금지 ★★):\n"""\n${input.sourceText.slice(0, 800)}\n"""\n⛔ 위 원문의 문장·표현·구조·키워드를 그대로 쓰면 표절. 완전히 새로운 각도·표현·문장구조로 다시 써라. 원문의 핵심 사실만 참고하고 문구 자체는 0% 재사용.` });
     }
     if (avoid) parts.push({ type: 'text', text: `⛔ 방금 실패 사유 · 이번엔 반드시 회피: ${avoid}` });
     parts.push({ type: 'text', text: `JSON으로만 반환${input.withReplyLead ? ' ({body, replyLead})' : ' ({body})'}.` });

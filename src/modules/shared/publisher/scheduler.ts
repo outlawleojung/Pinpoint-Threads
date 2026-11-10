@@ -226,7 +226,7 @@ function fmtHm(d: Date): string {
 const KIND_WINDOW: Record<string, { start: [number, number]; end: [number, number] }> = {
   SHARING: { start: [8, 0], end: [10, 30] }, // 3계정 × 계정 간 30분~1h 시차가 들어가게 (10/15 sookck 다음 날로 밀림)
   DAILY: { start: [13, 0], end: [22, 30] },
-  SHOPPING: { start: [13, 0], end: [22, 30] },
+  SHOPPING: { start: [9, 0], end: [11, 30] },
 };
 const SEARCH_DAYS = 14;
 

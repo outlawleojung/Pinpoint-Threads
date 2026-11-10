@@ -281,12 +281,11 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
     logger.info({ postId: post.id, threadsPostId, handle: post.account.handle }, 'main post published');
 
     if (post.generatedReply) {
-      // 비디오 포함 게시글은 Meta 후단 처리가 이어지므로 reply 전 대기 필요.
-      // 이미지만이면 즉시 reply 가능.
       const hasVideo = (post.mediaUrls ?? []).some(
         (u: string) => /\.mp4(?:\?|$)/i.test(u) || u.includes('/video/upload/'),
       );
-      const replyDelayMs = hasVideo ? 30_000 : 1_000;
+      // Threads 내부 미디어 인덱싱 지연: 이미지도 5~15초 걸릴 수 있음 (실측 11% 실패율).
+      const replyDelayMs = hasVideo ? 30_000 : 5_000;
 
       // 재시도 로직: reply 실패 시 지수 백오프 (비디오 후단 처리 대기 · 최대 총 ~3분)
       // 비영상도 5회까지(이미지 4회 + 텍스트 1회): 이미지 컨테이너가 첫 시도에 "media not found"로
@@ -304,7 +303,8 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
       //   **마지막 몇 시도에서만** 텍스트로 폴백(리플 자체는 반드시 나가게).
       const imageMaxAttempt = replyImageUrl ? Math.min(maxAttempts - 1, 4) : 0;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        const wait = attempt === 1 ? replyDelayMs : replyDelayMs * attempt;
+        // 지수 백오프: 이미지 5s→10s→20s→40s→80s (총 ~155s), 비디오 30s→60s→… (총 ~6분)
+        const wait = attempt === 1 ? replyDelayMs : replyDelayMs * Math.pow(2, attempt - 2);
         const useImage = attempt <= imageMaxAttempt ? replyImageUrl : undefined;
         logger.info({ postId: post.id, attempt, waitMs: wait, hasVideo, withImage: Boolean(useImage) }, 'waiting before pinned reply');
         await new Promise((r) => setTimeout(r, wait));
