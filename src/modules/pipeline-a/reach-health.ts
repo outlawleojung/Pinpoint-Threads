@@ -111,12 +111,12 @@ export interface ShoppingEligibility {
 export const LINK_MIN_FOLLOWERS = 300;
 
 /**
- * 링크 글 비율 상한: 계정의 최근 글 LINK_RATIO_WINDOW 개(이번 글 포함) 중 링크 글은 1개까지.
- *   근거(2026-10-02 실측): 9월 이후 링크 비율 45%(pikkseetem)·46%(kle0) 계정이 도달 붕괴,
- *   33%·27%·0% 계정은 정상. 표본 작음(가설) — 사용자 결정으로 강제.
- *   = 직전 발행 (WINDOW-1)개에 링크 글(고정댓글 발행됨)이 하나라도 있으면 이번엔 링크 금지.
+ * 링크 글 비율 상한: 직전 (WINDOW-1)개 발행에 링크 글이 있으면 금지.
+ *   2026-11-13 5→2 축소: 사용자 케이던스(쇼핑 매일 오전 + 일상 매일 오후)에서
+ *   일상이 쇼핑 사이에 항상 끼어 있어 직전 1개만 체크하면 연속 링크 방지됨.
+ *   일상이 미발행되면 직전=쇼핑→차단 (안전장치).
  */
-export const LINK_RATIO_WINDOW = 5;
+export const LINK_RATIO_WINDOW = 2;
 
 export async function linkRatioBlock(accountId: string, excludePostId?: string): Promise<string | null> {
   const recent = await prisma.post.findMany({

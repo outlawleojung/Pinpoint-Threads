@@ -53,30 +53,62 @@ const ALL_AGES: AgeBucket[] = ['fresh_under_7d', 'young_under_30d', 'settled_1to
 //   우리 글은 "스하리 해줘/N명/반하리 갈게" 메타 얘기뿐이라 대부분 0~20뷰. → 훅 = 누구나 겪는 오늘의 한 순간.
 //   신상(자녀·직업·나이·구체 취미) X · 첨부(남의 영상)를 내 것처럼 말하기 X("우리 강아지" X).
 const HOOK_QUERIES: HookDef[] = [
-  // ★ 스하리는 아침 8~9시대 발행 → 그 시간에 맞는 순간만 (2026-10-13 사용자: 기상 직후 글은 6~7시에나 어울림).
-  // ★★ 2026-10-29: 훅 다양화 — 아침 루틴만 7개 → 카테고리 분산. 5계정 매일 돌려도 2주간 안 겹치게.
-  // ★★ 2026-11-01: 훅 = LLM이 거의 그대로 축약할 원문.
-  //   규칙: 혼자 읽어도 말이 되는 완결된 문장만. 맥락 필요한 건 금지.
-  //   시간대 특정 표현(퇴근/저녁/밤/새벽) 금지 — 아침 발행.
-  // — 일상 공감 (완결 문장)
+  // ★ 2026-11-13: 47개 훅 × 7카테고리. 5계정 격일 ≈ 2.5/일 → 19일 무겹침.
+  //   규칙: 완결 문장, 시간대 표현 금지(아침 발행), FORBIDDEN_PATTERNS 회피.
+  // — 음식·음료
   { label: '커피', query: '커피 한 잔 하고 하루 시작', ageOK: ALL_AGES },
-  { label: '할일', query: '오늘 할 일 좀 많다', ageOK: ALL_AGES },
   { label: '배고픔', query: '벌써 배고프다', ageOK: ALL_AGES },
-  { label: '집중', query: '오늘은 집중 좀 해야겠다', ageOK: ALL_AGES },
-  { label: '피곤', query: '피곤한데 힘내본다', ageOK: ALL_AGES },
-  // — 기분
+  { label: '라면', query: '라면 먹고 싶다', ageOK: ALL_AGES },
+  { label: '간식', query: '간식 먹고 싶은 타이밍', ageOK: ALL_AGES },
+  { label: '빵', query: '빵이 먹고 싶다', ageOK: ALL_AGES },
+  { label: '치킨', query: '치킨 생각난다', ageOK: ALL_AGES },
+  { label: '떡볶이', query: '떡볶이 먹고 싶다', ageOK: ALL_AGES },
+  { label: '또배고픔', query: '밥 먹었는데 또 배고프다', ageOK: ALL_AGES },
+  { label: '카페', query: '카페 가고 싶다', ageOK: ALL_AGES },
+  // — 기분·감정
   { label: '좋다', query: '오늘 기분 좋다', ageOK: ALL_AGES },
   { label: '힘내자', query: '다들 오늘도 힘내자', ageOK: ALL_AGES },
   { label: '여유', query: '여유로운 하루 보내자', ageOK: ALL_AGES },
   { label: '한숨', query: '한숨 한 번 쉬고 간다', ageOK: ALL_AGES },
-  // — 짧은 독백 (완결)
+  { label: '평화', query: '별일 없는 게 좋은 거다', ageOK: ALL_AGES },
+  { label: '설렘', query: '왠지 좋은 일 생길 것 같다', ageOK: ALL_AGES },
+  { label: '나른', query: '나른한 하루다', ageOK: ALL_AGES },
+  { label: '심심', query: '심심하다 누구 놀아줘', ageOK: ALL_AGES },
+  { label: '기분업', query: '괜히 기분이 좋아졌다', ageOK: ALL_AGES },
+  // — 독백·생각
   { label: '멍', query: '멍때리는 중', ageOK: ALL_AGES },
-  { label: '라면', query: '라면 먹고 싶다', ageOK: ALL_AGES },
-  { label: '간식', query: '간식 먹고 싶은 타이밍', ageOK: ALL_AGES },
-  { label: '음악', query: '노래 틀어놓고 멍때리는 중', ageOK: ALL_AGES },
-  { label: '산책', query: '산책이나 하고 싶다', ageOK: ALL_AGES },
-  { label: '하루', query: '하루가 빠르다', ageOK: ALL_AGES },
   { label: '뭐하지', query: '뭐 하지', ageOK: ALL_AGES },
+  { label: '쉬자', query: '아 잠깐만 쉬자', ageOK: ALL_AGES },
+  { label: '웃김', query: '갑자기 웃기다', ageOK: ALL_AGES },
+  { label: '깜빡', query: '아 맞다 뭔가 깜빡했다', ageOK: ALL_AGES },
+  { label: '고민', query: '고민이 많다', ageOK: ALL_AGES },
+  { label: '혼잣말', query: '혼자 중얼거리는 중', ageOK: ALL_AGES },
+  { label: '갑자기', query: '갑자기 생각나는 게 있다', ageOK: ALL_AGES },
+  { label: '아무생각', query: '아무 생각이 없다', ageOK: ALL_AGES },
+  // — 소소한 일상
+  { label: '산책', query: '산책이나 하고 싶다', ageOK: ALL_AGES },
+  { label: '음악', query: '노래 틀어놓고 멍때리는 중', ageOK: ALL_AGES },
+  { label: '하루', query: '하루가 빠르다', ageOK: ALL_AGES },
+  { label: '옷', query: '옷 뭐 입지', ageOK: ALL_AGES },
+  { label: '머리', query: '머리 감기 귀찮다', ageOK: ALL_AGES },
+  { label: '이어폰', query: '이어폰 어디 뒀지', ageOK: ALL_AGES },
+  { label: '청소', query: '청소 좀 해야 되는데', ageOK: ALL_AGES },
+  { label: '택배', query: '택배 왔나', ageOK: ALL_AGES },
+  { label: '충전', query: '폰 배터리 없다', ageOK: ALL_AGES },
+  { label: '가방', query: '가방에서 뭐 찾는 중', ageOK: ALL_AGES },
+  // — 의지·다짐
+  { label: '할일', query: '오늘 할 일 좀 많다', ageOK: ALL_AGES },
+  { label: '집중', query: '오늘은 집중 좀 해야겠다', ageOK: ALL_AGES },
+  { label: '피곤', query: '피곤한데 힘내본다', ageOK: ALL_AGES },
+  { label: '미루기', query: '미루지 말자 오늘만', ageOK: ALL_AGES },
+  { label: '부지런', query: '좀 부지런해져야지', ageOK: ALL_AGES },
+  { label: '정리', query: '정리 좀 해야 되는데', ageOK: ALL_AGES },
+  // — 공감·질문
+  { label: '나만', query: '나만 이런가', ageOK: ALL_AGES },
+  { label: '다들', query: '다들 뭐 하고 있어', ageOK: ALL_AGES },
+  { label: '점심뭐', query: '점심 뭐 먹지', ageOK: ALL_AGES },
+  { label: '추천', query: '뭐 재밌는 거 없나', ageOK: ALL_AGES },
+  { label: '소확행', query: '이런 게 소확행이지', ageOK: ALL_AGES },
 ];
 
 /** 본문 blacklist. 노출 시 재생성. */
@@ -178,23 +210,18 @@ const SYSTEM_PROMPT = `한국 Threads 스하리 글의 **앞부분(일상 한마
 
 ★★ 구조: [일상 한마디] + [스하리 꼬리]. 너는 **[일상 한마디]만** 써라. [스하리 꼬리]는 시스템이 붙인다.
 
-★★★ 핵심: 주어진 훅 문장을 **거의 그대로 쓰되 15자 안쪽으로 축약만** 해라.
-- 훅: "커피 한 잔 들어가야 사람 됨" → "커피 한 잔 하고 시작"
-- 훅: "심심한데 놀 사람 댓글 남겨봐" → "심심한데 놀 사람"
-- 훅: "점심 뭐 먹지 골라줘" → "점심 뭐 먹지"
-- 훅: "나만 이래? 다들 이런 거 공감돼?" → "나만 이런가"
-- 훅: "오늘은 진짜 할 일 다 끝내고 일찍 쉰다" → "오늘 할 일 다 끝낸다"
-- 훅: "갑자기 생각난 건데 별거 아닌데 웃김" → "갑자기 생각났는데 ㅋㅋ"
-- 훅: "스친들 고마워 덕분에 오늘도 즐겁다" → "오늘도 즐겁다"
+★★★ 핵심: 주어진 훅의 **감정·상황만 참고**해서 자연스러운 한마디를 20자 안쪽으로 써라.
+- 훅과 같은 감정이면 되고, 표현은 자유롭게 바꿔라.
+- 매번 다르게 — 직전 글 목록과 겹치지 않는 표현으로.
+- 스레드에서 혼잣말하듯 담백하게.
 
 ★ 절대 금지:
-1. 창작 금지 — 훅에 없는 내용을 지어내지 마라
-2. 밤/저녁/자기 전/퇴근 표현 금지 — 아침에 발행됨
-3. 스하리/반하리/맞팔/스친 단어 금지 (꼬리에서 붙는다)
-4. 불평·하소연 금지 ("왜 안 와" "실망" "도와줘")
-5. 숫자(팔로워 수·N명·N일차) 금지
-6. "시작이야" "처음이야" "입문" 등 신규 계정 주장 금지
-7. 반말, 담백하게. 오글거리면 안 됨.
+1. 밤/저녁/자기 전/퇴근 표현 금지 — 아침에 발행됨
+2. 스하리/반하리/맞팔/스친 단어 금지 (꼬리에서 붙는다)
+3. 불평·하소연 금지 ("왜 안 와" "실망" "도와줘")
+4. 숫자(팔로워 수·N명·N일차) 금지
+5. "시작이야" "처음이야" "입문" 등 신규 계정 주장 금지
+6. 반말, 담백하게. 오글거리면 안 됨.
 
 JSON만: { "body": "..." }`;
 
@@ -577,6 +604,14 @@ const SHARING_TAILS = [
   '스하리 남기면 바로 감',
   '소통하자 스하리',
   '스하리 하면 갈게',
+  '스하리 ㄱㄱ',
+  '스하리 남겨줘',
+  '반하리 바로 감',
+  '소통 좋아 스하리',
+  '스하리 놓고 가',
+  '한 번 남겨봐 스하리',
+  '가볍게 스하리',
+  '스하리 한 번만',
 ];
 
 function pickSharingTail(seed: number): string {
