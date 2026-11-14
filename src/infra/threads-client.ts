@@ -437,6 +437,16 @@ export class ThreadsClient {
     return out;
   }
 
+  async deletePost(accessToken: string, threadsPostId: string): Promise<void> {
+    const res = await request(`${GRAPH_BASE}/v1.0/${threadsPostId}?access_token=${accessToken}`, {
+      method: 'DELETE',
+    });
+    const json = (await res.body.json()) as any;
+    if (res.statusCode !== 200 && !json.success) {
+      throw new Error(`Threads delete failed: ${res.statusCode} ${JSON.stringify(json)}`);
+    }
+  }
+
   async reply(input: ThreadsReplyInput): Promise<ThreadsReplyResult> {
     // 이미지 첨부 시 IMAGE 컨테이너 · 없으면 TEXT
     // (Threads 는 reply 에 이미지가 붙으면 링크 프리뷰 OG 카드를 자동 억제.)

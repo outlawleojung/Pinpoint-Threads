@@ -330,16 +330,36 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
       if (lastErr) {
         const reason = String((lastErr as Error)?.message ?? lastErr).slice(0, 500);
         logger.error({ err: lastErr, postId: post.id, threadsPostId }, 'pinned reply failed after retries — main post is live but reply missing');
+
+        // 쇼핑 글: 고정댓글(딥링크+공정위 문구)이 없으면 발행 자체가 무의미 → 본문 삭제 + FAILED.
+        if (post.kind === 'SHOPPING') {
+          try {
+            await client.deletePost(accessToken, threadsPostId);
+            logger.info({ postId: post.id, threadsPostId }, '쇼핑 글 고정댓글 실패 → 본문 삭제 완료');
+          } catch (delErr) {
+            logger.error({ err: delErr, postId: post.id, threadsPostId }, '본문 삭제도 실패 — 수동 삭제 필요');
+          }
+          await prisma.post.update({
+            where: { id: post.id },
+            data: { state: 'FAILED', replyFailureReason: reason, threadsPostId: null, threadsReplyId: null },
+          }).catch(() => {});
+          await notifyAdmin(
+            `⛔ 쇼핑 글 고정댓글 실패 → 본문도 삭제함 (FAILED 처리).\n` +
+            `계정: ${post.account.handle}\nPost: ${post.id}\n사유: ${reason}\n` +
+            `→ 카드에서 다시 승인하면 재발행됩니다.`,
+          );
+          throw new PublisherError(`쇼핑 글 고정댓글 실패 → 본문 삭제 + FAILED`, 'API_ERROR', lastErr);
+        }
+
+        // 비쇼핑 글(일상·스하리): 고정댓글 없어도 본문은 유지 + 알림만.
         await prisma.post.update({
           where: { id: post.id },
           data: { replyFailureReason: reason },
         }).catch(() => {});
-        // 고정댓글엔 딥링크 + 공정위 필수 문구가 들어감 → 누락 시 법적·수익 문제.
-        // 조용히 PUBLISHED 로 넘기지 말고 관리자에게 즉시 알림 (수동 조치 유도).
         await notifyAdmin(
-          `⚠️ 본문은 발행됐으나 고정댓글 발행 실패 (딥링크·공정위 문구 누락).\n` +
+          `⚠️ 본문은 발행됐으나 고정댓글 발행 실패.\n` +
           `계정: ${post.account.handle}\nPost: ${post.id}\nThreads: ${threadsPostId}\n사유: ${reason}\n` +
-          `→ Threads 앱에서 고정댓글 수동 작성하거나 게시물 삭제 후 재발행하세요.`,
+          `→ Threads 앱에서 고정댓글 수동 작성하세요.`,
         );
       }
     }
