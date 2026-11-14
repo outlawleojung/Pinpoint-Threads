@@ -109,6 +109,8 @@ export interface ShoppingEligibility {
  * 300 미만은 링크 없이 일상글로 (사용자 결정 2026-09-30 · docs/00-overview/course-strategy.md §5).
  */
 export const LINK_MIN_FOLLOWERS = 300;
+// 팔로워 부족해도 사용자가 쇼핑 발행 명시한 계정 (2026-11-14)
+export const SHOPPING_OVERRIDE_HANDLES = new Set(['minyoung.jung']);
 
 /**
  * 링크 글 비율 상한: 직전 (WINDOW-1)개 발행에 링크 글이 있으면 금지.
@@ -135,7 +137,10 @@ export async function isShoppingEligible(
   accountId: string,
   followersCount: number | null | undefined,
 ): Promise<ShoppingEligibility> {
-  if ((followersCount ?? 0) < LINK_MIN_FOLLOWERS) {
+  // 오버라이드 계정 확인
+  const acc = await prisma.account.findUnique({ where: { id: accountId }, select: { handle: true } });
+  const overridden = acc ? SHOPPING_OVERRIDE_HANDLES.has(acc.handle) : false;
+  if (!overridden && (followersCount ?? 0) < LINK_MIN_FOLLOWERS) {
     return {
       ok: false,
       median: null,

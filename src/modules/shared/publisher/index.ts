@@ -185,12 +185,13 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
   //   강의 11개 공통 최강 금지 + 사용자 결정(2026-09-30). 계정 선택 단계(isShoppingEligible)에서도 막지만,
   //   수동 지정·재탕 등 어떤 경로로 들어와도 여기서 최종 차단한다.
   //   + 링크 비율 상한(최근 5개 중 1개 · 2026-10-02 링크 과다 계정 도달 붕괴): 넘으면 같은 방식으로 링크 생략.
-  const { LINK_MIN_FOLLOWERS, linkRatioBlock } = await import('../../pipeline-a/reach-health.js');
+  const { LINK_MIN_FOLLOWERS, linkRatioBlock, SHOPPING_OVERRIDE_HANDLES } = await import('../../pipeline-a/reach-health.js');
   const ratioBlock = post.kind === 'SHOPPING' ? await linkRatioBlock(post.accountId, post.id) : null;
+  const isOverride = SHOPPING_OVERRIDE_HANDLES.has(post.account.handle);
   const stripReason =
     post.kind !== 'SHOPPING'
       ? null
-      : (post.account.followersCount ?? 0) < LINK_MIN_FOLLOWERS
+      : !isOverride && (post.account.followersCount ?? 0) < LINK_MIN_FOLLOWERS
         ? `팔로워 ${post.account.followersCount ?? 0}명 < ${LINK_MIN_FOLLOWERS} → 링크 생략(일상글 강등)`
         : ratioBlock
           ? `${ratioBlock} → 링크 생략(일상글 강등)`
