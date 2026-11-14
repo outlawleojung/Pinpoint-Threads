@@ -287,21 +287,11 @@ export async function publish(input: PublishInput): Promise<PublishResult> {
       // Threads 내부 미디어 인덱싱 지연: 이미지도 5~15초 걸릴 수 있음 (실측 11% 실패율).
       const replyDelayMs = hasVideo ? 30_000 : 5_000;
 
-      // 재시도 로직: reply 실패 시 지수 백오프 (비디오 후단 처리 대기 · 최대 총 ~3분)
-      // 비영상도 5회까지(이미지 4회 + 텍스트 1회): 이미지 컨테이너가 첫 시도에 "media not found"로
-      //   실패했다 재시도에서 살아나는 일시 오류가 잦음(2026-09-21 실측 · 최초 발행 3회 전부 실패 사고). 여유를 준다.
-      const maxAttempts = hasVideo ? 6 : 5;
+      const maxAttempts = hasVideo ? 5 : 4;
       let lastErr: unknown = null;
-      // 답글에 이미지를 첨부하면 미디어 슬롯이 채워져 쿠팡 링크 자동 OG 프리뷰 카드가 억제된다.
-      //   (ZWS URL 마스킹은 실제로 안 먹히고 링크만 깨진다 — API 엔 프리뷰 끄는 파라미터 없음.)
-      //   쿠팡 파트너스 썸네일(ads-partners.coupang.com)은 Threads 가 못 가져와(WEBPAGE_CURL_FAILED) 리플이 통째로 실패하므로,
-      //   Threads 가 항상 fetch 가능한 우리 Cloudinary 미디어 프레임을 우선 사용한다.
-      //   그래도 실패하면 텍스트 전용으로 폴백(이 경우에만 프리뷰가 뜰 수 있음 · 드묾).
       const replyImageUrl: string | undefined = deriveReplyImage(post);
-      // ★ 이미지를 최대한 유지한다(이미지=프리뷰 억제). 한 번 실패했다고 바로 텍스트로 떨어뜨리면
-      //   일시적 오류에도 영구 텍스트 폴백 → OG 프리뷰가 뜬다(실측 MUJI 사고). 이미지로 여러 번 재시도하고,
-      //   **마지막 몇 시도에서만** 텍스트로 폴백(리플 자체는 반드시 나가게).
-      const imageMaxAttempt = replyImageUrl ? Math.min(maxAttempts - 1, 4) : 0;
+      // 이미지 1번 시도 → 실패하면 바로 텍스트 전용으로 전환. 댓글 자체(딥링크+공정위)가 나가는 게 최우선.
+      const imageMaxAttempt = replyImageUrl ? 1 : 0;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         // 지수 백오프: 이미지 5s→10s→20s→40s→80s (총 ~155s), 비디오 30s→60s→… (총 ~6분)
         const wait = attempt === 1 ? replyDelayMs : replyDelayMs * Math.pow(2, attempt - 2);

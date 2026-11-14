@@ -410,16 +410,40 @@ function extractJson(raw: string): unknown {
  */
 export const REPLY_LINK_REPEAT = 3;
 
-export function buildReply(deeplinkUrl: string | undefined): string {
+export function buildReply(deeplinkUrl: string | undefined, replyHook?: string): string {
   if (!deeplinkUrl) {
     return LEGAL_DISCLAIMER;
   }
+  const hook = replyHook?.trim() || '';
   return [
-    '정보 물어보시는 분들 많아서 링크 남겨요 🙌',
+    `[광고] ${hook}`,
     ...Array(REPLY_LINK_REPEAT).fill(deeplinkUrl),
     '',
     LEGAL_DISCLAIMER,
   ].join('\n');
+}
+
+async function generateReplyHook(productName?: string, productCategory?: string): Promise<string> {
+  try {
+    const res = await llm().complete({
+      tier: 'fast',
+      system: `너는 한국 Threads 쇼핑 고정댓글의 첫 줄을 쓴다.
+"[광고]" 뒤에 붙을 툭 던지는 한마디만 생성해.
+- 15자 이내
+- 상품 외형·기능·모델명·색감 묘사 절대 금지
+- "링크 남겨요", "정보 드릴게", "여기서 샀어" 같은 광고 느낌 금지
+- "사고쳤다", "일냈다" 패턴 금지
+- 그냥 자연스러운 감정·반응 한마디 (예: "요즘 이것만 신는 중", "이거 진짜임", "자꾸 생각남")
+- 텍스트만 출력, 따옴표·이모지 없이`,
+      userParts: [{ type: 'text', text: `상품: ${productName ?? '쇼핑 상품'}${productCategory ? ` (${productCategory})` : ''}\n한마디:` }],
+      maxOutputTokens: 30,
+      thinking: 'disabled',
+    });
+    return res.text.replace(/^["']|["']$/g, '').trim().slice(0, 20);
+  } catch (err) {
+    logger.warn({ err }, 'replyHook 생성 실패 → 빈 훅');
+    return '';
+  }
 }
 
 export async function generateCopy(input: CopywriteInput): Promise<CopywriteResult> {
@@ -486,7 +510,8 @@ export async function generateCopy(input: CopywriteInput): Promise<CopywriteResu
     body = await generateBody(groundedInput, attempt + 10, style.reason, sink);
   }
 
-  const reply = buildReply(input.deeplinkUrl);
+  const replyHook = input.deeplinkUrl ? await generateReplyHook(input.productName, input.productCategory) : undefined;
+  const reply = buildReply(input.deeplinkUrl, replyHook);
   const result: CopywriteResult = { body, reply, sourceBrief, warnings: warnings.length ? warnings : undefined, rationale: sink.rationale };
   logger.debug({ result, factCheck, lastReason }, 'generateCopy');
   return result;
