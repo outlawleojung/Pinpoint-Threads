@@ -29,9 +29,12 @@ export interface SharingRunResult {
 }
 
 /**
- * 최근 N시간 이내에 같은 계정 SHARING 포스트가 있으면 스킵 (격일 발행 · 2026-11-01).
+ * 스하리 DEDUP 윈도우 (시간).
+ * 팔로워 부스팅 계정(hanseoa.pick, kle0_lee)은 매일, 나머지는 격일.
  */
-const DEDUP_WINDOW_HOURS = 44;
+const DEDUP_WINDOW_DEFAULT = 44;
+const DEDUP_WINDOW_DAILY = 20;
+const DAILY_SHARING_HANDLES = new Set(['hanseoa.pick', 'kle0_lee']);
 
 export async function runSharingPipeline(input: SharingRunInput): Promise<SharingRunResult> {
   const acc = await prisma.account.findUniqueOrThrow({
@@ -42,8 +45,8 @@ export async function runSharingPipeline(input: SharingRunInput): Promise<Sharin
     return { status: 'skipped_recent', reason: 'account inactive' };
   }
 
-  // dedup: 24h 내 SHARING Post 있으면 skip
-  const since = new Date(Date.now() - DEDUP_WINDOW_HOURS * 60 * 60 * 1000);
+  const dedupHours = DAILY_SHARING_HANDLES.has(acc.handle) ? DEDUP_WINDOW_DAILY : DEDUP_WINDOW_DEFAULT;
+  const since = new Date(Date.now() - dedupHours * 60 * 60 * 1000);
   const recent = await prisma.post.findFirst({
     where: {
       accountId: acc.id,
@@ -56,7 +59,7 @@ export async function runSharingPipeline(input: SharingRunInput): Promise<Sharin
   if (recent) {
     return {
       status: 'skipped_recent',
-      reason: `최근 ${DEDUP_WINDOW_HOURS}h 내 SHARING post 있음 (postId=${recent.id}, state=${recent.state})`,
+      reason: `최근 ${dedupHours}h 내 SHARING post 있음 (postId=${recent.id}, state=${recent.state})`,
     };
   }
 
