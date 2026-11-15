@@ -462,6 +462,7 @@ export class ThreadsClient {
           text: input.text,
           replyToId: input.parentId,
         });
+    await this.waitForContainerReady(input.accessToken, containerId);
     const publishedId = await this.publishContainer(input.accessToken, containerId);
     return { threadsReplyId: publishedId };
   }
