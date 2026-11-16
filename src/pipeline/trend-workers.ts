@@ -180,6 +180,12 @@ export function startTrendWorkers(): Worker[] {
       async (job) => {
         logger.info({ jobId: job.id }, 'account-metrics-sync start');
         const results = await syncAllAccountMetrics();
+
+        // 토큰 만료 체크 + 자동 갱신 + 텔레그램 알림
+        await checkAndRefreshTokens().catch((err) =>
+          logger.error({ err }, 'token-check failed'),
+        );
+
         logger.info({ jobId: job.id, results }, 'account-metrics-sync done');
         return { results };
       },
@@ -395,6 +401,54 @@ export async function scheduleTrendJobs(): Promise<void> {
   await scanOverdueApproved();
   setInterval(scanOverdueApproved, 30 * 60 * 1000);
   logger.info('overdue-approved-scan: 즉시 1회 + 30분 간격 활성');
+}
+
+const TOKEN_WARN_DAYS = 7;
+
+async function checkAndRefreshTokens(): Promise<void> {
+  const { refreshAccountToken } = await import(
+    '../modules/shared/publisher/oauth/token-service.js'
+  );
+  const accounts = await prisma.account.findMany({
+    where: { isActive: true },
+    select: { id: true, handle: true, tokenExpiresAt: true },
+  });
+
+  const now = Date.now();
+  const alerts: string[] = [];
+
+  for (const acc of accounts) {
+    if (!acc.tokenExpiresAt) {
+      alerts.push(`❌ ${acc.handle} — 토큰 없음`);
+      continue;
+    }
+
+    const daysLeft = Math.round(
+      (acc.tokenExpiresAt.getTime() - now) / 86_400_000,
+    );
+
+    if (daysLeft <= 0) {
+      alerts.push(`🚨 ${acc.handle} — 토큰 만료됨! OAuth 재인증 필요`);
+    } else if (daysLeft <= TOKEN_WARN_DAYS) {
+      // 자동 갱신 시도
+      try {
+        const result = await refreshAccountToken(acc.id);
+        const newDays = Math.round(
+          (result.expiresAt.getTime() - now) / 86_400_000,
+        );
+        alerts.push(`✅ ${acc.handle} — 토큰 자동 갱신 완료 (${newDays}일)`);
+      } catch {
+        alerts.push(
+          `⚠️ ${acc.handle} — 토큰 ${daysLeft}일 남음, 자동 갱신 실패! OAuth 재인증 필요`,
+        );
+      }
+    }
+  }
+
+  if (alerts.length > 0) {
+    await sendDigestMessage(`🔑 토큰 상태 알림\n\n${alerts.join('\n')}`);
+    logger.info({ alerts }, 'token-check alerts sent');
+  }
 }
 
 /**

@@ -758,21 +758,25 @@ bot.on('message:text', async (ctx, next) => {
     return;
   }
 
-  // 방식 0: "일상 {URL}" 태그 → Pipeline C 일상글 (쇼핑과 명시적 구분 · 사용자 방침)
-  //   주의: \b 는 한글에 안 먹음 → "일상" 뒤 공백/콜론/끝 으로 판정 (단, "일상복" 같은 단어는 제외)
-  if (/^\s*일상(?=[\s:：]|$)/.test(text)) {
+  // 방식 0: "일상 {URL}" 또는 "{URL} | 일상" 태그 → Pipeline C 일상글 (쇼핑과 명시적 구분 · 사용자 방침)
+  //   주의: \b 는 한글에 안 먹음 → "일상" 앞뒤 공백/콜론/구분자/끝 으로 판정 (단, "일상복" 같은 단어는 제외)
+  //   2026-11-16: "URL | 일상" (URL 먼저, 뒤에 태그) 패턴도 인식 — 사용자가 자주 쓰는 순서.
+  const isDailyTag = /^\s*일상(?=[\s:：|]|$)/.test(text) || /[|\s]일상\s*$/.test(text);
+  if (isDailyTag) {
     const dailyUrl = urls[0];
     if (!dailyUrl) {
       await ctx.reply('⚠️ 일상글로 만들 URL이 없어요.\n예: 일상 https://www.threads.net/... | 영상 내용 한 줄 설명');
       return;
     }
-    // "일상 {URL} | {설명}" 또는 "일상 {URL} {설명}" — URL·태그·비디오플래그 뺀 나머지 = 영상 내용 설명.
+    // "일상 {URL} | {설명}" 또는 "{URL} | 일상" — URL·태그·비디오플래그 뺀 나머지 = 영상 내용 설명.
     //   무캡션·반응만 있는 영상은 AI가 내용을 모르므로, 사용자가 준 이 설명을 내용 기준으로 씀.
     const desc = stripVideoFlag(
       text
         .replace(/^\s*일상[\s:：]*/, '')
+        .replace(/[\s|]*일상\s*$/, '')
         .replace(/https?:\/\/\S+/g, '')
         .replace(/^\s*\|\s*/, '')
+        .replace(/\|\s*$/, '')
         .trim(),
     ).trim();
     await runDailyFromUrl(ctx, dailyUrl, detectVideoFlag(text), desc.length >= 2 ? desc : undefined);
