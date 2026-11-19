@@ -160,6 +160,11 @@ const FORBIDDEN_PATTERNS: Array<{ re: RegExp; label: string }> = [
   // 불평·하소연 — 프롬프트로 안 막혀서 하드 차단 (2026-11-01)
   { re: /안\s*오(네|는데|냐|잖|지)|왜\s*(안|못)\s*(와|오|해|줘)|실망|서운|섭섭|허무/, label: '불평-하소연' },
   { re: /도와줘|도와\s*주세요|제발|부탁/, label: '불평-구걸' },
+  // 격언·교훈조 — 매일 뻔한 "미루면 후회" "게으름은 빚" 반복 차단 (2026-11-19)
+  { re: /(은|는)\s*(빚|독|적|병|약|힘|돈)(?:이다|처럼|같)/, label: '격언조-은X이다' },
+  { re: /후회(한다|할|하게|함)/, label: '격언조-후회한다' },
+  { re: /가둔다|무거워(진다|짐)|쌓인다|늦는다|멀어진다/, label: '격언조-교훈동사' },
+  { re: /~?(해야지|해야겠다|해야 되는데|해야만|안 하면)/, label: '격언조-다짐' },
 ];
 
 const BodyResultSchema = z.object({
@@ -210,10 +215,12 @@ const SYSTEM_PROMPT = `한국 Threads 스하리 글의 **앞부분(일상 한마
 
 ★★ 구조: [일상 한마디] + [스하리 꼬리]. 너는 **[일상 한마디]만** 써라. [스하리 꼬리]는 시스템이 붙인다.
 
-★★★ 핵심: 주어진 훅의 **감정·상황만 참고**해서 자연스러운 한마디를 20자 안쪽으로 써라.
-- 훅과 같은 감정이면 되고, 표현은 자유롭게 바꿔라.
-- 매번 다르게 — 직전 글 목록과 겹치지 않는 표현으로.
-- 스레드에서 혼잣말하듯 담백하게.
+★★★ 핵심:
+- 훅의 **구체적 상황**을 살려서 감각적인 한마디를 써라 (15~35자).
+- **구체적 디테일**이 있어야 한다: "배고프다"(X) → "떡볶이에 치즈 올리고 싶다"(O), "심심하다"(X) → "폰 잠금화면만 열 번째 보는 중"(O)
+- 격언·교훈조 절대 금지 ("게으름은 빚이다" "미루면 무거워진다" 같은 거 쓰면 안 됨)
+- 혼잣말, 머릿속 생각, 지금 이 순간 느낌. 스레드에 툭 던지듯.
+- 매번 완전히 다른 표현으로. 직전 글 목록과 구조·단어 겹치면 안 됨.
 
 ★ 절대 금지:
 1. 밤/저녁/자기 전/퇴근 표현 금지 — 아침에 발행됨
@@ -221,7 +228,8 @@ const SYSTEM_PROMPT = `한국 Threads 스하리 글의 **앞부분(일상 한마
 3. 불평·하소연 금지 ("왜 안 와" "실망" "도와줘")
 4. 숫자(팔로워 수·N명·N일차) 금지
 5. "시작이야" "처음이야" "입문" 등 신규 계정 주장 금지
-6. 반말, 담백하게. 오글거리면 안 됨.
+6. 격언·교훈·다짐조 금지 ("~은 ~이다" "~하면 후회한다" "~해야지")
+7. 반말, 담백하게. 오글거리면 안 됨.
 
 JSON만: { "body": "..." }`;
 
@@ -272,9 +280,10 @@ async function generateOne(
   const toneHint = extractSharingToneHint(context.personaPrompt);
   const hookGuide = `훅 방향: "${hook.query}"`;
   const userPrompt = [
-    `== 아래 훅 방향으로 일상 한마디를 20자 안쪽으로 만들어라 ==\n${hookGuide}`,
+    `== 아래 훅 방향으로 감각적인 일상 한마디를 만들어라 (15~35자) ==\n${hookGuide}`,
     `계정 톤: ${toneHint}`,
-    ...(recentBodies.length > 0 ? ['최근 우리 글(반복 금지):', ...recentBodies.slice(0, 5).map((b) => `- ${b.replace(/\n/g, ' ').slice(0, 40)}`)] : []),
+    `★ "~은 ~이다" "~하면 후회한다" 격언체 절대 금지. 지금 이 순간의 감각·행동을 묘사해라.`,
+    ...(recentBodies.length > 0 ? ['최근 우리 글(구조·단어 겹침 금지):', ...recentBodies.slice(0, 8).map((b) => `- ${b.replace(/\n/g, ' ').slice(0, 50)}`)] : []),
     `JSON만.`,
   ].join('\n');
 
@@ -341,7 +350,7 @@ async function generateOne(
       for (const g of A) if (B.has(g)) n++;
       return n / Math.min(A.size, B.size);
     };
-    const near = recentBodies.find((r) => sim(opener, r) >= 0.65);
+    const near = recentBodies.find((r) => sim(opener, r) >= 0.5);
     if (near) throw new SharingBlacklistError('최근 우리 스하리와 비슷', opener, false);
   }
 
@@ -421,8 +430,8 @@ export async function generateSharingCopy(
 
   const context = await getAccountContext(input.accountId);
 
-  // 최근 7일 스하리 본문 (전 계정) → 반복 회피용. 같은 오프너·구조 재생성 방지.
-  const recentBodies = await loadRecentSharingBodies(20);
+  // 최근 14일 스하리 본문 (전 계정) → 반복 회피용. 같은 오프너·구조 재생성 방지.
+  const recentBodies = await loadRecentSharingBodies(40);
 
   // 성과 피드백: winner 구조 요인 + loser 오프너 회피 (유닛② copy-learning)
   const learnings = await getSharingLearnings();
@@ -564,7 +573,7 @@ async function loadTrendingSharingBenchmarks(days: number, poolSize: number): Pr
 /** 최근 7일 스하리 본문 (전 계정 · 리젝/실패 제외) — 반복 회피용. */
 async function loadRecentSharingBodies(limit: number): Promise<string[]> {
   try {
-    const since = new Date(Date.now() - 7 * 864e5);
+    const since = new Date(Date.now() - 14 * 864e5);
     const posts = await prisma.post.findMany({
       where: {
         kind: PostKind.SHARING,
@@ -614,8 +623,8 @@ const SHARING_TAILS = [
   '스하리 한 번만',
 ];
 
-function pickSharingTail(seed: number): string {
-  return SHARING_TAILS[((seed % SHARING_TAILS.length) + SHARING_TAILS.length) % SHARING_TAILS.length]!;
+function pickSharingTail(_seed?: number): string {
+  return SHARING_TAILS[Math.floor(Math.random() * SHARING_TAILS.length)]!;
 }
 
 /**

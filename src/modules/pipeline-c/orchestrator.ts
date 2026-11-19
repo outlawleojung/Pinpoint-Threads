@@ -146,18 +146,15 @@ export async function runPipelineC(input: RunPipelineCInput): Promise<PipelineCO
     //   지어내면 매번 뜻이 틀린다(예: 고양이+개 친함 → "신종 동물 소름"). 프레임 추측 금지 → 설명 요청.
     //   (사진은 정지화면이 곧 내용이라 프레임 허용.)
     const hasVideoMedia = publicUrls.some((u) => isVideoUrl(u)) || hasCoverFrame;
-    if (!desc && !rawText && hasVideoMedia) {
-      return await finishFailed(
-        post.id,
-        'caption',
-        '원본 캡션을 못 읽었어요. 영상은 화면만으론 내용을 알 수 없어 지어내면 뉘앙스가 틀립니다. "일상 {URL} | 영상 내용 한 줄 설명" 으로 다시 보내주세요.',
-      );
-    }
+    // ★ 2026-11-19: 영상+캡션 없어도 프레임으로 시도 (실패보다 나음).
+    //   단, 카드에 ⚠️ 경고 붙여서 사용자가 뉘앙스 확인 후 승인.
+    const captionMissing = !desc && !rawText && hasVideoMedia;
     // 사용자가 준 영상 설명이 있으면 → mediaDescription 으로 넘겨 "반응" 모드 (설명 복붙 X · 그 상황에 대한 반응).
     //   설명이 있으면 캡션·프레임 이미지는 안 넘긴다(엉뚱한 해석·복붙 방지).
-    const imageForCopy = (desc || rawText) ? undefined : publicUrls.find((u) => !isVideoUrl(u));
+    const imageForCopy = (desc || rawText) && !captionMissing ? undefined : publicUrls.find((u) => !isVideoUrl(u));
     let rationale: unknown;
     const copyWarnings: string[] = [];
+    if (captionMissing) copyWarnings.push('⚠️ 원본 캡션 없음 — 프레임만 보고 추측한 카피입니다. 뉘앙스 확인 후 승인해주세요.');
     const body = input.bodyOverride !== undefined ? input.bodyOverride : await generateDailyBody({
       personaPrompt: account.personaPrompt,
       accountSeed: account.id,
