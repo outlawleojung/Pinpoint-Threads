@@ -216,11 +216,30 @@ const SYSTEM_PROMPT = `한국 Threads 스하리 글의 **앞부분(일상 한마
 ★★ 구조: [일상 한마디] + [스하리 꼬리]. 너는 **[일상 한마디]만** 써라. [스하리 꼬리]는 시스템이 붙인다.
 
 ★★★ 핵심:
-- 훅의 **구체적 상황**을 살려서 감각적인 한마디를 써라 (15~35자).
-- **구체적 디테일**이 있어야 한다: "배고프다"(X) → "떡볶이에 치즈 올리고 싶다"(O), "심심하다"(X) → "폰 잠금화면만 열 번째 보는 중"(O)
-- 격언·교훈조 절대 금지 ("게으름은 빚이다" "미루면 무거워진다" 같은 거 쓰면 안 됨)
-- 혼잣말, 머릿속 생각, 지금 이 순간 느낌. 스레드에 툭 던지듯.
-- 매번 완전히 다른 표현으로. 직전 글 목록과 구조·단어 겹치면 안 됨.
+- 훅 방향을 **재료로만** 써라. 훅 문장을 그대로 다듬지 말고, 그 상황에서 떠오르는 **전혀 다른 구체적 장면**을 만들어라.
+- 15~35자. 혼잣말, 지금 이 순간 느낌. 스레드에 툭 던지듯.
+- 매번 **완전히 다른 소재·단어·구조**로. 직전 글 목록과 겹치면 안 됨.
+
+★ 좋은 예시 (이런 톤·구체성으로):
+- "떡볶이에 치즈 올리고 싶다"
+- "양말 한 짝이 세탁기 속에서 실종됐다"
+- "냉장고 열었다 닫았다를 세 번째 반복 중"
+- "이어폰 왼쪽만 소리가 작아진 게 은근 스트레스"
+- "장바구니에 넣고 한 달째 결제 안 누르는 나"
+- "베개 뒤집으면 시원한 면이 나오는 그 쾌감"
+- "아이스 아메리카노 얼음 다 녹기 전에 마셔야 하는데"
+- "샤워하고 머리 안 말리고 소파에 누운 죄책감"
+- "지하철에서 내릴 역인데 노래가 딱 좋은 부분"
+- "편의점 삼각김밥 두 개 중에 뭘 고를지 진지하게 고민 중"
+- "택배 올 줄 알고 초인종 소리에 벌떡 일어났는데 아니었음"
+- "유튜브 쇼츠 한 개만 보려다 30분 지남"
+
+★ 나쁜 예시 (이런 거 쓰면 안 됨):
+- "커피 한 모금에 눈이 떠진다" ← 훅을 그대로 다듬기만 한 것
+- "게으름은 빚이다" ← 격언
+- "오늘도 힘내보자" ← 뻔한 다짐
+- "폰 배터리가 없다" ← 훅 그대로
+- "심심하다" ← 구체성 없음
 
 ★ 절대 금지:
 1. 밤/저녁/자기 전/퇴근 표현 금지 — 아침에 발행됨
@@ -230,6 +249,7 @@ const SYSTEM_PROMPT = `한국 Threads 스하리 글의 **앞부분(일상 한마
 5. "시작이야" "처음이야" "입문" 등 신규 계정 주장 금지
 6. 격언·교훈·다짐조 금지 ("~은 ~이다" "~하면 후회한다" "~해야지")
 7. 반말, 담백하게. 오글거리면 안 됨.
+8. 훅 쿼리를 그대로 옮기지 마. 훅은 방향일 뿐. 네가 새 장면을 만들어.
 
 JSON만: { "body": "..." }`;
 
@@ -275,15 +295,21 @@ async function generateOne(
   //   새 해시태그(스레드소통·스레드일상 등)로 다양한 벤치마크가 쌓일 때까지
   //   벤치마크 OFF → 훅 쿼리만으로 순수 일상 한마디 생성.
   //   TODO: 풀에 daily_moment/question/humor/participation 패턴이 30%+ 되면 다시 활성화
-  // ★ 벤치마크 OFF (위 주석 참조)
-  const cleanedBenchmark: string | null = null;
+  // ★ 벤치마크 OFF (위 주석 참조) — few-shot 예시로 대체 (시스템 프롬프트에 하드코딩)
   const toneHint = extractSharingToneHint(context.personaPrompt);
-  const hookGuide = `훅 방향: "${hook.query}"`;
+  // 훅은 "재료"일 뿐. 같은 훅이라도 계정·variant마다 완전히 다른 장면이 나오도록 랜덤 소재 힌트 추가.
+  const SCENE_SEEDS = [
+    '집', '편의점', '버스', '카페', '책상', '침대', '주방', '거울', '엘리베이터', '마트',
+    '소파', '화장실', '지하철', '공원', '사무실', '주차장', '옥상', '계단', '세탁기', '냉장고',
+  ];
+  const sceneSeed = SCENE_SEEDS[(variantIndex * 7 + (context.followersCount % SCENE_SEEDS.length)) % SCENE_SEEDS.length];
   const userPrompt = [
-    `== 아래 훅 방향으로 감각적인 일상 한마디를 만들어라 (15~35자) ==\n${hookGuide}`,
+    `== 감각적인 일상 한마디를 만들어라 (15~35자) ==`,
+    `힌트 주제: "${hook.query}"`,
+    `장소/소재 힌트: ${sceneSeed} (참고만 해. 꼭 이 장소일 필요 없음)`,
     `계정 톤: ${toneHint}`,
-    `★ "~은 ~이다" "~하면 후회한다" 격언체 절대 금지. 지금 이 순간의 감각·행동을 묘사해라.`,
-    ...(recentBodies.length > 0 ? ['최근 우리 글(구조·단어 겹침 금지):', ...recentBodies.slice(0, 8).map((b) => `- ${b.replace(/\n/g, ' ').slice(0, 50)}`)] : []),
+    `★ 힌트를 그대로 다듬지 마. 그 주제에서 연상되는 전혀 다른 구체적 장면을 만들어.`,
+    ...(recentBodies.length > 0 ? ['최근 우리 글(구조·단어·장면 겹침 금지):', ...recentBodies.slice(0, 10).map((b) => `- ${b.replace(/\n/g, ' ').slice(0, 50)}`)] : []),
     `JSON만.`,
   ].join('\n');
 
@@ -293,7 +319,7 @@ async function generateOne(
     // slice() 로 반쪽 잘린 이모지(lone surrogate) 제거 → Anthropic 'no low surrogate' 요청오류 방지
     userParts: [{ type: 'text', text: sanitizeForLlm(userPrompt) }],
     maxOutputTokens: 700,
-    temperature: 0.9 + variantIndex * 0.03,
+    temperature: 1.0,
     jsonMode: true,
     jsonSchema: {
       type: 'object',
@@ -352,6 +378,18 @@ async function generateOne(
     };
     const near = recentBodies.find((r) => sim(opener, r) >= 0.5);
     if (near) throw new SharingBlacklistError('최근 우리 스하리와 비슷', opener, false);
+    // 핵심 명사 겹침 검사: 2글자+ 한글 명사를 뽑아 최근 글과 2개 이상 겹치면 재생성
+    const nouns = (t: string) => [...t.matchAll(/[가-힣]{2,}/g)].map(m => m[0]).filter(w => w.length >= 2);
+    const openerNouns = new Set(nouns(opener));
+    if (openerNouns.size >= 2) {
+      const dup = recentBodies.find((r) => {
+        const rn = nouns(r.split('\n')[0] ?? r);
+        let overlap = 0;
+        for (const w of rn) if (openerNouns.has(w)) overlap++;
+        return overlap >= 2;
+      });
+      if (dup) throw new SharingBlacklistError('핵심 단어 겹침', opener, true);
+    }
   }
 
   // 계정 나이 주장 금지
