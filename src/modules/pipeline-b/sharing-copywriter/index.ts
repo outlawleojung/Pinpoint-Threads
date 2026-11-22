@@ -48,98 +48,70 @@ export interface SharingCopyResult {
 // 오프너 풀 (OPENER_POOL)에서 직접 뽑고 스하리 꼬리만 붙인다.
 // LLM 비용 0, 할루시네이션 0, 검증된 패턴만 사용.
 
-const OPENER_POOL: string[] = [
-  // — 음식 (벤치마크 검증: "벌써 배고프네" 323뷰)
-  '벌써 배고프네',
-  '아 라면 먹고 싶다',
-  '간식 타이밍인데',
-  '빵 먹고 싶다 진짜',
-  '치킨 생각나네',
-  '떡볶이 땡긴다',
-  '밥 먹었는데 또 배고프다',
-  '카페 가고 싶다',
-  '아이스크림 먹고 싶네',
-  '국물 땡기는 날이다',
-  '커피 한 잔 하자',
-  '뭐 먹지',
-  // — 기분 (벤치마크 검증: "한숨 한 번 쉬고 간다" 440뷰)
-  '한숨 한 번 쉬고 간다',
-  '오늘 기분 좋다',
-  '다들 오늘도 힘내자',
-  '여유로운 하루 보내자',
-  '별일 없는 게 좋은 거다',
-  '왠지 좋은 일 생길 것 같다',
-  '나른하다',
-  '심심한데',
-  '괜히 기분이 좋아졌다',
-  '오늘 되게 평화롭네',
-  '좋은 하루 보내는 중',
-  // — 독백 (벤치마크 검증: "오늘은 진짜 집중 모드 켤게" 310뷰)
-  '멍때리는 중',
-  '뭐 하지',
-  '아 잠깐만 쉬자',
-  '갑자기 웃기다',
-  '아 맞다 뭔가 깜빡했다',
-  '혼자 중얼거리는 중',
-  '아무 생각이 없다',
-  '갑자기 생각나는 게 있다',
-  '할 거 많은데 안 하는 중',
-  '아 집중이 안 된다',
-  // — 소소한 일상
-  '산책이나 하고 싶다',
-  '노래 틀어놓고 멍때리는 중',
-  '하루가 빠르다',
-  '옷 뭐 입지',
-  '청소 좀 해야 되는데',
-  '폰 배터리 없다',
-  '샤워하고 싶다',
-  '뭐 하다가 여기 왔지',
-  '오늘 뭐 했지 벌써',
-  // — 의지
-  '오늘은 진짜 집중 모드 켤게',
-  '오늘 할 일 좀 많다',
-  '피곤한데 힘내본다',
-  '미루지 말자 오늘만',
-  '정리 좀 해야겠다',
-  '오늘은 좀 부지런해져야지',
-  // — 공감·질문
-  '나만 이런가',
-  '다들 뭐 하고 있어',
-  '점심 뭐 먹지',
-  '뭐 재밌는 거 없나',
-  '이런 게 소확행이지',
-  '다들 힘내고 있는 거지',
-  '나만 멍하니 있는 건가',
+// ★★ 2026-11-22: 오프너+꼬리 분리 구조 폐지.
+// 벤치마크 TOP 성과는 글 전체가 스하리 소통 자체.
+// "산책이나 하고 싶다 / 스하리 ㄱ" ← 이런 뜬금없는 조합이 아니라
+// "스하리 남기면 반하리 바로 감" 처럼 글 전체가 하나의 메시지.
+const POST_POOL: string[] = [
+  // — 반하리 약속형 (벤치마크 440뷰, 377뷰)
+  '스하리 남기면 반하리 감',
+  '스하리 남겨주면 반하리 바로 간다',
+  '스하리 하자 반하리 갈게',
+  '스하리 남기면 바로 감 약속',
+  '오늘도 소통하자 스하리 남기면 반하리 감',
+  '스하리 남겨줘 반하리 꼭 갈게',
+  '같이 키우자 스하리 남기면 반하리 감',
+  '스하리 하면 반하리 바로 감 진짜',
+  // — 소통 제안형
+  '소통하고 싶다 스하리 남겨줘',
+  '스하리 한 번 남겨봐 바로 감',
+  '오늘 소통 좀 하자 스하리 ㄱ',
+  '스친 늘리고 싶다 스하리 남겨줘',
+  '스하리 남기면 갈게 소통하자',
+  '같이 소통해요 스하리 남기면 바로 감',
+  // — 자기 경험형 (벤치마크 891뷰, 370뷰)
+  '스하리 하다 보면 스친 늘겠지 남기면 감',
+  '맨날 스하리 하는데 아직 갈 길이 멀다ㅋㅋ 남기면 반하리 감',
+  '스하리 꾸준히 하는 중 남겨주면 바로 감',
+  '오늘도 스하리 돌리는 중 남기면 반하리 감',
+  '스하리 하면서 스친 늘리는 중 남겨줘',
+  '반하리 안 오면 서운하잖아 나는 꼭 감',
+  // — 함께하자형 (벤치마크 377뷰)
+  '함께하자 스하리 남기면 반하리 바로 감',
+  '같이 키우자 스하리 남겨줘',
+  '다 같이 소통하자 스하리 남기면 감',
+  '서로 키워주자 스하리 하면 반하리 감',
+  '같이 가자 스하리 남기면 바로 감',
+  // — 짧고 강렬형
+  '스하리 ㄱ 반하리 바로 감',
+  '스하리 하자',
+  '소통 ㄱㄱ 스하리 남기면 감',
+  '반하리 갈게 스하리 남겨줘',
+  '스하리 놓고 가 반하리 감',
+  // — 가벼운 톤
+  '심심한데 스하리 하자 반하리 감',
+  '스하리 한 번만 남겨줘 반하리 갈게',
+  '오늘 뭐 하지 스하리나 하자 남기면 감',
+  '스하리 남기면 반하리 감 가볍게 소통하자',
 ];
 
 
-/**
- * ★★ 2026-11-22: LLM 오프너 생성 완전 폐지.
- * 벤치마크 실측: TOP 성과 오프너 = OPENER_POOL과 동일한 짧은 혼잣말.
- * LLM이 "다른 소재로 써"하니 쌩뚱맞은 감성글이 나옴.
- * → 오프너 풀에서 직접 뽑고 스하리 꼬리만 붙인다.
- */
-function pickOpener(
+function pickPost(
   variantIndex: number,
   hookOffset: number,
   recentBodies: string[],
 ): string {
-  // 최근 사용된 오프너의 첫 줄 추출 (꼬리 제외)
-  const usedOpeners = new Set(
-    recentBodies.map((b) => b.split('\n')[0]?.trim() ?? b.trim()),
-  );
+  const usedPosts = new Set(recentBodies.map((b) => b.trim()));
 
-  // offset + variant로 시작점 결정, 겹치면 다음으로
-  const start = ((hookOffset + variantIndex) * 7) % OPENER_POOL.length;
-  for (let i = 0; i < OPENER_POOL.length; i++) {
-    const idx = (start + i) % OPENER_POOL.length;
-    const candidate = OPENER_POOL[idx]!;
-    if (!usedOpeners.has(candidate)) {
+  const start = ((hookOffset + variantIndex) * 7) % POST_POOL.length;
+  for (let i = 0; i < POST_POOL.length; i++) {
+    const idx = (start + i) % POST_POOL.length;
+    const candidate = POST_POOL[idx]!;
+    if (!usedPosts.has(candidate)) {
       return candidate;
     }
   }
-  // 전부 사용됨 (거의 불가) → 랜덤
-  return OPENER_POOL[Math.floor(Math.random() * OPENER_POOL.length)]!;
+  return POST_POOL[Math.floor(Math.random() * POST_POOL.length)]!;
 }
 
 export class SharingBlacklistError extends Error {
@@ -150,17 +122,12 @@ export class SharingBlacklistError extends Error {
 }
 
 
-/**
- * 오프너 풀에서 뽑아 스하리 꼬리 붙여 완성. LLM 호출 없음.
- */
 function generateSharingBody(
   variantIndex: number,
   hookOffset: number,
   recentBodies: string[],
 ): string {
-  const opener = pickOpener(variantIndex, hookOffset, recentBodies);
-  const tail = pickSharingTail(variantIndex);
-  return `${opener}\n${tail}`;
+  return pickPost(variantIndex, hookOffset, recentBodies);
 }
 
 /**
@@ -236,30 +203,4 @@ async function loadRecentSharingBodies(limit: number): Promise<string[]> {
 }
 
 
-/**
- * 스하리 꼬리 문구 풀 — 계정·날짜별 회전. LLM이 생성한 일상 한마디 뒤에 붙는다.
- * 오글거리지 않으면서 스하리 요청이 담긴 짧은 한 줄.
- */
-const SHARING_TAILS = [
-  '스하리 남기면 반하리 감',
-  '스하리 하자',
-  '반하리 갈게',
-  '스하리 ㄱ',
-  '같이 키우자 스하리',
-  '스하리 남기면 바로 감',
-  '소통하자 스하리',
-  '스하리 하면 갈게',
-  '스하리 ㄱㄱ',
-  '스하리 남겨줘',
-  '반하리 바로 감',
-  '소통 좋아 스하리',
-  '스하리 놓고 가',
-  '한 번 남겨봐 스하리',
-  '가볍게 스하리',
-  '스하리 한 번만',
-];
-
-function pickSharingTail(_seed?: number): string {
-  return SHARING_TAILS[Math.floor(Math.random() * SHARING_TAILS.length)]!;
-}
 
