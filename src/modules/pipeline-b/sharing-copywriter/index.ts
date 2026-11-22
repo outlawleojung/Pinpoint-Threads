@@ -1,23 +1,15 @@
-import { z } from 'zod';
-import { llm } from '../../../infra/llm/index.js';
 import { logger } from '../../../config/logger.js';
 import { prisma } from '../../../db/prisma.js';
-import { type SimilarBenchmark } from '../../shared/source-collector/embedder.js';
-import { getAccountContext, type AccountContext } from './follower-sync.js';
+import { getAccountContext } from './follower-sync.js';
 import { PostKind, PostState } from '@prisma/client';
-import { getSharingLearnings, type SharingLearnings } from '../../shared/performance-feedback/copy-learning.js';
 
-const NO_LEARNINGS: SharingLearnings = { factors: [], avoidOpeners: [] };
 
 /**
- * Pipeline B 스하리 각색 카피라이터.
+ * Pipeline B 스하리 카피라이터 (2026-11-22 개편).
  *
- * 원칙:
- *   - **계정별 톤 차별화** (personaPrompt 에서 스하리 톤 힌트 추출 · 2026-10-30)
- *   - **RAG 기반 각색** (pgvector · SHARING 벤치마크 풀 유사도 검색)
- *   - **계정 실 팔로워 수 기반** (허구 X, 구간에 맞는 표현만)
- *   - **훅 유형 다양화**: variant 마다 다른 훅 유형 쿼리 → 다른 few-shot
- *   - **본문에 "팔로워" 단어 직접 노출 X** (스레드 문화 어휘: "스친", "1000까지", "100 넘음" 등)
+ * 벤치마크 실측 결과: TOP 성과 스하리는 LLM이 쓴 창작물이 아니라
+ * "벌써 배고프네", "한숨 한 번 쉬고 간다" 같은 짧은 혼잣말.
+ * → LLM 오프너 생성 완전 폐지, 검증된 오프너 풀에서 직접 선택.
  */
 
 /**
@@ -27,170 +19,7 @@ const NO_LEARNINGS: SharingLearnings = { factors: [], avoidOpeners: [] };
  */
 export const SHARING_TOPIC_TAG = '스하리1000명프로젝트';
 
-/**
- * 훅 유형 · 각 훅은 어떤 계정 나이 구간에서 자연스러운지 지정.
- * 계정 나이 구간에 안 맞는 훅은 배정에서 제외 (예: "발견·감탄형"은 fresh 계정에만).
- */
-import type { AgeBucket } from './follower-sync.js';
 
-interface HookDef {
-  label: string;
-  query: string;
-  ageOK: AgeBucket[];
-  /** true인 훅만 프롬프트에 현재 팔로워 숫자를 노출(마일스톤 언급용). 나머지는 숫자 없이 순수 에너지로. */
-  milestone?: boolean;
-}
-
-const ALL_AGES: AgeBucket[] = ['fresh_under_7d', 'young_under_30d', 'settled_1to3m', 'mature_3m_plus', 'unknown'];
-
-// ★ 실제 고참여 스하리 글(댓글 400~900)의 훅 패턴을 반영. 공통점 = "에너지 + 매번 다른 각도".
-//   밍밍한 잡담 X · 신상(직업·자녀 등) 노출 X · 하지만 스하리 특유의 텐션은 그대로. 회전해서 매일 다른 훅.
-//   ★ 숫자(마일스톤)는 milestone 훅에서만 — 안 그러면 전 계정이 "N 넘고싶어"로 또 수렴(숫자만 바뀜).
-// ★ 톤을 다양하게 (에너지·웃김·담백·호기심). 전부 "달리자🔥"로 수렴하면 매일 똑같아 보인다(실측 2026-09-17).
-//   하이에너지도 담백함도 섞여야 5계정·날짜 간 변주가 생긴다.
-// ★★ 2026-10-07 실측 전환: 반응 좋은 최신 스하리(댓글 50~76·좋아요 173)는 **일상 한마디가 중심**
-//   ("출근하기 싫은 날… 힘내자", "나지금 ㅁㅐ우 심심함.") + 스하리 요청은 끝에 한 줄 또는 생략.
-//   우리 글은 "스하리 해줘/N명/반하리 갈게" 메타 얘기뿐이라 대부분 0~20뷰. → 훅 = 누구나 겪는 오늘의 한 순간.
-//   신상(자녀·직업·나이·구체 취미) X · 첨부(남의 영상)를 내 것처럼 말하기 X("우리 강아지" X).
-const HOOK_QUERIES: HookDef[] = [
-  // ★ 2026-11-13: 47개 훅 × 7카테고리. 5계정 격일 ≈ 2.5/일 → 19일 무겹침.
-  //   규칙: 완결 문장, 시간대 표현 금지(아침 발행), FORBIDDEN_PATTERNS 회피.
-  // — 음식·음료
-  { label: '커피', query: '커피 한 잔 하고 하루 시작', ageOK: ALL_AGES },
-  { label: '배고픔', query: '벌써 배고프다', ageOK: ALL_AGES },
-  { label: '라면', query: '라면 먹고 싶다', ageOK: ALL_AGES },
-  { label: '간식', query: '간식 먹고 싶은 타이밍', ageOK: ALL_AGES },
-  { label: '빵', query: '빵이 먹고 싶다', ageOK: ALL_AGES },
-  { label: '치킨', query: '치킨 생각난다', ageOK: ALL_AGES },
-  { label: '떡볶이', query: '떡볶이 먹고 싶다', ageOK: ALL_AGES },
-  { label: '또배고픔', query: '밥 먹었는데 또 배고프다', ageOK: ALL_AGES },
-  { label: '카페', query: '카페 가고 싶다', ageOK: ALL_AGES },
-  // — 기분·감정
-  { label: '좋다', query: '오늘 기분 좋다', ageOK: ALL_AGES },
-  { label: '힘내자', query: '다들 오늘도 힘내자', ageOK: ALL_AGES },
-  { label: '여유', query: '여유로운 하루 보내자', ageOK: ALL_AGES },
-  { label: '한숨', query: '한숨 한 번 쉬고 간다', ageOK: ALL_AGES },
-  { label: '평화', query: '별일 없는 게 좋은 거다', ageOK: ALL_AGES },
-  { label: '설렘', query: '왠지 좋은 일 생길 것 같다', ageOK: ALL_AGES },
-  { label: '나른', query: '나른한 하루다', ageOK: ALL_AGES },
-  { label: '심심', query: '심심하다 누구 놀아줘', ageOK: ALL_AGES },
-  { label: '기분업', query: '괜히 기분이 좋아졌다', ageOK: ALL_AGES },
-  // — 독백·생각
-  { label: '멍', query: '멍때리는 중', ageOK: ALL_AGES },
-  { label: '뭐하지', query: '뭐 하지', ageOK: ALL_AGES },
-  { label: '쉬자', query: '아 잠깐만 쉬자', ageOK: ALL_AGES },
-  { label: '웃김', query: '갑자기 웃기다', ageOK: ALL_AGES },
-  { label: '깜빡', query: '아 맞다 뭔가 깜빡했다', ageOK: ALL_AGES },
-  { label: '고민', query: '고민이 많다', ageOK: ALL_AGES },
-  { label: '혼잣말', query: '혼자 중얼거리는 중', ageOK: ALL_AGES },
-  { label: '갑자기', query: '갑자기 생각나는 게 있다', ageOK: ALL_AGES },
-  { label: '아무생각', query: '아무 생각이 없다', ageOK: ALL_AGES },
-  // — 소소한 일상
-  { label: '산책', query: '산책이나 하고 싶다', ageOK: ALL_AGES },
-  { label: '음악', query: '노래 틀어놓고 멍때리는 중', ageOK: ALL_AGES },
-  { label: '하루', query: '하루가 빠르다', ageOK: ALL_AGES },
-  { label: '옷', query: '옷 뭐 입지', ageOK: ALL_AGES },
-  { label: '머리', query: '머리 감기 귀찮다', ageOK: ALL_AGES },
-  { label: '이어폰', query: '이어폰 어디 뒀지', ageOK: ALL_AGES },
-  { label: '청소', query: '청소 좀 해야 되는데', ageOK: ALL_AGES },
-  { label: '택배', query: '택배 왔나', ageOK: ALL_AGES },
-  { label: '충전', query: '폰 배터리 없다', ageOK: ALL_AGES },
-  { label: '가방', query: '가방에서 뭐 찾는 중', ageOK: ALL_AGES },
-  // — 의지·다짐
-  { label: '할일', query: '오늘 할 일 좀 많다', ageOK: ALL_AGES },
-  { label: '집중', query: '오늘은 집중 좀 해야겠다', ageOK: ALL_AGES },
-  { label: '피곤', query: '피곤한데 힘내본다', ageOK: ALL_AGES },
-  { label: '미루기', query: '미루지 말자 오늘만', ageOK: ALL_AGES },
-  { label: '부지런', query: '좀 부지런해져야지', ageOK: ALL_AGES },
-  { label: '정리', query: '정리 좀 해야 되는데', ageOK: ALL_AGES },
-  // — 공감·질문
-  { label: '나만', query: '나만 이런가', ageOK: ALL_AGES },
-  { label: '다들', query: '다들 뭐 하고 있어', ageOK: ALL_AGES },
-  { label: '점심뭐', query: '점심 뭐 먹지', ageOK: ALL_AGES },
-  { label: '추천', query: '뭐 재밌는 거 없나', ageOK: ALL_AGES },
-  { label: '소확행', query: '이런 게 소확행이지', ageOK: ALL_AGES },
-];
-
-/** 본문 blacklist. 노출 시 재생성. */
-const FORBIDDEN_TERMS = [
-  '팔로워',   // 스레드 문화 어휘 아님 → "스친", "N명" 형태로만
-  '팔로워수', '팔로워 늘리', 'follower',
-];
-
-/**
- * 금지 오프너·템플릿 패턴 (코드 강제 · 노출 시 재생성).
- * 프롬프트로만 막던 "몇 달째 하는 중인데 아직 N도 못 채움" 계열이 5계정 매일 똑같이 나와서 정규식으로 차단.
- */
-//   "몇 달째" 자체는 성숙 계정엔 사실이라 허용. 5계정 매일 반복되던 **정확한 조합 템플릿만** 차단.
-const FORBIDDEN_PATTERNS: Array<{ re: RegExp; label: string }> = [
-  // "몇 달째 … 아직 N도 못 채움/안 됨" whine 오프너 (반복 주범)
-  { re: /몇\s*달째[\s\S]{0,30}(아직|겨우)[\s\S]{0,12}(못\s*채|안\s*(됨|돼|되))/, label: '몇달째-아직못채움-템플릿' },
-  // "뒷삭 없이 반하리" 상투적 꼬리말 (13/15 반복) — 정확 조합만 차단, 다른 반하리 표현은 허용
-  { re: /뒷삭\s*(한\s*번\s*)?없이\s*반하리/, label: '뒷삭없이반하리-상투구' },
-  // "뒷삭 없이/없어" 단독도 오글거림 주범 — 반하리와 조합 아니어도 차단 (2026-10-30)
-  { re: /뒷삭\s*(절대\s*)?없/, label: '뒷삭없다-오글거림' },
-  // "의리" 포함 표현 전부 — 각색 시 원문 의리가 남는 것 방지 (2026-10-31)
-  { re: /의리/, label: '의리-오글거림' },
-  // "진심이니까/진심으로" 다짐형 (2026-10-30)
-  { re: /진심(이니까|으로|임|인데)/, label: '진심-오글거림' },
-  // "무조건 갈게/바로 간다" 과잉 약속 (2026-10-30)
-  { re: /무조건\s*(갈게|간다|감|바로)/, label: '무조건-과잉약속' },
-  // 남의 취미·관심사 가져오기 — 벤치마크에서 흡수하는 주범 (2026-10-30 "개발 일지 정주행" 사건)
-  { re: /개발|코딩|프로그래밍|그림\s*(그리|연습)|운동\s*(하|루틴)|요리\s*(하|중)|독서|공부\s*(중|하)/, label: '남의취미-가져오기' },
-  // 느낌표 2개 이상 연속 — 과잉 텐션 (2026-10-30)
-  { re: /!{2,}/, label: '느낌표-과잉' },
-  // 이모지 3개 이상 연속 (2026-10-30)
-  { re: /(?:\p{Emoji_Presentation}|\p{Extended_Pictographic}){3,}/u, label: '이모지-과잉' },
-  // "오래 굴린/붙잡은/해온 계정" 계정나이 상투 오프너 (13/15 반복)
-  { re: /오래\s*(굴린|굴려온|붙잡[은고]|해온|해왔)/, label: '오래된계정-상투오프너' },
-  // "알림 없는데 새로고침" 각도 — 반복 + 실측 저조(kle0 25뷰 · 2026-10-07)
-  { re: /새로고침/, label: '새로고침-반복각도' },
-  // 시각·시간대 — 스하리는 일상글 발행 직후 생성되지만 같은 계정 4h 간격으로 몇 시간 뒤 나감 (2026-10-12)
-  { re: /\d{1,2}\s*시(?!간)|오후|저녁|새벽|밤|야식|잠이\s*안|잠\s*안\s*와|자기\s*전|잠들기|자려고|자고\s*싶|눕|이불|퇴근|눈\s*(?:뜨자마자|떠서|뜨면|뜨고)|일어나자마자|일어나서|알람|[월화수목금토일]요일|주말|불금|평일|어제|핸드폰\s*놨/, label: '아침 발행에 안 맞는 시간·요일 표현' },
-  // 날씨·계절 — 발행일 실제 날씨를 모름 (2026-10-12 사용자 "즉흥 발행 아니면 날씨 얘기 하지 마")
-  { re: /날씨|추워|추운|춥다|쌀쌀|선선|더워|더운|덥다|비\s*(?:와|오|가\s*와|내)|눈\s*(?:와|오는|온다|내려)|장마|미세먼지|햇살|가을|겨울|여름|봄바람|바람\s*(?:불|차)/, label: '날씨·계절(발행일 날씨 모름)' },
-  // 구체적 숫자 팔로워/목표 주장 — 벤치마크 숫자를 그대로 가져오면 계정 실제 상황과 불일치 (2026-11-01)
-  { re: /\d+\s*명\s*(까지|남|목표|넘|달성|채우|도달|만들)/, label: '거짓-팔로워숫자-주장' },
-  { re: /\d+\s*일\s*차/, label: '거짓-N일차-주장' },
-  // 남의 개인 사연 — 벤치마크에서 흡수하는 주범 (2026-11-01 "육아맘" 사건)
-  { re: /육아|아기|애기|아이\s*(키우|돌보|재우)|임신|출산|맘스타|엄마|아빠\s*(되|된)/, label: '남의사연-육아' },
-  { re: /군대|군인|전역|입대|복학|대학생|취준|취업|이직|퇴사/, label: '남의사연-직업신분' },
-  { re: /부산|대구|광주|대전|인천|제주|전주|경상|전라|충청|강원|서울\s*(사는|살|거주)/, label: '남의사연-지역' },
-  { re: /취미\s*(맞|같|비슷)|취미\s*(가|를|은)|친구\s*사귀/, label: '남의사연-취미친구' },
-  // 불평·하소연 — 프롬프트로 안 막혀서 하드 차단 (2026-11-01)
-  { re: /안\s*오(네|는데|냐|잖|지)|왜\s*(안|못)\s*(와|오|해|줘)|실망|서운|섭섭|허무/, label: '불평-하소연' },
-  { re: /도와줘|도와\s*주세요|제발|부탁/, label: '불평-구걸' },
-  // 격언·교훈조 — 매일 뻔한 "미루면 후회" "게으름은 빚" 반복 차단 (2026-11-19)
-  { re: /(은|는)\s*(빚|독|적|병|약|힘|돈)(?:이다|처럼|같)/, label: '격언조-은X이다' },
-  { re: /후회(한다|할|하게|함)/, label: '격언조-후회한다' },
-  { re: /가둔다|무거워(진다|짐)|쌓인다|늦는다|멀어진다/, label: '격언조-교훈동사' },
-  { re: /~?(해야지|해야겠다|해야 되는데|해야만|안 하면)/, label: '격언조-다짐' },
-];
-
-const BodyResultSchema = z.object({
-  body: z.string().min(4).max(120), // 벤치마크 각색 방식 전환 후 원문이 길면 각색도 길어짐 → 120자 허용 (40자 목표는 프롬프트로 유도)
-});
-
-/**
- * personaPrompt → 스하리용 간결 톤 힌트 한 줄.
- * 쇼핑·일상글용 페르소나가 "20대 여성 …" 같은 식이면 핵심 톤만 추출.
- * 신상(직업·나이·지역) 자체는 스하리 본문에 쓰면 안 되지만, 말투(반말·존댓말·이모지 빈도·에너지)는 구분 가능.
- */
-function extractSharingToneHint(personaPrompt: string): string {
-  const p = personaPrompt.trim();
-  if (!p) return '자연스럽고 가벼운 반말';
-  const hints: string[] = [];
-  if (/솔직|직설|쿨/.test(p)) hints.push('쿨하고 직설적');
-  if (/따뜻|다정|상냥|부드/.test(p)) hints.push('따뜻하고 다정한');
-  if (/유머|웃|재밌|ㅋ/.test(p)) hints.push('유머러스한');
-  if (/차분|담백|조용|깔끔/.test(p)) hints.push('담백하고 차분한');
-  if (/활발|에너지|밝|텐션/.test(p)) hints.push('밝고 에너지 넘치는');
-  if (/20대/.test(p)) hints.push('20대 말투');
-  if (/30대/.test(p)) hints.push('30대 말투');
-  if (/남성|남자/.test(p)) hints.push('남성 화자');
-  if (/여성|여자/.test(p)) hints.push('여성 화자');
-  return hints.length > 0 ? hints.join(' · ') : p.slice(0, 40);
-}
 
 export interface SharingCopyInput {
   accountId: string;
@@ -211,185 +40,106 @@ export interface SharingCopyResult {
   }>;
 }
 
-const SYSTEM_PROMPT = `너는 한국 20대 Threads 유저야. 스하리 글의 앞부분(일상 한마디)만 쓴다.
+// ★★ 2026-11-22: LLM 오프너 생성 완전 폐지.
+// 벤치마크 실측 결과, TOP 성과 스하리 오프너("벌써 배고프네", "한숨 한 번 쉬고 간다")는
+// HOOK_QUERIES와 거의 동일한 짧은 혼잣말이었음.
+// LLM이 "힌트와 다른 소재"를 쓰게 하니 쌩뚱맞은 감성 에세이가 나옴 → 직접 사용으로 전환.
+//
+// 오프너 풀 (OPENER_POOL)에서 직접 뽑고 스하리 꼬리만 붙인다.
+// LLM 비용 0, 할루시네이션 0, 검증된 패턴만 사용.
 
-★★ 규칙:
-- 15~25자. 짧을수록 좋다. 한 문장.
-- "지금 나한테 일어난 일" 하나만 툭 던져.
-- 반말, 담백하게. 감탄사 하나 정도 OK.
+const OPENER_POOL: string[] = [
+  // — 음식 (벤치마크 검증: "벌써 배고프네" 323뷰)
+  '벌써 배고프네',
+  '아 라면 먹고 싶다',
+  '간식 타이밍인데',
+  '빵 먹고 싶다 진짜',
+  '치킨 생각나네',
+  '떡볶이 땡긴다',
+  '밥 먹었는데 또 배고프다',
+  '카페 가고 싶다',
+  '아이스크림 먹고 싶네',
+  '국물 땡기는 날이다',
+  '커피 한 잔 하자',
+  '뭐 먹지',
+  // — 기분 (벤치마크 검증: "한숨 한 번 쉬고 간다" 440뷰)
+  '한숨 한 번 쉬고 간다',
+  '오늘 기분 좋다',
+  '다들 오늘도 힘내자',
+  '여유로운 하루 보내자',
+  '별일 없는 게 좋은 거다',
+  '왠지 좋은 일 생길 것 같다',
+  '나른하다',
+  '심심한데',
+  '괜히 기분이 좋아졌다',
+  '오늘 되게 평화롭네',
+  '좋은 하루 보내는 중',
+  // — 독백 (벤치마크 검증: "오늘은 진짜 집중 모드 켤게" 310뷰)
+  '멍때리는 중',
+  '뭐 하지',
+  '아 잠깐만 쉬자',
+  '갑자기 웃기다',
+  '아 맞다 뭔가 깜빡했다',
+  '혼자 중얼거리는 중',
+  '아무 생각이 없다',
+  '갑자기 생각나는 게 있다',
+  '할 거 많은데 안 하는 중',
+  '아 집중이 안 된다',
+  // — 소소한 일상
+  '산책이나 하고 싶다',
+  '노래 틀어놓고 멍때리는 중',
+  '하루가 빠르다',
+  '옷 뭐 입지',
+  '청소 좀 해야 되는데',
+  '폰 배터리 없다',
+  '샤워하고 싶다',
+  '뭐 하다가 여기 왔지',
+  '오늘 뭐 했지 벌써',
+  // — 의지
+  '오늘은 진짜 집중 모드 켤게',
+  '오늘 할 일 좀 많다',
+  '피곤한데 힘내본다',
+  '미루지 말자 오늘만',
+  '정리 좀 해야겠다',
+  '오늘은 좀 부지런해져야지',
+  // — 공감·질문
+  '나만 이런가',
+  '다들 뭐 하고 있어',
+  '점심 뭐 먹지',
+  '뭐 재밌는 거 없나',
+  '이런 게 소확행이지',
+  '다들 힘내고 있는 거지',
+  '나만 멍하니 있는 건가',
+];
 
-★★ 작성법:
-1. 힌트 주제를 읽는다.
-2. 그 주제와 완전히 다른 소재로, 네 하루에서 겪을 법한 작은 순간을 하나 떠올려.
-3. 그걸 혼잣말로 써.
 
-★★ 금지:
-- 힌트 주제의 단어를 쓰지 마. 힌트는 방향일 뿐.
-- 아래 단어 금지: 커피, 냉장고, 냉동실, 양말, 세탁기, 베개, 택배, 삼각김밥, 이어폰, 유튜브, 쇼츠
-- 밤/저녁/퇴근/자기전 금지 (아침 발행)
-- 스하리/반하리/맞팔/스친 금지 (시스템이 붙임)
-- 격언/다짐/교훈 금지 ("~은 ~이다" "~해야지")
-- 불평/하소연 금지
-- 숫자/팔로워수 금지
-- 30자 넘기지 마.
-
-JSON: { "body": "..." }`;
-
-/** 생성 시점의 한국 요일·시간대 (스하리 일상 한마디가 요일을 지어내지 않게). */
-function nowKoContext(now = new Date()): string {
-  const k = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
-  const day = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'][k.getDay()];
-  const h = k.getHours();
-  const part = h < 5 ? '새벽' : h < 11 ? '아침' : h < 14 ? '점심 무렵' : h < 18 ? '오후' : h < 22 ? '저녁' : '밤';
-  return `${k.getMonth() + 1}월 ${k.getDate()}일 ${day} ${part}(${h}시)`;
-}
-
-async function generateOne(
-  context: AccountContext,
-  hook: { label: string; query: string; milestone?: boolean },
-  benchmarks: SimilarBenchmark[],
+/**
+ * ★★ 2026-11-22: LLM 오프너 생성 완전 폐지.
+ * 벤치마크 실측: TOP 성과 오프너 = OPENER_POOL과 동일한 짧은 혼잣말.
+ * LLM이 "다른 소재로 써"하니 쌩뚱맞은 감성글이 나옴.
+ * → 오프너 풀에서 직접 뽑고 스하리 꼬리만 붙인다.
+ */
+function pickOpener(
   variantIndex: number,
-  recentBodies: string[] = [],
-  learnings: SharingLearnings = NO_LEARNINGS,
-): Promise<string> {
-  const refBlock =
-    benchmarks.length > 0
-      ? benchmarks
-          .map(
-            (b, i) =>
-              `${i + 1}. [replies ${b.likesCount}]\n"""\n${b.text.slice(0, 120)}\n"""`,
-          )
-          .join('\n\n')
-      : '(유사 벤치마크 없음. 훅 유형 지시만 따라 각색.)';
+  hookOffset: number,
+  recentBodies: string[],
+): string {
+  // 최근 사용된 오프너의 첫 줄 추출 (꼬리 제외)
+  const usedOpeners = new Set(
+    recentBodies.map((b) => b.split('\n')[0]?.trim() ?? b.trim()),
+  );
 
-  const ageLabel = context.accountAgeDays == null
-    ? '미확인'
-    : `${context.accountAgeDays}일 (${context.accountAgeBucket})`;
-
-  // 마일스톤 훅: 실제 스친 수 기준 "믿을 만한 다음 목표"만. 구간(bucket)만 주면 107명인데 "300 코앞" 같은 거짓이 나옴.
-  const cur = context.followersCount;
-  const nextMilestone = cur < 100 ? 100 : Math.ceil((cur + 1) / 100) * 100; // 107 → 200
-  const gap = nextMilestone - cur;
-  const closeToMilestone = gap <= 25; // 코앞이라 할 수 있는 거리
-
-  // ★★ 2026-11-01: 벤치마크 풀이 전부 동일 패턴(의리/뒷삭/반하리)이라
-  //   sanitize해도 LLM이 맥락에서 복원 → 거짓 숫자·남의 사연 반복.
-  //   새 해시태그(스레드소통·스레드일상 등)로 다양한 벤치마크가 쌓일 때까지
-  //   벤치마크 OFF → 훅 쿼리만으로 순수 일상 한마디 생성.
-  //   TODO: 풀에 daily_moment/question/humor/participation 패턴이 30%+ 되면 다시 활성화
-  // ★ 벤치마크 OFF (위 주석 참조) — few-shot 예시로 대체 (시스템 프롬프트에 하드코딩)
-  const toneHint = extractSharingToneHint(context.personaPrompt);
-  // 훅은 "재료"일 뿐. 같은 훅이라도 계정·variant마다 완전히 다른 장면이 나오도록 랜덤 소재 힌트 추가.
-  const SENSE_SEEDS = [
-    '촉감', '냄새', '소리', '맛', '온도',
-    '손끝', '발바닥', '눈앞', '귓가', '혀끝',
-    '무게', '질감', '습도', '빛', '그림자',
-    '진동', '틈새', '표면', '깊이', '거리',
-  ];
-  const senseSeed = SENSE_SEEDS[(variantIndex * 7 + (context.followersCount % SENSE_SEEDS.length)) % SENSE_SEEDS.length];
-  const userPrompt = [
-    `힌트: "${hook.query}"`,
-    `감각: ${senseSeed}`,
-    `톤: ${toneHint}`,
-    `힌트 단어 쓰지 마. 전혀 다른 소재로 15~25자 혼잣말. JSON만.`,
-    ...(recentBodies.length > 0 ? ['겹침 금지:', ...recentBodies.slice(0, 5).map((b) => `- ${b.replace(/\n/g, ' ').slice(0, 30)}`)] : []),
-  ].join('\n');
-
-  const response = await llm().complete({
-    tier: 'fast', // 한 줄 25자 문구 → Haiku 로 충분 (2026-10-13 사용자 "최대한 아껴")
-    system: SYSTEM_PROMPT,
-    // slice() 로 반쪽 잘린 이모지(lone surrogate) 제거 → Anthropic 'no low surrogate' 요청오류 방지
-    userParts: [{ type: 'text', text: sanitizeForLlm(userPrompt) }],
-    maxOutputTokens: 700,
-    temperature: 1.0,
-    jsonMode: true,
-    jsonSchema: {
-      type: 'object',
-      properties: { body: { type: 'string' } },
-      required: ['body'],
-    },
-  });
-
-  const parsed = extractJson(response.text);
-  const { body } = BodyResultSchema.parse(parsed);
-  // LLM 출력 정제: 해시태그·이중공백 제거
-  let opener = body
-    .replace(/#[^\s#]+/g, '')
-    .replace(/#?\s*스하리\s*1000\s*명\s*프로젝트/g, '')
-    .replace(/[ \t]{2,}/g, ' ')
-    .replace(/^[ \t]+/gm, '')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-
-  // opener에서 스하리 관련 단어 전부 제거 (꼬리에서 붙인다 — opener는 순수 일상 한마디만)
-  opener = opener
-    .replace(/스하리[^\s]*/g, '')
-    .replace(/반하리[^\s]*/g, '')
-    .replace(/맞팔[^\s]*/g, '')
-    .replace(/스친[^\s]*/g, '')
-    .replace(/선팔|팔로우|팔로|리포스트/g, '')
-    .replace(/1000\s*명\s*프로젝트/g, '')
-    // 숫자+단위 제거 (거짓 팔로워/마일스톤 방지)
-    .replace(/\d+\s*(명|천|백|만)\s*(까지|남|넘|목표|달성|채우|되|거의|코앞|가까이)?/g, '')
-    .replace(/\d+\s*(일\s*차|개월)/g, '')
-    .replace(/[ \t]{2,}/g, ' ')
-    .trim();
-
-  // 금지어 검증 (일상 한마디 부분만)
-  const hit = FORBIDDEN_TERMS.find((t) => opener.includes(t));
-  if (hit) throw new SharingBlacklistError(hit, opener, false);
-  const patHit = FORBIDDEN_PATTERNS.find((p) => p.re.test(opener));
-  const HARD_LABELS = /시간|요일|날씨|계절|오글|과잉|취미|의리|진심|무조건|뒷삭|느낌표|이모지|거짓|남의사연|불평|구걸/;
-  if (patHit) throw new SharingBlacklistError(patHit.label, opener, !HARD_LABELS.test(patHit.label));
-
-  // 유사도 검사: 다른 계정 최근 스하리와 비슷하면 재생성
-  {
-    const grams = (t: string) => {
-      const x = t.replace(/[\s\p{P}\p{S}ㅋㅎㅠㅜ]/gu, '');
-      const g = new Set<string>();
-      for (let i = 0; i < x.length - 1; i++) g.add(x.slice(i, i + 2));
-      return g;
-    };
-    const sim = (a: string, b: string) => {
-      const A = grams(a), B = grams(b);
-      if (!A.size || !B.size) return 0;
-      let n = 0;
-      for (const g of A) if (B.has(g)) n++;
-      return n / Math.min(A.size, B.size);
-    };
-    const near = recentBodies.find((r) => sim(opener, r) >= 0.5);
-    if (near) throw new SharingBlacklistError('최근 우리 스하리와 비슷', opener, false);
-    // 핵심 명사 겹침 검사: 2글자+ 한글 명사를 뽑아 최근 글과 2개 이상 겹치면 재생성
-    const nouns = (t: string) => [...t.matchAll(/[가-힣]{2,}/g)].map(m => m[0]).filter(w => w.length >= 2);
-    const openerNouns = new Set(nouns(opener));
-    if (openerNouns.size >= 2) {
-      const dup = recentBodies.find((r) => {
-        const rn = nouns(r.split('\n')[0] ?? r);
-        let overlap = 0;
-        for (const w of rn) if (openerNouns.has(w)) overlap++;
-        return overlap >= 2;
-      });
-      if (dup) throw new SharingBlacklistError('핵심 단어 겹침', opener, true);
+  // offset + variant로 시작점 결정, 겹치면 다음으로
+  const start = ((hookOffset + variantIndex) * 7) % OPENER_POOL.length;
+  for (let i = 0; i < OPENER_POOL.length; i++) {
+    const idx = (start + i) % OPENER_POOL.length;
+    const candidate = OPENER_POOL[idx]!;
+    if (!usedOpeners.has(candidate)) {
+      return candidate;
     }
   }
-
-  // 계정 나이 주장 금지
-  {
-    const { NEW_ACCOUNT_CLAIM } = await import('../sharing-repost.js');
-    if (NEW_ACCOUNT_CLAIM.test(opener) || /스레드\s*처음|오늘.*시작|첫\s*계정|첫\s*글|처음\s*글|첫\s*포스트|입문|시작한\s*지|시작했|막\s*시작|새로\s*시작|시작이야|시작할래|시작해볼/.test(opener)) {
-      throw new SharingBlacklistError('계정 나이 주장', opener, false);
-    }
-  }
-
-  // opener가 너무 짧으면(2자 이하) 실패
-  if (opener.length < 3) throw new SharingBlacklistError('일상 한마디 너무 짧음', opener, false);
-
-  // 스하리 꼬리 랜덤 선택해서 붙이기
-  const tail = pickSharingTail(variantIndex);
-  const full = `${opener}\n${tail}`;
-
-  return full;
+  // 전부 사용됨 (거의 불가) → 랜덤
+  return OPENER_POOL[Math.floor(Math.random() * OPENER_POOL.length)]!;
 }
 
 export class SharingBlacklistError extends Error {
@@ -399,44 +149,23 @@ export class SharingBlacklistError extends Error {
   }
 }
 
-const MAX_RETRY = 4;
-async function generateOneWithRetry(
-  context: AccountContext,
-  hook: { label: string; query: string; milestone?: boolean },
-  benchmarks: SimilarBenchmark[],
+
+/**
+ * 오프너 풀에서 뽑아 스하리 꼬리 붙여 완성. LLM 호출 없음.
+ */
+function generateSharingBody(
   variantIndex: number,
-  recentBodies: string[] = [],
-  learnings: SharingLearnings = NO_LEARNINGS,
-): Promise<string> {
-  let lastErr: Error | null = null;
-  let lastSoftBody: string | null = null; // 소프트 패턴 위반이지만 최종 fallback 으로 쓸 본문
-  for (let attempt = 0; attempt <= MAX_RETRY; attempt++) {
-    try {
-      return await generateOne(context, hook, benchmarks, variantIndex + attempt * 10, recentBodies, learnings);
-    } catch (err) {
-      lastErr = err as Error;
-      if (err instanceof SharingBlacklistError) {
-        logger.warn({ term: err.term, soft: err.soft, attempt, variantIndex, hook: hook.label }, 'blacklist hit');
-        if (err.soft) lastSoftBody = err.body; // 템플릿 패턴 = 소프트 → 최종 시도까지 실패하면 이거라도 씀
-        continue;
-      }
-      // JSON 잘림·API 일시 오류 등도 재시도 (기존엔 즉시 throw 라 일회성 오류에 계정 전체 실패했음)
-      logger.warn({ err, attempt, variantIndex, hook: hook.label }, 'sharing generation transient error → retry');
-    }
-  }
-  // 소프트 패턴만 계속 걸렸으면 아예 실패시키지 말고 마지막 본문 채택 (다양성 < 발행 자체)
-  if (lastSoftBody) {
-    logger.warn({ variantIndex, hook: hook.label }, 'soft-pattern 재시도 소진 → 마지막 본문 수용');
-    return lastSoftBody;
-  }
-  throw lastErr ?? new Error('sharing generation failed');
+  hookOffset: number,
+  recentBodies: string[],
+): string {
+  const opener = pickOpener(variantIndex, hookOffset, recentBodies);
+  const tail = pickSharingTail(variantIndex);
+  return `${opener}\n${tail}`;
 }
 
 /**
- * 스하리 카피 생성.
- *   - variant 마다 다른 훅 유형 (rotation)
- *   - 각 유형에 맞는 pgvector 유사도 검색 → 다른 few-shot
- *   - 계정 실 팔로워 수 컨텍스트로 어투·구간 결정
+ * 스하리 카피 생성 (2026-11-22 개편).
+ * LLM 호출 없이 검증된 오프너 풀에서 직접 뽑고 스하리 꼬리만 붙인다.
  */
 export async function generateSharingCopy(
   input: SharingCopyInput,
@@ -450,45 +179,18 @@ export async function generateSharingCopy(
 
   const context = await getAccountContext(input.accountId);
 
-  // 최근 14일 스하리 본문 (전 계정) → 반복 회피용. 같은 오프너·구조 재생성 방지.
+  // 최근 14일 스하리 본문 (전 계정) → 반복 회피용
   const recentBodies = await loadRecentSharingBodies(40);
-
-  // 성과 피드백: winner 구조 요인 + loser 오프너 회피 (유닛② copy-learning)
-  const learnings = await getSharingLearnings();
-  const avoidBodies = [...recentBodies, ...learnings.avoidOpeners];
-
-  // 계정 나이 구간에 맞는 훅만 필터
-  const eligibleHooks = HOOK_QUERIES.filter((h) => h.ageOK.includes(context.accountAgeBucket));
-  if (eligibleHooks.length === 0) {
-    throw new Error(`No eligible hooks for age bucket ${context.accountAgeBucket}`);
-  }
-
-  // ✅ 트렌드 반영: 유사도(옛 고참여 글)로 뽑지 않고 **최근 수집·게시된 스하리 글** 을 few-shot 으로.
-  //    "예전 조회수 높은 글만 반복" 방지 → 지금 스하리 태그에서 도는 최신 흐름을 각색.
-  const trendPool = await loadTrendingSharingBenchmarks(7, 12);
 
   const variants: SharingCopyResult['variants'] = [];
   const offset = input.hookOffset ?? 0;
   for (let i = 0; i < variantCount; i++) {
-    const hook = eligibleHooks[(i + offset) % eligibleHooks.length]!;
-
-    // 최근 트렌드 풀에서 계정·날짜별로 다른 4개 회전 선택 (다양성)
-    const benchmarks: SimilarBenchmark[] = rotatePick(trendPool, offset + i, 4);
-
-    try {
-      const body = await generateOneWithRetry(context, hook, benchmarks, i, avoidBodies, learnings);
-      variants.push({
-        body,
-        hookLabel: hook.label,
-        referencesUsed: benchmarks.map((b) => ({
-          id: b.id,
-          sourceHandle: b.sourceHandle,
-          repliesCount: b.likesCount,
-        })),
-      });
-    } catch (err) {
-      logger.warn({ err, variantIndex: i, hook: hook.label }, 'variant gave up after retries');
-    }
+    const body = generateSharingBody(i, offset, recentBodies);
+    variants.push({
+      body,
+      hookLabel: 'pool',
+      referencesUsed: [],
+    });
   }
 
   logger.info(
@@ -497,11 +199,9 @@ export async function generateSharingCopy(
       handle: account.handle,
       followers: context.followersCount,
       followerBucket: context.followerBucket,
-      accountAgeDays: context.accountAgeDays,
-      accountAgeBucket: context.accountAgeBucket,
       variantsProduced: variants.length,
     },
-    'sharing copy generated',
+    'sharing copy generated (pool-based, no LLM)',
   );
 
   return {
@@ -513,82 +213,6 @@ export async function generateSharingCopy(
   };
 }
 
-/**
- * 최근 트렌드 스하리 벤치마크 풀 (유사도 X · 최신성 우선).
- *   - 목적: "예전 조회수 높은 글만 반복" 방지. 지금 스하리 태그에 도는 최신 흐름을 각색.
- *   - collectedAt 최근 N일 + 실게시 시각(publishedAt) 최신 우선. (수집 시 이미 repliesCount≥20 필터됨)
- */
-/**
- * 스하리 패턴 분류 — 같은 패턴 벤치마크끼리 수렴 방지.
- * "의리·반하리" 패턴만 상위 12개를 독점하면 LLM 출력이 전부 같아지므로
- * 패턴별 최대 CAP 개로 제한하고 나머지는 다른 유형으로 채운다.
- */
-type SharingPattern = 'loyalty' | 'milestone' | 'greeting' | 'daily_moment' | 'question' | 'participation' | 'humor' | 'energy' | 'other';
-const PATTERN_CAP = 3;
-const LOYALTY_CAP = 1;
-
-function classifySharingPattern(text: string): SharingPattern {
-  const t = text.replace(/\s+/g, ' ');
-  if (/의리|뒷삭|반하리.*무조건|무조건.*반하리|진짜.*바로|1분.*컷|100%/.test(t)) return 'loyalty';
-  if (/\d+\s*명|넘고\s*싶|남았|채우|목표|달성/.test(t)) return 'milestone';
-  if (/골라|결정해|뭐\s*먹|뭐\s*할|어떤.*좋아|추천|투표|남겨줘|알려줘|봐줄게/.test(t)) return 'participation';
-  if (/ㅋㅋ|ㅎㅎ|웃긴|미친|레전드|개웃|빵터/.test(t)) return 'humor';
-  if (/안녕|나는|시작했|처음|입문|자기소개/.test(t)) return 'greeting';
-  if (/출근|퇴근|커피|피곤|배고|심심|아침|점심/.test(t)) return 'daily_moment';
-  if (/\?|맞아|어려운|힘든|왜.*이렇|진짜야|나만/.test(t)) return 'question';
-  if (/달리자|화이팅|가보자|🔥|💪|파이팅|가즈아/.test(t)) return 'energy';
-  return 'other';
-}
-
-async function loadTrendingSharingBenchmarks(days: number, poolSize: number): Promise<SimilarBenchmark[]> {
-  try {
-    const since = new Date(Date.now() - days * 864e5);
-    const recent = await prisma.benchmarkPost.findMany({
-      where: { contentType: 'SHARING', collectedAt: { gte: since }, text: { not: '' } },
-      orderBy: { collectedAt: 'desc' },
-      take: 300,
-      select: { id: true, sourceHandle: true, text: true, likesCount: true, repliesCount: true, viralFactors: true },
-    });
-    const scored = recent
-      .map((r) => ({ ...r, score: r.repliesCount * 3 + r.likesCount, pattern: classifySharingPattern(r.text) }))
-      .sort((a, b) => b.score - a.score);
-
-    // 패턴별 CAP 적용: 같은 패턴이 풀을 독점하지 않게
-    const patternCount = new Map<SharingPattern, number>();
-    const diverse: typeof scored = [];
-    const overflow: typeof scored = []; // CAP 초과분 (풀이 부족하면 여기서 보충)
-    for (const r of scored) {
-      const cnt = patternCount.get(r.pattern) ?? 0;
-      const cap = r.pattern === 'loyalty' ? LOYALTY_CAP : PATTERN_CAP;
-      if (cnt < cap) {
-        diverse.push(r);
-        patternCount.set(r.pattern, cnt + 1);
-      } else {
-        overflow.push(r);
-      }
-      if (diverse.length >= poolSize) break;
-    }
-    // 풀이 부족하면 overflow 에서 보충 (다양성보다 빈 슬롯 방지)
-    while (diverse.length < poolSize && overflow.length > 0) {
-      diverse.push(overflow.shift()!);
-    }
-
-    const patternSummary = Object.fromEntries([...patternCount.entries()]);
-    logger.info({ poolSize: diverse.length, patterns: patternSummary }, 'sharing benchmark pool (diversity-filtered)');
-
-    return diverse.map((r) => ({
-      id: r.id,
-      sourceHandle: r.sourceHandle,
-      text: r.text,
-      likesCount: r.repliesCount ?? r.likesCount,
-      distance: 0,
-      viralFactors: (r.viralFactors as Record<string, unknown> | null) ?? null,
-    }));
-  } catch (err) {
-    logger.warn({ err }, 'loadTrendingSharingBenchmarks failed');
-    return [];
-  }
-}
 
 /** 최근 7일 스하리 본문 (전 계정 · 리젝/실패 제외) — 반복 회피용. */
 async function loadRecentSharingBodies(limit: number): Promise<string[]> {
@@ -611,14 +235,6 @@ async function loadRecentSharingBodies(limit: number): Promise<string[]> {
   }
 }
 
-/** 풀에서 offset 부터 n개를 회전 선택 (계정·날짜별 다른 few-shot). */
-function rotatePick<T>(pool: T[], offset: number, n: number): T[] {
-  if (pool.length <= n) return pool;
-  const start = ((offset % pool.length) + pool.length) % pool.length;
-  const out: T[] = [];
-  for (let i = 0; i < n; i++) out.push(pool[(start + i) % pool.length]!);
-  return out;
-}
 
 /**
  * 스하리 꼬리 문구 풀 — 계정·날짜별 회전. LLM이 생성한 일상 한마디 뒤에 붙는다.
@@ -647,63 +263,3 @@ function pickSharingTail(_seed?: number): string {
   return SHARING_TAILS[Math.floor(Math.random() * SHARING_TAILS.length)]!;
 }
 
-/**
- * 벤치마크 원문에서 오글거림 표현을 제거/교체 → LLM이 그대로 복사 방지.
- * 원문의 구조는 유지하되 금지 단어만 빼서 "깨끗한 원문"을 프롬프트에 전달.
- */
-function sanitizeBenchmarkForPrompt(text: string): string {
-  return text
-    // 스하리 메타 단어 전부 제거 (LLM이 복사 못 하게)
-    .replace(/스하리|반하리|맞팔|선팔|팔로우|팔로|리포스트|스친/g, '')
-    .replace(/1000\s*명\s*프로젝트/g, '')
-    .replace(/의리[^\s]*/g, '')
-    .replace(/뒷삭[^\s]*/g, '')
-    .replace(/무조건/g, '')
-    .replace(/진심(이니까|으로|임|인데)/g, '')
-    // 숫자+단위 제거 (거짓 마일스톤 방지)
-    .replace(/\d+\s*(명|천|백|만)\s*[^\s]*/g, '')
-    .replace(/\d+\s*(일\s*차|개월)/g, '')
-    // 계정 나이 주장
-    .replace(/첫\s*글|처음\s*글|막\s*시작|시작한\s*지|입문/g, '')
-    // 개인 사연
-    .replace(/육아맘|육아|아기|애기|임신|출산|맘스타/g, '')
-    .replace(/군대|군인|전역|입대|복학|취준생?|취업|이직|퇴사/g, '')
-    .replace(/(부산|대구|광주|대전|인천|제주|전주|경상도?|전라도?|충청도?|강원도?)\s*(사는|살|거주|에서)/g, '')
-    .replace(/자기\s*가게|사업|쇼핑몰|카페\s*(하|운영)|식당\s*(하|운영)/g, '')
-    .replace(/#[^\s#]+/g, '')
-    .replace(/[ \t]{2,}/g, ' ')
-    .trim();
-}
-
-/** slice 로 짝 잃은 서로게이트(반쪽 이모지) 제거 — LLM 요청 JSON 깨짐 방지. */
-function sanitizeForLlm(s: string): string {
-  return s
-    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, '') // 짝 없는 high surrogate
-    .replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, ''); // 짝 없는 low surrogate
-}
-
-function extractJson(raw: string): unknown {
-  const stripped = raw
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```\s*$/i, '')
-    .trim();
-  try {
-    return JSON.parse(stripped);
-  } catch {
-    const s = stripped.indexOf('{');
-    const e = stripped.lastIndexOf('}');
-    if (s !== -1 && e !== -1 && e > s) {
-      try {
-        return JSON.parse(stripped.slice(s, e + 1));
-      } catch {
-        /* fallthrough to salvage */
-      }
-    }
-    // 잘린 응답 salvage: "body" 값만이라도 추출 (닫는 따옴표·괄호 없어도)
-    const m = stripped.match(/"body"\s*:\s*"((?:[^"\\]|\\.)*)/);
-    if (m && m[1] && m[1].trim().length >= 20) {
-      return { body: m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').trim() };
-    }
-    throw new Error(`no JSON in response: ${stripped.slice(0, 200)}`);
-  }
-}
