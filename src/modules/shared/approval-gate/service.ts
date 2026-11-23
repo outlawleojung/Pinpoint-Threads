@@ -10,6 +10,7 @@ import { publishQueue } from '../../../queues/queues.js';
 import { generateCopy, generateDailyBody } from '../copywriter/index.js';
 import { composeReply } from '../../pipeline-a/reply-composer/index.js';
 import { videoFrameUrls } from '../../../infra/video-frames.js';
+import { SHOPPING_OVERRIDE_HANDLES } from '../../pipeline-a/reach-health.js';
 
 type PostWithRelations = Post & {
   account: Account;
@@ -49,7 +50,8 @@ function buildPreviewCaption(post: PostWithRelations, hasProductThumb: boolean):
     return lines.join('\n');
   }
   // 팔로워 300 미만 쇼핑 = 발행기가 링크(고정댓글)를 떼고 일상글로 발행 (course-strategy §5)
-  if (post.kind === 'SHOPPING' && (post.account.followersCount ?? 0) < 300) {
+  // 단, SHOPPING_OVERRIDE_HANDLES 예외 계정은 300 미만이어도 링크(고정댓글) 유지
+  if (post.kind === 'SHOPPING' && (post.account.followersCount ?? 0) < 300 && !SHOPPING_OVERRIDE_HANDLES.has(post.account.handle)) {
     lines.push('━━━ 고정 댓글 ━━━');
     lines.push(`🚫 발행 안 함 — 팔로워 ${post.account.followersCount ?? 0}명 < 300 → 링크 없이 일상글로 발행`);
     return lines.join('\n');
