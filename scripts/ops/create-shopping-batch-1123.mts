@@ -24,7 +24,8 @@ const items: { url: string; link: string; note?: string }[] = [
   { url: 'https://www.threads.com/share/HXAXyHDiU', link: 'https://link.coupang.com/a/iKPCXPh4oe' },
 ];
 
-const MALE_KEYWORDS = ['남성', '남자', '운동화', '스니커즈', '러닝화', '에어포스', '에어맥스', '덩크', '조던', '뉴발란스', '아식스', '젤카야노', '나이키', '면도', '그루밍', '남친'];
+// 명백한 남성 전용 키워드만 (운동화·스니커즈·브랜드명은 유니섹스라 제외)
+const MALE_KEYWORDS = ['남성', '남자', '남친', '남편', '면도', '그루밍', '남성용', '보디빌딩', '수염'];
 
 const FEMALE_HANDLES = ['pikkseetem', 'hanseoa.pick', 'kle0_lee'];
 const MALE_HANDLE = 'minyoung.jung';
