@@ -198,10 +198,12 @@ function startOfToday(): Date {
   return d;
 }
 
-// 계정당 발행 페이싱 규칙 (2026-09-18 사용자 방침):
-//   · 종류별 하루 상한: 일상 2건(2026-09-30) · 스하리 1건 · 쇼핑 전체 1건
+// 계정당 발행 페이싱 규칙:
+//   · 일상 계정당 하루 2건 · 스하리 1건
+//   · 쇼핑: pikkseetem 하루 1건, 나머지 격일 1건 (2026-11-23 사용자 결정)
 //   · 같은 계정 글끼리 최소 4시간 간격
 const MANUAL_MIN_GAP_MS = 4 * 60 * 60 * 1000;
+const SHOPPING_MAIN_HANDLE = 'pikkseetem';
 /** 계정 간 최소 시차 30분 + 랜덤 0~30분 (2026-10-01 사용자 결정: 1~2h는 너무 느림 → 30분~1h). */
 const CROSS_ACCOUNT_MIN_GAP_MS = 30 * 60 * 1000;
 const CROSS_ACCOUNT_JITTER_MS = 30 * 60 * 1000;
@@ -234,7 +236,7 @@ const SEARCH_DAYS = 14;
  * 수동 승인 발행 시각 계산 — 아래를 **모두** 만족하는 가장 이른 시각 (2026-10-12 재작성):
  *   ① 종류별 시간창(스하리 08:00~10:30 · 일상/쇼핑 13:00~22:30)
  *   ② 같은 계정의 발행·예약 글과 **앞뒤 모두** 4h 이상 (과거 글만 보던 방식 → 아침 스하리를 끼워 넣을 수 있게)
- *   ③ 종류별 하루 상한(일상 계정당 2 · 스하리 1 · 쇼핑 전체 1)
+ *   ③ 종류별 상한(일상 계정당 2/일 · 스하리 1/일 · 쇼핑 pikkseetem 1/일, 나머지 격일 1)
  *   ④ 다른 계정 글과 30분 + 0~30분 랜덤 시차
  */
 export async function computeManualPublishSchedule(
@@ -259,11 +261,13 @@ export async function computeManualPublishSchedule(
   const at = (p: (typeof rows)[number]) => (p.publishedAt ?? p.scheduledAt)!.getTime();
   const own = rows.filter((p) => p.accountId === accountId).map(at);
   const others = rows.filter((p) => p.accountId !== accountId).map(at);
-  const shoppingGlobalCap = kind === 'SHOPPING';
+  // 쇼핑: pikkseetem 하루 1건, 나머지 격일 1건 (2026-11-23 사용자 결정)
+  const acct = await prisma.account.findUnique({ where: { id: accountId }, select: { handle: true } });
+  const isEveryOtherDay = kind === 'SHOPPING' && acct?.handle !== SHOPPING_MAIN_HANDLE;
   const perDayCap = kind === 'DAILY' ? DAILY_PER_ACCOUNT_CAP : 1;
   const dayCount = new Map<string, number>();
   for (const p of rows) {
-    if (p.kind !== kind || (!shoppingGlobalCap && p.accountId !== accountId)) continue;
+    if (p.kind !== kind || p.accountId !== accountId) continue;
     const k = dayKey(new Date(at(p)));
     dayCount.set(k, (dayCount.get(k) ?? 0) + 1);
   }
@@ -287,6 +291,10 @@ export async function computeManualPublishSchedule(
     if (t < w.s) { t = w.s + jitterMs; continue; }
     if (t > w.e) { t = nextDayStart(t); continue; }
     if ((dayCount.get(dayKey(new Date(t))) ?? 0) >= perDayCap) { t = nextDayStart(t); continue; }
+    if (isEveryOtherDay) {
+      const prev = new Date(t); prev.setDate(prev.getDate() - 1);
+      if ((dayCount.get(dayKey(prev)) ?? 0) > 0) { t = nextDayStart(t); continue; }
+    }
     const ownClash = own.find((x) => Math.abs(t - x) < MANUAL_MIN_GAP_MS);
     if (ownClash != null) { t = ownClash + MANUAL_MIN_GAP_MS; continue; }
     const otherClash = others.find((x) => Math.abs(t - x) < crossGapMs);
