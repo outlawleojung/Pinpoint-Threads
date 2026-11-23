@@ -73,9 +73,9 @@ for (let i = 0; i < items.length; i++) {
       // 소스 원문 + 카피 본문 + note 종합해서 성별 판단
       const inbound = await prisma.inboundLink.findFirst({
         where: { OR: [{ url: item.url }, { normalizedUrl: item.url }] },
-        select: { extractedText: true },
+        select: { rawText: true },
       });
-      const combinedText = [item.note ?? '', inbound?.extractedText ?? '', r.body].join(' ');
+      const combinedText = [item.note ?? '', inbound?.rawText ?? '', r.body].join(' ');
       const targetHandle = pickHandle(combinedText);
 
       if (targetHandle !== 'pikkseetem') {
