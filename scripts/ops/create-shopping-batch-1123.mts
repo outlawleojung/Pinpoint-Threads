@@ -1,4 +1,4 @@
-// 2026-11-23 쇼핑 17건 — 4계정 라운드 로빈 분배 + holdApproval
+// 2026-11-23 쇼핑 17건 — 성별 라우팅 + 전 계정 분배 + holdApproval
 import { prisma } from '../../src/db/prisma.js';
 import { runCustomPublish } from '../../src/modules/pipeline-a/custom-publish.js';
 import { sendApprovalRequest } from '../../src/modules/shared/approval-gate/service.js';
@@ -24,36 +24,67 @@ const items: { url: string; link: string; note?: string }[] = [
   { url: 'https://www.threads.com/share/HXAXyHDiU', link: 'https://link.coupang.com/a/iKPCXPh4oe' },
 ];
 
-// 4계정 라운드 로빈 (sookck.kate 제외 — 정지 상태)
-const HANDLES = ['pikkseetem', 'minyoung.jung', 'hanseoa.pick', 'kle0_lee'];
+const MALE_KEYWORDS = ['남성', '남자', '운동화', '스니커즈', '러닝화', '에어포스', '에어맥스', '덩크', '조던', '뉴발란스', '아식스', '젤카야노', '나이키', '면도', '그루밍', '남친'];
+
+const FEMALE_HANDLES = ['pikkseetem', 'hanseoa.pick', 'kle0_lee'];
+const MALE_HANDLE = 'minyoung.jung';
 
 const BASE_DIRECTION = '원작자가 왜 이걸 샀는지, 쓰고 나서 뭐가 달라졌는지 — 그 "아 이거 진짜 괜찮네" 순간을 1인칭으로. 상품명·스펙·색감 나열 금지. 광고 아닌 솔직한 후기처럼.';
 
-// 계정 ID 미리 로드
-const accounts = await Promise.all(
-  HANDLES.map(h => prisma.account.findFirstOrThrow({ where: { handle: h } })),
-);
+// 계정 로드
+const allHandles = [MALE_HANDLE, ...FEMALE_HANDLES];
+const accountMap: Record<string, string> = {};
+for (const h of allHandles) {
+  const acc = await prisma.account.findFirstOrThrow({ where: { handle: h } });
+  accountMap[h] = acc.id;
+}
+
+// 성별 판단 (소스 텍스트 기반) — 남성향이면 minyoung.jung, 나머지는 여성 3계정 라운드 로빈
+function isMale(text: string): boolean {
+  const d = text.toLowerCase();
+  return MALE_KEYWORDS.some(k => d.includes(k.toLowerCase()));
+}
+
+let femaleIdx = 0;
+function pickHandle(sourceText: string): string {
+  if (isMale(sourceText)) return MALE_HANDLE;
+  const h = FEMALE_HANDLES[femaleIdx % FEMALE_HANDLES.length]!;
+  femaleIdx++;
+  return h;
+}
 
 const results: { url: string; handle: string; body: string; postId: string }[] = [];
 
 for (let i = 0; i < items.length; i++) {
   const item = items[i]!;
-  const account = accounts[i % HANDLES.length]!;
-  const handle = HANDLES[i % HANDLES.length]!;
+  // 먼저 pikkseetem으로 생성 (카피 생성 후 소스 텍스트로 성별 판단해서 재배정)
+  const tempAccId = accountMap['pikkseetem']!;
 
-  console.log(`\n🛍️ [${i + 1}/${items.length}] @${handle} ← ${item.url.split('/').pop()?.slice(0, 20)}`);
+  console.log(`\n🛍️ [${i + 1}/${items.length}] ${item.url.split('/').pop()?.slice(0, 20)}`);
   try {
     const r = await runCustomPublish({
-      accountId: account.id,
+      accountId: tempAccId,
       sourceUrl: item.url,
       commerceUrl: item.link,
       holdApproval: true,
       direction: item.note || BASE_DIRECTION,
     });
     if (r.status === 'PENDING_APPROVAL') {
+      // 소스 원문 + 카피 본문 + note 종합해서 성별 판단
+      const inbound = await prisma.inboundLink.findFirst({
+        where: { OR: [{ url: item.url }, { normalizedUrl: item.url }] },
+        select: { extractedText: true },
+      });
+      const combinedText = [item.note ?? '', inbound?.extractedText ?? '', r.body].join(' ');
+      const targetHandle = pickHandle(combinedText);
+
+      if (targetHandle !== 'pikkseetem') {
+        await prisma.post.update({ where: { id: r.postId }, data: { accountId: accountMap[targetHandle]! } });
+      }
+
       await sendApprovalRequest(r.postId);
-      console.log(`  ✅ @${handle} | ${r.body.replace(/\n/g, ' / ').slice(0, 80)}`);
-      results.push({ url: item.url, handle, body: r.body, postId: r.postId });
+      console.log(`  ✅ @${targetHandle} | ${r.body.replace(/\n/g, ' / ').slice(0, 80)}`);
+      results.push({ url: item.url, handle: targetHandle, body: r.body, postId: r.postId });
     } else {
       console.log(`  ❌ ${r.stage} | ${r.reason}`);
     }
