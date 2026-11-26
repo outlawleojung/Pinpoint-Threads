@@ -30,11 +30,11 @@ export interface SharingRunResult {
 
 /**
  * 스하리 DEDUP 윈도우 (시간).
- * 팔로워 부스팅 계정(hanseoa.pick, kle0_lee)은 매일, 나머지는 격일.
+ * 2026-11-26 사용자 결정: 전 계정 격일 (과거 팔로워 부스팅 매일 예외 제거).
  */
 const DEDUP_WINDOW_DEFAULT = 44;
 const DEDUP_WINDOW_DAILY = 20;
-const DAILY_SHARING_HANDLES = new Set(['hanseoa.pick', 'kle0_lee']);
+const DAILY_SHARING_HANDLES = new Set<string>();
 
 export async function runSharingPipeline(input: SharingRunInput): Promise<SharingRunResult> {
   const acc = await prisma.account.findUniqueOrThrow({
