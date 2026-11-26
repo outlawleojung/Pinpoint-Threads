@@ -225,8 +225,9 @@ export async function runSourceWatch(opts: { maxCards?: number; dryRun?: boolean
     const acc = targets ? targets.shift() : await pickAccount();
     if (!acc) break;
     const cardsBefore = summary.cards;
+    let out: Awaited<ReturnType<typeof runPipelineC>> | undefined;
     try {
-      const out = await runPipelineC({ accountId: acc.id, sourceUrl: url, holdApproval: true, bodyOverride: '', ...(targets ? { allowInactive: true } : {}) });
+      out = await runPipelineC({ accountId: acc.id, sourceUrl: url, holdApproval: true, bodyOverride: '', ...(targets ? { allowInactive: true } : {}) });
       if (out.status !== 'PENDING_APPROVAL' || !('postId' in out) || !out.postId) {
         summary.skipped.push({ url, reason: `파이프라인: ${'reason' in out ? out.reason : out.status}` });
         continue;
@@ -269,6 +270,18 @@ export async function runSourceWatch(opts: { maxCards?: number; dryRun?: boolean
     } catch (err) {
       summary.skipped.push({ url, reason: (err as Error).message.slice(0, 120) });
       logger.warn({ url, err: (err as Error).message }, 'source-watch: 후보 처리 실패');
+      // 유령 PENDING 방지: judge/sendApprovalRequest 에서 터지면 바디 없는 PENDING_APPROVAL 가 남는다 → FAILED 로 정리.
+      if (out && 'postId' in out && out.postId) {
+        await prisma.post
+          .update({
+            where: { id: out.postId },
+            data: {
+              state: PostState.FAILED,
+              rejectionReason: `source-watch 예외: ${(err as Error).message.slice(0, 200)}`,
+            },
+          })
+          .catch(() => {});
+      }
     } finally {
       // 회복 테스트: 이 후보가 카드로 안 이어졌으면(제외·실패·continue 포함) 계정 차례를 되돌려 다음 후보에 배정
       if (targets && summary.cards === cardsBefore) targets.unshift(acc);
