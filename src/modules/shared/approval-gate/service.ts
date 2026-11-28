@@ -451,20 +451,8 @@ export async function handleApprovalCallback(action: Action, postId: string): Pr
     return '✅ 승인' + scheduleNote;
   }
 
-  // 스하리 폐기 → 같은 계정으로 자동 재생성 (2026-11-05 사용자 요청)
-  if (action === 'reject' && post.kind === PostKind.SHARING) {
-    try {
-      const { runSharingPipeline } = await import('../../pipeline-b/sharing-publisher/orchestrator.js');
-      const result = await runSharingPipeline({ accountId: post.accountId });
-      if (result.status === 'sent_for_approval') {
-        return `🗑 폐기 → 🔄 새 스하리 카드 발송 (${result.postId?.slice(-8)})`;
-      }
-      return `🗑 폐기 (재생성 skip: ${result.reason ?? 'DEDUP'})`;
-    } catch (err) {
-      logger.error({ postId, err }, 'sharing auto-regen after reject failed');
-      return `🗑 폐기 (재생성 실패: ${(err as Error).message})`;
-    }
-  }
-
+  // 2026-11-29: 스하리 폐기 시 자동 재생성 비활성화.
+  // 원래 2026-11-05 사용자 요청으로 추가됐으나, 쓰레기 바디 반복 뱉기 문제로 제거.
+  // 재생성 필요 시 사용자가 명시적으로 수동 크론 (scripts/ops/run-sharing-cron-now.mts) 실행.
   return '🗑 폐기 처리';
 }
