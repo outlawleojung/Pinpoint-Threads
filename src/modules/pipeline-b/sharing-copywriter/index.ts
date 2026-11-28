@@ -2,24 +2,31 @@ import { logger } from '../../../config/logger.js';
 import { prisma } from '../../../db/prisma.js';
 import { getAccountContext } from './follower-sync.js';
 import { PostKind, PostState } from '@prisma/client';
-
+import { llm } from '../../../infra/llm/index.js';
 
 /**
- * Pipeline B 스하리 카피라이터 (2026-11-22 개편).
+ * Pipeline B 스하리 카피라이터 (2026-11-28 재개편).
  *
- * 벤치마크 실측 결과: TOP 성과 스하리는 LLM이 쓴 창작물이 아니라
- * "벌써 배고프네", "한숨 한 번 쉬고 간다" 같은 짧은 혼잣말.
- * → LLM 오프너 생성 완전 폐지, 검증된 오프너 풀에서 직접 선택.
+ * 2026-11-22 "오프너+꼬리 폐지, 공식 풀만" 전제는 벤치마크를 잘못 해석.
+ * 실제 벤치마크 TOP (BenchmarkPost 1795건 조사, 좋아요 300+):
+ *   - 1250♥: "휴게소에서 차키 주웠는데 혹시 잃어버린 스친 있니?" (상황 질문)
+ *   - 977♥:  "스레드 시작한 지 얼마 안 됐거나 같이 성장할 친구가 필요하다면..." (초대·설명)
+ *   - 918♥:  "진짜 친구들 오늘 나 무시당했자나..." (감정 토로)
+ *   - 736♥:  "힝... 첫스레드 썼는데 아무도 안봐줘써🥺" (애교 호소)
+ *   - 709♥:  "마흔다섯에 다시 신입사원 됐어..." (자기 스토리)
+ *   - 669♥:  "스레드 우습게 본거 후회된다. 5개월 꾸준히..." (성공담)
+ *
+ * TOP은 전부 "자기 공개/상황/스토리 + 스친 요청" 조합.
+ * "스하리 남기면 반하리 감" 단순 공식은 중위권 이하.
+ *
+ * 설계: Account.personaPrompt + 벤치마크 TOP few-shot + 최근 14일 recentBodies 회피 → LLM 생성.
  */
 
 /**
  * 스하리 토픽 태그 — **본문 텍스트 금지**.
- * Threads `topic_tag` 파라미터로만 부착 → 게시물엔 태그로 붙지만 본문 글자엔 안 들어감 (사용자 방침).
- * (# 없이, ≤50자, 마침표·& 금지)
+ * Threads `topic_tag` 파라미터로만 부착.
  */
 export const SHARING_TOPIC_TAG = '스하리1000명프로젝트';
-
-
 
 export interface SharingCopyInput {
   accountId: string;
@@ -40,80 +47,6 @@ export interface SharingCopyResult {
   }>;
 }
 
-// ★★ 2026-11-22: LLM 오프너 생성 완전 폐지.
-// 벤치마크 실측 결과, TOP 성과 스하리 오프너("벌써 배고프네", "한숨 한 번 쉬고 간다")는
-// HOOK_QUERIES와 거의 동일한 짧은 혼잣말이었음.
-// LLM이 "힌트와 다른 소재"를 쓰게 하니 쌩뚱맞은 감성 에세이가 나옴 → 직접 사용으로 전환.
-//
-// 오프너 풀 (OPENER_POOL)에서 직접 뽑고 스하리 꼬리만 붙인다.
-// LLM 비용 0, 할루시네이션 0, 검증된 패턴만 사용.
-
-// ★★ 2026-11-22: 오프너+꼬리 분리 구조 폐지.
-// 벤치마크 TOP 성과는 글 전체가 스하리 소통 자체.
-// "산책이나 하고 싶다 / 스하리 ㄱ" ← 이런 뜬금없는 조합이 아니라
-// "스하리 남기면 반하리 바로 감" 처럼 글 전체가 하나의 메시지.
-const POST_POOL: string[] = [
-  // — 반하리 약속형 (벤치마크 440뷰, 377뷰)
-  '스하리 남기면 반하리 감',
-  '스하리 남겨주면 반하리 바로 간다',
-  '스하리 하자 반하리 갈게',
-  '스하리 남기면 바로 감 약속',
-  '오늘도 소통하자 스하리 남기면 반하리 감',
-  '스하리 남겨줘 반하리 꼭 갈게',
-  '같이 키우자 스하리 남기면 반하리 감',
-  '스하리 하면 반하리 바로 감 진짜',
-  // — 소통 제안형
-  '소통하고 싶다 스하리 남겨줘',
-  '스하리 한 번 남겨봐 바로 감',
-  '오늘 소통 좀 하자 스하리 ㄱ',
-  '스친 늘리고 싶다 스하리 남겨줘',
-  '스하리 남기면 갈게 소통하자',
-  '같이 소통해요 스하리 남기면 바로 감',
-  // — 자기 경험형 (벤치마크 891뷰, 370뷰)
-  '스하리 하다 보면 스친 늘겠지 남기면 감',
-  '맨날 스하리 하는데 아직 갈 길이 멀다ㅋㅋ 남기면 반하리 감',
-  '스하리 꾸준히 하는 중 남겨주면 바로 감',
-  '오늘도 스하리 돌리는 중 남기면 반하리 감',
-  '스하리 하면서 스친 늘리는 중 남겨줘',
-  '반하리 안 오면 서운하잖아 나는 꼭 감',
-  // — 함께하자형 (벤치마크 377뷰)
-  '함께하자 스하리 남기면 반하리 바로 감',
-  '같이 키우자 스하리 남겨줘',
-  '다 같이 소통하자 스하리 남기면 감',
-  '서로 키워주자 스하리 하면 반하리 감',
-  '같이 가자 스하리 남기면 바로 감',
-  // — 짧고 강렬형
-  '스하리 ㄱ 반하리 바로 감',
-  '스하리 하자',
-  '소통 ㄱㄱ 스하리 남기면 감',
-  '반하리 갈게 스하리 남겨줘',
-  '스하리 놓고 가 반하리 감',
-  // — 가벼운 톤
-  '심심한데 스하리 하자 반하리 감',
-  '스하리 한 번만 남겨줘 반하리 갈게',
-  '오늘 뭐 하지 스하리나 하자 남기면 감',
-  '스하리 남기면 반하리 감 가볍게 소통하자',
-];
-
-
-function pickPost(
-  variantIndex: number,
-  hookOffset: number,
-  recentBodies: string[],
-): string {
-  const usedPosts = new Set(recentBodies.map((b) => b.trim()));
-
-  const start = ((hookOffset + variantIndex) * 7) % POST_POOL.length;
-  for (let i = 0; i < POST_POOL.length; i++) {
-    const idx = (start + i) % POST_POOL.length;
-    const candidate = POST_POOL[idx]!;
-    if (!usedPosts.has(candidate)) {
-      return candidate;
-    }
-  }
-  return POST_POOL[Math.floor(Math.random() * POST_POOL.length)]!;
-}
-
 export class SharingBlacklistError extends Error {
   constructor(public term: string, public body: string, public soft = false) {
     super(`SHARING body contains forbidden ${soft ? 'pattern' : 'term'} "${term}": ${body.slice(0, 100)}`);
@@ -121,67 +54,17 @@ export class SharingBlacklistError extends Error {
   }
 }
 
+// 하드 차단: 어떤 맥락에서도 금지 (스하리 본문에 쇼핑 링크 금지 룰)
+const HARD_BLACKLIST = ['coupa.ng', 'coupang.com', 'musinsa.com', 'link.coupang', 'smartstore.naver'];
 
-function generateSharingBody(
-  variantIndex: number,
-  hookOffset: number,
-  recentBodies: string[],
-): string {
-  return pickPost(variantIndex, hookOffset, recentBodies);
-}
+// 소프트 차단: 뻔한 광고·오글·반복 패턴 (사용자 피드백 기반)
+const SOFT_BLACKLIST = [
+  '사고쳤다', '사고쳤어', '일냈다', '일냈어',             // "사고쳤다" 패턴
+  '존예', '갓템', '인생템', '필수템', '강추', '미쳤다',  // 오글
+  '맘님들', '언니들',                                    // 셀럽·판매자 말투
+];
 
-/**
- * 스하리 카피 생성 (2026-11-22 개편).
- * LLM 호출 없이 검증된 오프너 풀에서 직접 뽑고 스하리 꼬리만 붙인다.
- */
-export async function generateSharingCopy(
-  input: SharingCopyInput,
-): Promise<SharingCopyResult> {
-  const variantCount = input.variantCount ?? 1;
-
-  const account = await prisma.account.findUniqueOrThrow({
-    where: { id: input.accountId },
-    select: { id: true, handle: true },
-  });
-
-  const context = await getAccountContext(input.accountId);
-
-  // 최근 14일 스하리 본문 (전 계정) → 반복 회피용
-  const recentBodies = await loadRecentSharingBodies(40);
-
-  const variants: SharingCopyResult['variants'] = [];
-  const offset = input.hookOffset ?? 0;
-  for (let i = 0; i < variantCount; i++) {
-    const body = generateSharingBody(i, offset, recentBodies);
-    variants.push({
-      body,
-      hookLabel: 'pool',
-      referencesUsed: [],
-    });
-  }
-
-  logger.info(
-    {
-      accountId: account.id,
-      handle: account.handle,
-      followers: context.followersCount,
-      followerBucket: context.followerBucket,
-      variantsProduced: variants.length,
-    },
-    'sharing copy generated (pool-based, no LLM)',
-  );
-
-  return {
-    accountId: account.id,
-    handle: account.handle,
-    followersCount: context.followersCount,
-    followerBucket: context.followerBucket,
-    variants,
-  };
-}
-
-
-/** 최근 7일 스하리 본문 (전 계정 · 리젝/실패 제외) — 반복 회피용. */
+/** 최근 14일 스하리 본문 (전 계정) — LLM 반복 회피 참고용. */
 async function loadRecentSharingBodies(limit: number): Promise<string[]> {
   try {
     const since = new Date(Date.now() - 14 * 864e5);
@@ -202,5 +85,166 @@ async function loadRecentSharingBodies(limit: number): Promise<string[]> {
   }
 }
 
+/**
+ * 스하리 키워드 포함 && likesCount 상위 벤치마크 few-shot.
+ * 광고·판매 글 필터링, 길이 300자 이하만.
+ */
+async function loadBenchmarkExamples(limit: number): Promise<string[]> {
+  try {
+    const items = await prisma.benchmarkPost.findMany({
+      where: {
+        OR: [
+          { text: { contains: '스하리' } },
+          { text: { contains: '반하리' } },
+          { text: { contains: '스친' } },
+        ],
+        likesCount: { gte: 100 },
+      },
+      orderBy: { likesCount: 'desc' },
+      take: 200,
+      select: { text: true, likesCount: true, repliesCount: true },
+    });
+    const filtered = items.filter((b) => {
+      const t = b.text?.trim() ?? '';
+      if (!t || t.length > 300) return false;
+      // 쇼핑/상품 홍보 글 제외
+      if (/coupa\.ng|coupang\.com|musinsa\.com|쿠팡|무신사|할인|체험단|판매|판다|주문|배송/i.test(t)) return false;
+      // 정치·시사 키워드 제외 (사용자 리스크 회피)
+      if (/우파|좌파|보수|진보|정치|대통령|민주당|국민의힘/.test(t)) return false;
+      return true;
+    });
+    return filtered.slice(0, limit).map((b) => b.text.trim());
+  } catch (err) {
+    logger.warn({ err: (err as Error).message }, 'loadBenchmarkExamples failed');
+    return [];
+  }
+}
 
+function buildSystemPrompt(persona: string, recentBodies: string[], benchmarks: string[]): string {
+  return `너는 Threads에서 자연스럽게 "스하리" 글을 쓰는 사람이다.
+스하리 = 스친(스레드 친구) + 하트 + 리포스트. 소통·맞팔 늘리기 글.
 
+[페르소나 — 완전 엄수]
+${persona}
+
+[벤치마크 TOP 성과 스하리 글 — 패턴·훅 유형만 참고, 절대 복붙 금지]
+${benchmarks.map((b, i) => `${i + 1}. ${b}`).join('\n')}
+
+[최근 14일 발행한 스하리 — 같은 공식·같은 어조 금지]
+${recentBodies.slice(0, 15).map((b, i) => `${i + 1}. ${b.slice(0, 120)}`).join('\n') || '(없음)'}
+
+[작성 규칙]
+1. **글 전체가 하나의 메시지.** "오프너 + 스하리 공식" 억지 조합 X. 벤치마크처럼 자기 상황/정체성/스토리/감정/질문/고민이 **본체**이고 "스친/스하리/반하리" 키워드는 자연스럽게 녹아들 것.
+2. 2~5줄, 80~200자. 짧은 공식("스하리 ㄱ 반하리 감") 절대 X — 이게 지금 가장 큰 문제다.
+3. 페르소나 말투·금기 표현·이모지 규칙 완전 엄수.
+4. **절대 금지**:
+   - "스하리 남기면 반하리 감" 류 공식의 단순 반복
+   - "사고쳤다/일냈다" 패턴 (뻔한 광고 티)
+   - 쿠팡·무신사·상품 링크, 모델명, 상품 묘사
+   - 오글 표현(존예·갓템·인생템·강추·미쳤다·맘님들·언니들)
+   - 요즘 이슈·시사·정치 (우파/좌파/보수/진보 등)
+   - **개인정보 노출 완전 금지**: 구체 나이(37살·28세 등 숫자), 구체 지역(경기 남부·인천 부평·마포 등 동/구/시 이름), 가족 구체 정보(5살 아들·배우자 직업 등), 직장명·학교명·병원명. 페르소나는 "글의 톤·관심사·말투 기준"일 뿐, 신원 정보를 글에 쓰라는 뜻이 아님.
+   - 페르소나의 숫자(나이·연차·거주기간) 그대로 베끼기 금지. "요즘·몇 년째·오랜만에" 같은 모호한 표현 쓸 것.
+   - 평범한 일상 톤 유지 — 자극적·세세한 자기개방 X.
+5. 벤치마크 글 그대로 베끼기 금지. **훅 유형**만 참고:
+   - 상황 질문형 (뭐 봤는데/누구 아는 사람 있어?)
+   - 자기 공개·정체성 (어디 살고 뭐 하고/몇 살/직업)
+   - 감정 토로 (오늘 속상/서운/외로움)
+   - 애교 호소 (아무도 안봐줘써/스친 한명만)
+   - 자기 스토리 (요즘 이런 일 있었다)
+   - 성공담·실패담 (몇 개월 해봤더니 / 또 실패함)
+   - 투정·고민 (이거 나만 그래? / 왜 안 올까)
+   - 소소한 승리·발견 (이거 이제 알았음)
+6. 반드시 JSON 배열 형태로만 응답. 다른 텍스트 금지.`;
+}
+
+export async function generateSharingCopy(
+  input: SharingCopyInput,
+): Promise<SharingCopyResult> {
+  const variantCount = input.variantCount ?? 1;
+  const account = await prisma.account.findUniqueOrThrow({
+    where: { id: input.accountId },
+    select: { id: true, handle: true, personaPrompt: true },
+  });
+  const context = await getAccountContext(input.accountId);
+
+  const [recentBodies, benchmarks] = await Promise.all([
+    loadRecentSharingBodies(30),
+    loadBenchmarkExamples(10),
+  ]);
+
+  const system = buildSystemPrompt(account.personaPrompt, recentBodies, benchmarks);
+  const userMsg = `서로 다른 훅 유형 ${variantCount}개로 스하리 글을 작성하라.
+각 variant는 위 "훅 유형" 목록에서 서로 다른 것을 골라야 한다.
+반드시 아래 JSON 배열만 응답, 그 외 어떤 텍스트도 X:
+[${Array.from({ length: variantCount }, () => '{"body":"..."}').join(',')}]`;
+
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const result = await llm().complete({
+      tier: 'main',
+      system,
+      userParts: [{ type: 'text', text: userMsg }],
+      maxOutputTokens: 1500,
+      thinking: 'disabled',
+    });
+
+    let parsed: Array<{ body?: unknown }>;
+    try {
+      const txt = result.text.trim();
+      const jsonMatch = txt.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) throw new Error('no json array in output');
+      parsed = JSON.parse(jsonMatch[0]);
+      if (!Array.isArray(parsed)) throw new Error('parsed not array');
+    } catch (e) {
+      logger.warn(
+        { handle: account.handle, attempt, err: (e as Error).message, raw: result.text.slice(0, 200) },
+        'sharing copy JSON parse fail',
+      );
+      continue;
+    }
+
+    const variants: SharingCopyResult['variants'] = [];
+    let blockedReason: string | null = null;
+    for (const v of parsed) {
+      const body = typeof v?.body === 'string' ? (v.body as string).trim() : '';
+      if (!body) { blockedReason = 'empty body'; break; }
+
+      const hard = HARD_BLACKLIST.find((t) => body.toLowerCase().includes(t));
+      if (hard) { blockedReason = `hard:${hard}`; break; }
+      const soft = SOFT_BLACKLIST.find((t) => body.includes(t));
+      if (soft) { blockedReason = `soft:${soft}`; break; }
+
+      if (body.length < 30) { blockedReason = `too_short:${body.length}`; break; }
+      if (body.length > 400) { blockedReason = `too_long:${body.length}`; break; }
+
+      variants.push({ body, hookLabel: 'llm', referencesUsed: [] });
+    }
+
+    if (blockedReason || variants.length === 0) {
+      logger.warn(
+        { handle: account.handle, attempt, blockedReason, parsedLen: parsed.length },
+        'sharing copy blocked, retrying',
+      );
+      continue;
+    }
+
+    logger.info(
+      {
+        accountId: account.id, handle: account.handle,
+        followers: context.followersCount,
+        variantsProduced: variants.length,
+        attempt, benchmarksUsed: benchmarks.length,
+        recentBodiesChecked: recentBodies.length,
+      },
+      'sharing copy generated (LLM + persona + benchmark few-shot)',
+    );
+    return {
+      accountId: account.id, handle: account.handle,
+      followersCount: context.followersCount, followerBucket: context.followerBucket,
+      variants,
+    };
+  }
+
+  throw new Error(`sharing copy generation failed after ${maxAttempts} attempts for @${account.handle}`);
+}
